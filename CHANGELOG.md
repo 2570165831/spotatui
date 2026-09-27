@@ -14,6 +14,8 @@
 
 - **Albums, Podcasts and Recently Played show their pane while loading**: the first time you opened one of them from the Library sidebar, the content pane stayed blank (no border, title or header) until the first page arrived, and stayed blank if that fetch failed. They now draw an empty titled table while they wait, like Artists does ([#610](https://github.com/LargeModGames/spotatui/issues/610)).
 
+- **`spotatui play` no longer panics on an empty result**: `play -n` with a name that matched nothing crashed with "index out of bounds" for tracks, albums, artists, shows and playlists, and `play -u <empty playlist> -r` crashed with "cannot sample empty range". Both now fail with an error such as `no tracks with name '...'` or `playlist has no tracks`, and `spotatui search` with no hits prints that same message instead of a blank line ([#603](https://github.com/LargeModGames/spotatui/issues/603)).
+
 - **A very narrow track table no longer crashes spotatui**: widening the sidebar with `}` until a table pane was under 3 columns wide panicked with "attempt to subtract with overflow" in debug builds and silently wrapped to a huge column width in release builds. The columns now shrink to zero width instead ([#540](https://github.com/LargeModGames/spotatui/issues/540)).
 
 - **Shift + a non-ASCII letter triggers its uppercase binding**: on terminals that send Shift+letter as the lowercase letter with Shift held (kitty keyboard protocol), a binding such as `next_track: Ö` never fired and a binding on plain `ö` fired instead. Shift now turns any lowercase letter into its uppercase letter, as it already did for `a`–`z`. A letter whose uppercase is two letters, such as `ß`, stays as it is ([#553](https://github.com/LargeModGames/spotatui/issues/553)).

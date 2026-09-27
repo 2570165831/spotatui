@@ -1,3 +1,4 @@
+use crate::core::app::SearchResult;
 use crate::core::user_config::UserConfig;
 use crate::infra::network::{IoEvent, Network};
 
@@ -468,8 +469,16 @@ impl CliApp {
             .await
           {
             Ok(p) => {
-              let num = p.items.total;
-              Some(rand::random_range(0..num) as usize)
+              let Some(offset) = random_offset(p.items.total) else {
+                self
+                  .net
+                  .app
+                  .lock()
+                  .await
+                  .handle_error(anyhow!("playlist has no tracks"));
+                return;
+              };
+              Some(offset)
             }
             Err(e) => {
               self
@@ -527,67 +536,7 @@ impl CliApp {
     // item + the offset or return an error message
     let uri = {
       let app = self.net.app.lock().await;
-      let results = app.search_results();
-      match item {
-        Type::Track => {
-          if let Some(r) = &results.tracks {
-            if let Some(ref id) = r.items[0].id {
-              format!("spotify:track:{}", id)
-            } else {
-              return Err(anyhow!("track has no id"));
-            }
-          } else {
-            return Err(anyhow!("no tracks with name '{}'", name));
-          }
-        }
-        Type::Album => {
-          if let Some(r) = &results.albums {
-            let album = &r.items[0];
-            if let Some(ref id) = album.id {
-              format!("spotify:album:{}", id)
-            } else {
-              return Err(anyhow!("album {} has no id", album.name));
-            }
-          } else {
-            return Err(anyhow!("no albums with name '{}'", name));
-          }
-        }
-        Type::Artist => {
-          if let Some(r) = &results.artists {
-            if let Some(ref id) = r.items[0].id {
-              format!("spotify:artist:{}", id)
-            } else {
-              return Err(anyhow!("artist has no id"));
-            }
-          } else {
-            return Err(anyhow!("no artists with name '{}'", name));
-          }
-        }
-        Type::Show => {
-          if let Some(r) = &results.shows {
-            if let Some(ref id) = r.items[0].id {
-              format!("spotify:show:{}", id)
-            } else {
-              return Err(anyhow!("show has no id"));
-            }
-          } else {
-            return Err(anyhow!("no shows with name '{}'", name));
-          }
-        }
-        Type::Playlist => {
-          if let Some(r) = &results.playlists {
-            let p = &r.items[0];
-            if let Some(ref id) = p.id {
-              format!("spotify:playlist:{}", id)
-            } else {
-              return Err(anyhow!("playlist has no id"));
-            }
-          } else {
-            return Err(anyhow!("no playlists with name '{}'", name));
-          }
-        }
-        _ => unreachable!(),
-      }
+      first_result_uri(app.search_results(), &item, &name)?
     };
 
     // Play or queue the uri
@@ -606,7 +555,12 @@ impl CliApp {
     let app = self.net.app.lock().await;
     match item {
       Type::Playlist => {
-        if let Some(results) = &app.search_results().playlists {
+        if let Some(results) = app
+          .search_results()
+          .playlists
+          .as_ref()
+          .filter(|r| !r.items.is_empty())
+        {
           results
             .items
             .iter()
@@ -623,7 +577,12 @@ impl CliApp {
         }
       }
       Type::Track => {
-        if let Some(results) = &app.search_results().tracks {
+        if let Some(results) = app
+          .search_results()
+          .tracks
+          .as_ref()
+          .filter(|r| !r.items.is_empty())
+        {
           results
             .items
             .iter()
@@ -640,7 +599,12 @@ impl CliApp {
         }
       }
       Type::Artist => {
-        if let Some(results) = &app.search_results().artists {
+        if let Some(results) = app
+          .search_results()
+          .artists
+          .as_ref()
+          .filter(|r| !r.items.is_empty())
+        {
           results
             .items
             .iter()
@@ -657,7 +621,12 @@ impl CliApp {
         }
       }
       Type::Show => {
-        if let Some(results) = &app.search_results().shows {
+        if let Some(results) = app
+          .search_results()
+          .shows
+          .as_ref()
+          .filter(|r| !r.items.is_empty())
+        {
           results
             .items
             .iter()
@@ -674,7 +643,12 @@ impl CliApp {
         }
       }
       Type::Album => {
-        if let Some(results) = &app.search_results().albums {
+        if let Some(results) = app
+          .search_results()
+          .albums
+          .as_ref()
+          .filter(|r| !r.items.is_empty())
+        {
           results
             .items
             .iter()
@@ -696,6 +670,85 @@ impl CliApp {
   }
 }
 
+fn first_result_uri(results: &SearchResult, item: &Type, name: &str) -> Result<String> {
+  let (kind, id) = match item {
+    Type::Track => {
+      let track = results
+        .tracks
+        .as_ref()
+        .and_then(|r| r.items.first())
+        .ok_or_else(|| anyhow!("no tracks with name '{}'", name))?;
+      (
+        "track",
+        track
+          .id
+          .as_ref()
+          .ok_or_else(|| anyhow!("track has no id"))?,
+      )
+    }
+    Type::Album => {
+      let album = results
+        .albums
+        .as_ref()
+        .and_then(|r| r.items.first())
+        .ok_or_else(|| anyhow!("no albums with name '{}'", name))?;
+      (
+        "album",
+        album
+          .id
+          .as_ref()
+          .ok_or_else(|| anyhow!("album {} has no id", album.name))?,
+      )
+    }
+    Type::Artist => {
+      let artist = results
+        .artists
+        .as_ref()
+        .and_then(|r| r.items.first())
+        .ok_or_else(|| anyhow!("no artists with name '{}'", name))?;
+      (
+        "artist",
+        artist
+          .id
+          .as_ref()
+          .ok_or_else(|| anyhow!("artist has no id"))?,
+      )
+    }
+    Type::Show => {
+      let show = results
+        .shows
+        .as_ref()
+        .and_then(|r| r.items.first())
+        .ok_or_else(|| anyhow!("no shows with name '{}'", name))?;
+      (
+        "show",
+        show.id.as_ref().ok_or_else(|| anyhow!("show has no id"))?,
+      )
+    }
+    Type::Playlist => {
+      let playlist = results
+        .playlists
+        .as_ref()
+        .and_then(|r| r.items.first())
+        .ok_or_else(|| anyhow!("no playlists with name '{}'", name))?;
+      (
+        "playlist",
+        playlist
+          .id
+          .as_ref()
+          .ok_or_else(|| anyhow!("playlist has no id"))?,
+      )
+    }
+    // Enforced by clap.
+    _ => unreachable!(),
+  };
+  Ok(format!("spotify:{kind}:{id}"))
+}
+
+fn random_offset(total: u32) -> Option<usize> {
+  (total > 0).then(|| rand::random_range(0..total) as usize)
+}
+
 fn parse_query_limit(max: &str, ceiling: u32) -> Result<u32> {
   match max.parse::<u32>() {
     Ok(num) if (1..=ceiling).contains(&num) => Ok(num),
@@ -705,7 +758,184 @@ fn parse_query_limit(max: &str, ceiling: u32) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
-  use super::parse_query_limit;
+  use super::{first_result_uri, parse_query_limit, random_offset, SearchResult, Type};
+  use crate::core::pagination::Paged;
+  use crate::core::plugin_api::{AlbumInfo, ArtistInfo, ShowInfo, TrackInfo};
+  use crate::core::test_helpers::{full_track, playlist_info};
+
+  fn search_results_with_hits() -> SearchResult {
+    SearchResult {
+      tracks: Some(Paged {
+        items: vec![
+          TrackInfo::from(&full_track("4uLU6hMCjMI75M1A2tKUQC", "A")),
+          TrackInfo::from(&full_track("1301WleyT98MSxVHPZCA6M", "B")),
+        ],
+        ..Paged::default()
+      }),
+      albums: Some(Paged {
+        items: vec![AlbumInfo {
+          id: Some("album1".to_string()),
+          name: "Album".to_string(),
+          ..AlbumInfo::default()
+        }],
+        ..Paged::default()
+      }),
+      artists: Some(Paged {
+        items: vec![ArtistInfo {
+          id: Some("artist1".to_string()),
+          ..ArtistInfo::default()
+        }],
+        ..Paged::default()
+      }),
+      shows: Some(Paged {
+        items: vec![ShowInfo {
+          id: Some("show1".to_string()),
+          ..ShowInfo::default()
+        }],
+        ..Paged::default()
+      }),
+      playlists: Some(Paged {
+        items: vec![
+          playlist_info("pl1", "Mix", "owner", false),
+          playlist_info("pl2", "Other", "owner", false),
+        ],
+        ..Paged::default()
+      }),
+    }
+  }
+
+  #[test]
+  fn play_by_name_reports_no_tracks_when_the_search_page_is_empty() {
+    let results = SearchResult {
+      tracks: Some(Paged::default()),
+      ..SearchResult::default()
+    };
+    assert_eq!(
+      first_result_uri(&results, &Type::Track, "qwxz")
+        .unwrap_err()
+        .to_string(),
+      "no tracks with name 'qwxz'"
+    );
+  }
+
+  #[test]
+  fn play_by_name_reports_no_playlists_when_the_search_page_is_empty() {
+    let results = SearchResult {
+      playlists: Some(Paged::default()),
+      ..SearchResult::default()
+    };
+    assert_eq!(
+      first_result_uri(&results, &Type::Playlist, "qwxz")
+        .unwrap_err()
+        .to_string(),
+      "no playlists with name 'qwxz'"
+    );
+  }
+
+  #[test]
+  fn play_by_name_reports_empty_album_artist_and_show_pages() {
+    let results = SearchResult {
+      albums: Some(Paged::default()),
+      artists: Some(Paged::default()),
+      shows: Some(Paged::default()),
+      ..SearchResult::default()
+    };
+    for (item, kind) in [
+      (Type::Album, "albums"),
+      (Type::Artist, "artists"),
+      (Type::Show, "shows"),
+    ] {
+      assert_eq!(
+        first_result_uri(&results, &item, "qwxz")
+          .unwrap_err()
+          .to_string(),
+        format!("no {kind} with name 'qwxz'")
+      );
+    }
+  }
+
+  #[test]
+  fn play_by_name_reports_a_missing_search_page_for_every_search_type() {
+    for (item, kind) in [
+      (Type::Track, "tracks"),
+      (Type::Album, "albums"),
+      (Type::Artist, "artists"),
+      (Type::Show, "shows"),
+      (Type::Playlist, "playlists"),
+    ] {
+      assert_eq!(
+        first_result_uri(&SearchResult::default(), &item, "qwxz")
+          .unwrap_err()
+          .to_string(),
+        format!("no {kind} with name 'qwxz'")
+      );
+    }
+  }
+
+  #[test]
+  fn play_by_name_picks_the_first_track_hit() {
+    assert_eq!(
+      first_result_uri(&search_results_with_hits(), &Type::Track, "A").unwrap(),
+      "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+    );
+  }
+
+  #[test]
+  fn play_by_name_picks_the_first_playlist_hit() {
+    assert_eq!(
+      first_result_uri(&search_results_with_hits(), &Type::Playlist, "Mix").unwrap(),
+      "spotify:playlist:pl1"
+    );
+  }
+
+  #[test]
+  fn play_by_name_preserves_the_type_of_album_artist_and_show_hits() {
+    let results = search_results_with_hits();
+    for (item, expected) in [
+      (Type::Album, "spotify:album:album1"),
+      (Type::Artist, "spotify:artist:artist1"),
+      (Type::Show, "spotify:show:show1"),
+    ] {
+      assert_eq!(first_result_uri(&results, &item, "name").unwrap(), expected);
+    }
+  }
+
+  #[test]
+  fn play_by_name_keeps_the_missing_id_errors_for_hits_without_ids() {
+    let mut results = search_results_with_hits();
+    results.tracks.as_mut().unwrap().items[0].id = None;
+    results.albums.as_mut().unwrap().items[0].id = None;
+    results.artists.as_mut().unwrap().items[0].id = None;
+    results.shows.as_mut().unwrap().items[0].id = None;
+    results.playlists.as_mut().unwrap().items[0].id = None;
+    for (item, expected) in [
+      (Type::Track, "track has no id"),
+      (Type::Album, "album Album has no id"),
+      (Type::Artist, "artist has no id"),
+      (Type::Show, "show has no id"),
+      (Type::Playlist, "playlist has no id"),
+    ] {
+      assert_eq!(
+        first_result_uri(&results, &item, "name")
+          .unwrap_err()
+          .to_string(),
+        expected
+      );
+    }
+  }
+
+  #[test]
+  fn a_random_offset_into_an_empty_playlist_is_none() {
+    assert_eq!(random_offset(0), None);
+  }
+
+  #[test]
+  fn a_random_offset_stays_inside_the_playlist() {
+    assert_eq!(random_offset(1), Some(0));
+    for _ in 0..50 {
+      assert!(random_offset(5).unwrap() < 5);
+    }
+  }
 
   #[test]
   fn a_query_limit_is_accepted_only_within_its_ceiling() {
