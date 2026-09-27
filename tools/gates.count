@@ -1,10 +1,12 @@
 # Ratchet baselines for the GUI substrate migration, asserted by src/gates.rs
 # on every cargo test leg (see its module doc for what each counter measures).
 #
-# src/gates.rs pins every value here exactly, so a PR that moves a counter must
-# move the file with it. tools/check_gates_ratchet.sh enforces the direction
-# against the merge base: coupling counters may only fall toward their target,
-# the two adoption counters may only rise.
+# src/gates.rs pins every coupling counter here exactly, so a PR that moves one
+# must move the file with it. The two adoption counters are floors: a PR that
+# adds tests leaves them alone, and .github/workflows/gates-floor.yml raises
+# them on main after the merge. tools/check_gates_ratchet.sh enforces the
+# direction against the merge base: coupling counters may only fall toward
+# their target, the adoption counters may only rise.
 
 crate_tui_refs_outside_tui = 2         # target 0
 app_field_writes_in_tui_handlers = 147 # target 0 (writes into app.view do not count)
