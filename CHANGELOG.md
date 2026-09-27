@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Stats "Last 10 Days" uses your local date**: the panel on the Stats screen and the day list in the HTML listening recap labelled each play with its UTC date, while the streak strip and the hour chart already used local time. Outside UTC, plays near midnight landed on the wrong day: in UTC-5 a track played after 19:00 showed up under tomorrow, and in UTC+10 everything before 10:00 counted as yesterday. Days now follow your local date ([#602](https://github.com/LargeModGames/spotatui/issues/602)).
+
 - **Albums, Podcasts and Recently Played show their pane while loading**: the first time you opened one of them from the Library sidebar, the content pane stayed blank (no border, title or header) until the first page arrived, and stayed blank if that fetch failed. They now draw an empty titled table while they wait, like Artists does ([#610](https://github.com/LargeModGames/spotatui/issues/610)).
 
 - **A very narrow track table no longer crashes spotatui**: widening the sidebar with `}` until a table pane was under 3 columns wide panicked with "attempt to subtract with overflow" in debug builds and silently wrapped to a huge column width in release builds. The columns now shrink to zero width instead ([#540](https://github.com/LargeModGames/spotatui/issues/540)).
