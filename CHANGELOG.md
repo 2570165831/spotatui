@@ -18,6 +18,8 @@
 
 - **Shift + a non-ASCII letter triggers its uppercase binding**: on terminals that send Shift+letter as the lowercase letter with Shift held (kitty keyboard protocol), a binding such as `next_track: Ö` never fired and a binding on plain `ö` fired instead. Shift now turns any lowercase letter into its uppercase letter, as it already did for `a`–`z`. A letter whose uppercase is two letters, such as `ß`, stays as it is ([#553](https://github.com/LargeModGames/spotatui/issues/553)).
 
+- **An unknown theme color is an error, not black**: a color spotatui didn't recognise, such as `blue`, `#1e1e2e` or `255, 0`, was logged and turned into black. Typing one in Settings switched the theme to Custom and saved `Black`, a Custom theme in `config.yml` got black text, and the Lua `spotatui.popup` and `spotatui.set_theme` drew black instead of raising an error. Settings now refuses the value with "Invalid color" and keeps the current theme, `config.yml` keeps the default color for that field and still loads, and Lua raises. RGB values need exactly three numbers, so `1, 2, 3, 4` is refused too. Color names stay case-sensitive, like `LightBlue` ([#595](https://github.com/LargeModGames/spotatui/issues/595)).
+
 - **`ctrl--` and `alt--` keybindings work**: a binding with `-` as the key after a modifier was rejected with "Shortcut can only have 2 keys", so config.yml skipped it with a warning and Settings showed `alt--` while the old binding stayed active. Both now bind Ctrl+- and Alt+- ([#554](https://github.com/LargeModGames/spotatui/issues/554)).
 
 ## [v0.43.0] 2026-09-23
