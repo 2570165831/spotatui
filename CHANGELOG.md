@@ -16,6 +16,8 @@
 
 - **A very narrow track table no longer crashes spotatui**: widening the sidebar with `}` until a table pane was under 3 columns wide panicked with "attempt to subtract with overflow" in debug builds and silently wrapped to a huge column width in release builds. The columns now shrink to zero width instead ([#540](https://github.com/LargeModGames/spotatui/issues/540)).
 
+- **An out-of-range number in Settings no longer wraps around**: saving Like Animation Frames as 256 wrote `like_animation_frames: 0` to `config.yml`, and the next launch refused to start until you edited the file by hand; a Seek Duration of -1 saved as 4294967295. Settings now clamps Seek Duration, Like Animation Frames, Table Scroll Padding and the two small-terminal sizes to the range their field can hold, so 256 frames saves as 255 and -1 ms as 0 ([#594](https://github.com/LargeModGames/spotatui/issues/594)).
+
 - **Shift + a non-ASCII letter triggers its uppercase binding**: on terminals that send Shift+letter as the lowercase letter with Shift held (kitty keyboard protocol), a binding such as `next_track: Ö` never fired and a binding on plain `ö` fired instead. Shift now turns any lowercase letter into its uppercase letter, as it already did for `a`–`z`. A letter whose uppercase is two letters, such as `ß`, stays as it is ([#553](https://github.com/LargeModGames/spotatui/issues/553)).
 
 - **`ctrl--` and `alt--` keybindings work**: a binding with `-` as the key after a modifier was rejected with "Shortcut can only have 2 keys", so config.yml skipped it with a warning and Settings showed `alt--` while the old binding stayed active. Both now bind Ctrl+- and Alt+- ([#554](https://github.com/LargeModGames/spotatui/issues/554)).
