@@ -28,6 +28,8 @@
 
 - **`ctrl--` and `alt--` keybindings work**: a binding with `-` as the key after a modifier was rejected with "Shortcut can only have 2 keys", so config.yml skipped it with a warning and Settings showed `alt--` while the old binding stayed active. Both now bind Ctrl+- and Alt+- ([#554](https://github.com/LargeModGames/spotatui/issues/554)).
 
+- **The help menu no longer lists `Ctrl+p` for moving up**: the "Move selection up" and "Scroll lyrics" rows offered `<Ctrl+p>`, but with the default config `Ctrl+p` opens the Listening Party, which is checked first. Both rows now list only the keys that work there ([#599](https://github.com/LargeModGames/spotatui/issues/599)).
+
 ## [v0.43.0] 2026-09-23
 
 ### Added
