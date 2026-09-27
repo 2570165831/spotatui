@@ -2051,9 +2051,13 @@ pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
 }
 
 pub fn aggregate_days(listens: &[ListenRecord]) -> Vec<RankedEntry> {
-  let mut totals: BTreeMap<String, u64> = BTreeMap::new();
+  aggregate_days_in(listens, &Local)
+}
+
+fn aggregate_days_in<Tz: TimeZone>(listens: &[ListenRecord], tz: &Tz) -> Vec<RankedEntry> {
+  let mut totals: BTreeMap<NaiveDate, u64> = BTreeMap::new();
   for record in listens {
-    let label = record.ended_at.format("%Y-%m-%d").to_string();
+    let label = record.ended_at.with_timezone(tz).date_naive();
     *totals.entry(label).or_default() += record.listened_ms;
   }
 
@@ -2062,7 +2066,7 @@ pub fn aggregate_days(listens: &[ListenRecord]) -> Vec<RankedEntry> {
     .rev()
     .take(10)
     .map(|(label, listened_ms)| RankedEntry {
-      display: label,
+      display: label.format("%Y-%m-%d").to_string(),
       detail: format_duration(listened_ms),
       value: listened_ms,
       uri: None,
@@ -2436,7 +2440,7 @@ pub async fn sync_history_to_cloud(sync_token: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chrono::TimeZone;
+  use chrono::{FixedOffset, TimeZone};
 
   fn record_at(day: u32, listened_ms: u64, qualified: bool) -> ListenRecord {
     let timestamp = Utc.with_ymd_and_hms(2026, 5, day, 12, 0, 0).unwrap();
@@ -2455,6 +2459,47 @@ mod tests {
       context_uri: None,
       source: HistoryPlaybackSource::NativeContext,
     }
+  }
+
+  #[test]
+  fn days_use_the_local_date_west_of_utc() {
+    let mut record = record_at(20, 60_000, true);
+    record.ended_at = Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0).unwrap();
+    let days = aggregate_days_in(&[record], &FixedOffset::west_opt(5 * 3600).unwrap());
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0].display, "2026-05-19");
+  }
+
+  #[test]
+  fn days_use_the_local_date_east_of_utc() {
+    let mut record = record_at(19, 60_000, true);
+    record.ended_at = Utc.with_ymd_and_hms(2026, 5, 19, 23, 0, 0).unwrap();
+    let days = aggregate_days_in(&[record], &FixedOffset::east_opt(2 * 3600).unwrap());
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0].display, "2026-05-20");
+  }
+
+  #[test]
+  fn days_merge_plays_that_share_a_local_date() {
+    let mut first = record_at(20, 60_000, true);
+    first.ended_at = Utc.with_ymd_and_hms(2026, 5, 20, 2, 0, 0).unwrap();
+    let mut second = record_at(19, 30_000, true);
+    second.ended_at = Utc.with_ymd_and_hms(2026, 5, 19, 20, 0, 0).unwrap();
+    let records = [first, second];
+    let days = aggregate_days_in(&records, &FixedOffset::west_opt(5 * 3600).unwrap());
+    assert_eq!(days.len(), 1);
+    assert_eq!(
+      (days[0].display.as_str(), days[0].value),
+      ("2026-05-19", 90_000)
+    );
+    let utc_days = aggregate_days_in(&records, &Utc);
+    assert_eq!(
+      utc_days
+        .iter()
+        .map(|day| day.display.as_str())
+        .collect::<Vec<_>>(),
+      ["2026-05-19", "2026-05-20"]
+    );
   }
 
   #[test]
