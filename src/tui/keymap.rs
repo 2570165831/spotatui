@@ -166,12 +166,7 @@ pub fn help_entries() -> Vec<HelpEntry> {
     ),
     row(
       "Move selection up",
-      Custom(|app| {
-        format!(
-          "{} | <Up Arrow Key> | <Ctrl+p>",
-          app.user_config.keys.move_up
-        )
-      }),
+      Custom(|app| format!("{} | <Up Arrow Key>", app.user_config.keys.move_up)),
       "General",
     ),
     row(
@@ -211,7 +206,7 @@ pub fn help_entries() -> Vec<HelpEntry> {
       "Scroll lyrics (pauses auto-follow)",
       Custom(|app| {
         format!(
-          "{}/{} | <Up>/<Down> | <Ctrl+p>/<Ctrl+n>",
+          "{}/{} | <Up>/<Down> | <Ctrl+n>",
           app.user_config.keys.move_up, app.user_config.keys.move_down
         )
       }),
@@ -884,6 +879,30 @@ mod tests {
       .expect("the next-track row");
     assert_eq!(row[1], "N");
     assert_eq!(row[2], "General");
+  }
+
+  #[test]
+  fn the_move_up_row_does_not_offer_the_listening_party_key() {
+    let app = App::default_connected();
+    let party = app.user_config.keys.listening_party.to_string();
+    let row = help_rows(&app)
+      .into_iter()
+      .find(|row| row[0] == "Move selection up")
+      .expect("the move-up row");
+    assert!(!row[1].contains(&party), "{}", row[1]);
+    assert!(row[1].contains("<Up Arrow Key>"));
+  }
+
+  #[test]
+  fn the_lyrics_scroll_row_does_not_offer_the_listening_party_key() {
+    let app = App::default_connected();
+    let party = app.user_config.keys.listening_party.to_string();
+    let row = help_rows(&app)
+      .into_iter()
+      .find(|row| row[0] == "Scroll lyrics (pauses auto-follow)")
+      .expect("the lyrics scroll row");
+    assert!(!row[1].contains(&party), "{}", row[1]);
+    assert!(row[1].contains("<Ctrl+n>"));
   }
 
   /// The variants no terminal gesture produces, in every build.
