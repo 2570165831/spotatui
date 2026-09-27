@@ -2658,6 +2658,23 @@ mod tests {
   }
 
   #[test]
+  fn an_unknown_theme_color_name_keeps_the_default_and_still_loads() {
+    use super::{UserConfig, UserTheme};
+    use crate::core::theme::Color;
+
+    let mut config = UserConfig::new();
+    let theme: UserTheme =
+      serde_yaml::from_str("preset: Custom\ntext: purple\nactive: '1, 2, 3'\n")
+        .expect("UserTheme must deserialize");
+
+    let result = config.load_theme(theme);
+
+    assert!(result.is_ok());
+    assert_eq!(config.theme.text, UserConfig::new().theme.text);
+    assert_eq!(config.theme.active, Color::Rgb(1, 2, 3))
+  }
+
+  #[test]
   #[cfg(feature = "cover-art")]
   fn a_malformed_cover_art_dither_color_keeps_the_default_and_still_loads() {
     use super::{UserConfig, UserTheme};
