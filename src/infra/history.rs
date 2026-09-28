@@ -2001,8 +2001,23 @@ fn split_artists(combo: &str) -> Vec<String> {
 pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
   for record in listens {
+    // Spotify credits one artist per entry, so a name such as "Mumford & Sons"
+    // stays whole. Other sources arrive as one joined string and are split.
+    let credited_separately = record
+      .item_uri
+      .as_deref()
+      .is_some_and(|uri| uri.starts_with("spotify:"));
     for artist_combo in &record.artists {
-      let individual_artists = split_artists(artist_combo);
+      let individual_artists = if credited_separately {
+        let name = artist_combo.trim();
+        if name.is_empty() {
+          Vec::new()
+        } else {
+          vec![name.to_string()]
+        }
+      } else {
+        split_artists(artist_combo)
+      };
       for artist in individual_artists {
         let entry = totals.entry(artist).or_insert((0, 0));
         entry.0 += record.listened_ms;
@@ -2459,6 +2474,57 @@ mod tests {
       context_uri: None,
       source: HistoryPlaybackSource::NativeContext,
     }
+  }
+
+  fn top_artist_names(record: ListenRecord) -> Vec<String> {
+    aggregate_top_artists(&[record], 10)
+      .into_iter()
+      .map(|entry| entry.display)
+      .collect()
+  }
+
+  #[test]
+  fn top_artists_keeps_a_spotify_band_name_with_an_ampersand_whole() {
+    let mut r = record_at(20, 100_000, true);
+    r.artists = vec!["Mumford & Sons".into()];
+    assert_eq!(top_artist_names(r), ["Mumford & Sons"]);
+  }
+
+  #[test]
+  fn top_artists_keeps_a_spotify_artist_name_with_a_comma_whole() {
+    let mut r = record_at(20, 100_000, true);
+    r.artists = vec!["Tyler, The Creator".into()];
+    assert_eq!(top_artist_names(r), ["Tyler, The Creator"]);
+  }
+
+  #[test]
+  fn top_artists_counts_each_credited_spotify_artist_separately() {
+    let mut r = record_at(20, 100_000, true);
+    r.artists = vec!["Kygo".into(), "Max McNown".into()];
+    let top = aggregate_top_artists(&[r], 10);
+    assert_eq!(
+      top
+        .iter()
+        .map(|entry| (entry.display.as_str(), entry.value))
+        .collect::<Vec<_>>(),
+      [("Kygo", 100_000), ("Max McNown", 100_000)]
+    );
+  }
+
+  #[test]
+  fn top_artists_still_splits_a_joined_local_file_artist_string() {
+    let mut r = record_at(20, 100_000, true);
+    r.artists = vec!["Alice, Bob".into()];
+    r.item_uri = Some("file:///m/a.flac".into());
+    assert_eq!(top_artist_names(r), ["Alice", "Bob"]);
+  }
+
+  #[test]
+  fn top_artists_splits_a_record_with_no_item_uri() {
+    let mut r = record_at(20, 100_000, true);
+    r.artists = vec!["Alice & Bob".into()];
+    r.item_uri = None;
+    assert_eq!(top_artist_names(r), ["Alice", "Bob"]);
   }
 
   #[test]
