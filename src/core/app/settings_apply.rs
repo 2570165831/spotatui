@@ -291,17 +291,13 @@ impl App {
             self.user_config.behavior.shuffle_icon = v.clone();
           }
         }
-        "behavior.playing_icon" => {
-          if let SettingValue::String(v) = &setting.value {
-            self.user_config.behavior.playing_icon = v.clone();
-          }
-        }
         "behavior.paused_icon" => {
           if let SettingValue::String(v) = &setting.value {
             self.user_config.behavior.paused_icon = v.clone();
           }
         }
-        "behavior.gauge_filled_icon"
+        "behavior.playing_icon"
+        | "behavior.gauge_filled_icon"
         | "behavior.gauge_unfilled_icon"
         | "behavior.episode_played_icon"
         | "behavior.sort_ascending_icon"
@@ -324,6 +320,7 @@ impl App {
                 "behavior.sort_descending_icon" => {
                   self.user_config.behavior.sort_descending_icon = v.clone()
                 }
+                "behavior.playing_icon" => self.user_config.behavior.playing_icon = v.clone(),
                 _ => {}
               }
             } else {
@@ -925,5 +922,38 @@ mod tests {
     app.apply_settings_changes();
     assert_eq!(app.user_config.behavior.small_terminal_width, u16::MAX);
     assert_eq!(app.user_config.behavior.table_scroll_padding, u16::MAX);
+  }
+
+  #[test]
+  fn saving_a_two_cell_playing_icon_keeps_the_default_and_reports_it() {
+    let mut app = make_app_simple();
+    app.settings_items = vec![setting(
+      "behavior.playing_icon",
+      SettingValue::String(">>".into()),
+    )];
+    app.apply_settings_changes();
+    assert_eq!(app.user_config.behavior.playing_icon, "▶");
+    assert!(app
+      .status_message()
+      .is_some_and(|message| message.contains("one terminal cell")));
+
+    app.settings_items = vec![setting(
+      "behavior.playing_icon",
+      SettingValue::String(String::new()),
+    )];
+    app.apply_settings_changes();
+    assert_eq!(app.user_config.behavior.playing_icon, "▶");
+  }
+
+  #[test]
+  fn saving_a_one_cell_playing_icon_applies_it() {
+    let mut app = make_app_simple();
+    app.settings_items = vec![setting(
+      "behavior.playing_icon",
+      SettingValue::String("»".into()),
+    )];
+    app.apply_settings_changes();
+    assert_eq!(app.user_config.behavior.playing_icon, "»");
+    assert_eq!(app.status_message(), None);
   }
 }
