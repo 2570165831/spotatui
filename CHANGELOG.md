@@ -16,6 +16,8 @@
 
 - **Albums, Podcasts and Recently Played show their pane while loading**: the first time you opened one of them from the Library sidebar, the content pane stayed blank (no border, title or header) until the first page arrived, and stayed blank if that fetch failed. They now draw an empty titled table while they wait, like Artists does ([#610](https://github.com/LargeModGames/spotatui/issues/610)).
 
+- **The Help menu and the episode list follow your paging keys**: the Help menu paged only with Ctrl+d and Ctrl+u, and a show's episode list jumped only with Ctrl+a and Ctrl+e, even after you rebound `next_page`, `previous_page`, `jump_to_start` or `jump_to_end`. Both now use your bindings, like track tables do, so a rebound key replaces the default there too. Jumping to the end of an empty episode page no longer crashes ([#598](https://github.com/LargeModGames/spotatui/issues/598)).
+
 - **`spotatui play` no longer panics on an empty result**: `play -n` with a name that matched nothing crashed with "index out of bounds" for tracks, albums, artists, shows and playlists, and `play -u <empty playlist> -r` crashed with "cannot sample empty range". Both now fail with an error such as `no tracks with name '...'` or `playlist has no tracks`, and `spotatui search` with no hits prints that same message instead of a blank line ([#603](https://github.com/LargeModGames/spotatui/issues/603)).
 
 - **A very narrow track table no longer crashes spotatui**: widening the sidebar with `}` until a table pane was under 3 columns wide panicked with "attempt to subtract with overflow" in debug builds and silently wrapped to a huge column width in release builds. The columns now shrink to zero width instead ([#540](https://github.com/LargeModGames/spotatui/issues/540)).
