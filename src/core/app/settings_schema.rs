@@ -532,7 +532,7 @@ impl App {
         SettingItem {
           id: "behavior.playing_icon".to_string(),
           name: "Playing Icon".to_string(),
-          description: "Icon for playing state".to_string(),
+          description: "Single-cell icon for the playing row".to_string(),
           value: SettingValue::String(self.user_config.behavior.playing_icon.clone()),
         },
         SettingItem {
