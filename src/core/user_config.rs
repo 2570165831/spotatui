@@ -327,6 +327,44 @@ pub fn parse_key_public(key: String) -> Result<Key> {
   parse_key(key)
 }
 
+/// Convert a Key to its config file string representation
+pub fn key_to_config_string(key: &Key) -> String {
+  match key {
+    Key::Char(c) if *c == ' ' => "space".to_string(),
+    Key::Char(c) => c.to_string(),
+    Key::Ctrl(c) => format!("ctrl-{}", c),
+    Key::Alt(c) => format!("alt-{}", c),
+    Key::Enter => "enter".to_string(),
+    Key::Esc => "esc".to_string(),
+    Key::Backspace => "backspace".to_string(),
+    Key::Delete => "del".to_string(),
+    Key::Left => "left".to_string(),
+    Key::Right => "right".to_string(),
+    Key::Up => "up".to_string(),
+    Key::Down => "down".to_string(),
+    Key::PageUp => "pageup".to_string(),
+    Key::PageDown => "pagedown".to_string(),
+    Key::Home => "home".to_string(),
+    Key::End => "end".to_string(),
+    Key::Tab => "tab".to_string(),
+    Key::Ins => "ins".to_string(),
+    Key::F0 => "f0".to_string(),
+    Key::F1 => "f1".to_string(),
+    Key::F2 => "f2".to_string(),
+    Key::F3 => "f3".to_string(),
+    Key::F4 => "f4".to_string(),
+    Key::F5 => "f5".to_string(),
+    Key::F6 => "f6".to_string(),
+    Key::F7 => "f7".to_string(),
+    Key::F8 => "f8".to_string(),
+    Key::F9 => "f9".to_string(),
+    Key::F10 => "f10".to_string(),
+    Key::F11 => "f11".to_string(),
+    Key::F12 => "f12".to_string(),
+    Key::Unknown => "unknown".to_string(),
+  }
+}
+
 fn check_reserved_keys(key: Key) -> Result<()> {
   let reserved = [
     Key::Char('H'),
@@ -2539,6 +2577,31 @@ mod tests {
     }
     let style: VisualizerStyle = serde_yaml::from_str("BarGraph").unwrap();
     assert_eq!(style, VisualizerStyle::BarGraph);
+  }
+
+  #[test]
+  fn config_string_round_trips_through_parse_key() {
+    use super::{key_to_config_string, parse_key};
+    use crate::core::input::Key;
+
+    for key in [
+      Key::Char(' '),
+      Key::Char('a'),
+      Key::Ctrl('d'),
+      Key::Alt('x'),
+      Key::Tab,
+      Key::Home,
+      Key::End,
+      Key::Ins,
+      Key::F0,
+      Key::F5,
+      Key::F12,
+      Key::PageUp,
+      Key::Delete,
+      Key::Esc,
+    ] {
+      assert_eq!(parse_key(key_to_config_string(&key)).unwrap(), key);
+    }
   }
 
   #[test]

@@ -1,5 +1,6 @@
 use crate::core::action::{Action, ActionOutcome};
 use crate::core::app::{App, SettingValue, SettingsCategory};
+use crate::core::user_config::key_to_config_string;
 use crate::tui::event::Key;
 use crate::tui::handlers::common_key_events::{
   down_event, left_event, on_down_press_handler, on_up_press_handler, right_event, up_event,
@@ -394,44 +395,6 @@ fn handle_key_edit(key: Key, app: &mut App) {
   }
 }
 
-/// Convert a Key to its config file string representation
-fn key_to_config_string(key: &Key) -> String {
-  match key {
-    Key::Char(c) if *c == ' ' => "space".to_string(),
-    Key::Char(c) => c.to_string(),
-    Key::Ctrl(c) => format!("ctrl-{}", c),
-    Key::Alt(c) => format!("alt-{}", c),
-    Key::Enter => "enter".to_string(),
-    Key::Esc => "esc".to_string(),
-    Key::Backspace => "backspace".to_string(),
-    Key::Delete => "del".to_string(),
-    Key::Left => "left".to_string(),
-    Key::Right => "right".to_string(),
-    Key::Up => "up".to_string(),
-    Key::Down => "down".to_string(),
-    Key::PageUp => "pageup".to_string(),
-    Key::PageDown => "pagedown".to_string(),
-    Key::Home => "home".to_string(),
-    Key::End => "end".to_string(),
-    Key::Tab => "tab".to_string(),
-    Key::Ins => "ins".to_string(),
-    Key::F0 => "f0".to_string(),
-    Key::F1 => "f1".to_string(),
-    Key::F2 => "f2".to_string(),
-    Key::F3 => "f3".to_string(),
-    Key::F4 => "f4".to_string(),
-    Key::F5 => "f5".to_string(),
-    Key::F6 => "f6".to_string(),
-    Key::F7 => "f7".to_string(),
-    Key::F8 => "f8".to_string(),
-    Key::F9 => "f9".to_string(),
-    Key::F10 => "f10".to_string(),
-    Key::F11 => "f11".to_string(),
-    Key::F12 => "f12".to_string(),
-    Key::Unknown => "unknown".to_string(),
-  }
-}
-
 fn switch_category_left(app: &mut App) {
   let current_index = app.view.settings_category.index();
   let new_index = if current_index == 0 {
@@ -620,6 +583,34 @@ mod tests {
       .iter()
       .position(|setting| matches!(setting.value, SettingValue::Bool(_)))
       .expect("expected a boolean setting")
+  }
+
+  #[test]
+  fn capturing_a_key_already_bound_elsewhere_is_refused_after_a_reload() {
+    let mut app = App::default();
+    app.view.settings_category = SettingsCategory::Keybindings;
+    open_settings(&mut app);
+
+    app.view.settings_selected_index = setting_index(&app, "keys.help");
+    handler(Key::Enter, &mut app);
+    handler(Key::F5, &mut app);
+    app.apply_settings_changes();
+    reload_category(&mut app);
+
+    let search = setting_index(&app, "keys.search");
+    app.view.settings_selected_index = search;
+    handler(Key::Enter, &mut app);
+    handler(Key::F5, &mut app);
+
+    assert_eq!(
+      app.settings_items[search].value,
+      SettingValue::Key("/".to_string())
+    );
+    assert!(
+      app.api_error().contains("already assigned to Help"),
+      "{}",
+      app.api_error()
+    );
   }
 
   #[test]
