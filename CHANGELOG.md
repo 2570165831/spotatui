@@ -18,6 +18,8 @@
 
 - **Stats "Last 10 Days" uses your local date**: the panel on the Stats screen and the day list in the HTML listening recap labelled each play with its UTC date, while the streak strip and the hour chart already used local time. Outside UTC, plays near midnight landed on the wrong day: in UTC-5 a track played after 19:00 showed up under tomorrow, and in UTC+10 everything before 10:00 counted as yesterday. Days now follow your local date ([#602](https://github.com/LargeModGames/spotatui/issues/602)).
 
+- **`--completions powershell` works**: the README lists powershell among the supported shells, but only `power-shell` parsed, so `--completions powershell` failed with an invalid-value error. `powershell` is now the listed value, and `power-shell` still works ([#606](https://github.com/LargeModGames/spotatui/issues/606)).
+
 - **Albums, Podcasts and Recently Played show their pane while loading**: the first time you opened one of them from the Library sidebar, the content pane stayed blank (no border, title or header) until the first page arrived, and stayed blank if that fetch failed. They now draw an empty titled table while they wait, like Artists does ([#610](https://github.com/LargeModGames/spotatui/issues/610)).
 
 - **`spotatui play` no longer panics on an empty result**: `play -n` with a name that matched nothing crashed with "index out of bounds" for tracks, albums, artists, shows and playlists, and `play -u <empty playlist> -r` crashed with "cannot sample empty range". Both now fail with an error such as `no tracks with name '...'` or `playlist has no tracks`, and `spotatui search` with no hits prints that same message instead of a blank line ([#603](https://github.com/LargeModGames/spotatui/issues/603)).
