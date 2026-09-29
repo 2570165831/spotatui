@@ -291,6 +291,16 @@ impl App {
             self.user_config.behavior.shuffle_icon = v.clone();
           }
         }
+        "behavior.repeat_track_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.repeat_track_icon = v.clone();
+          }
+        }
+        "behavior.repeat_context_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.repeat_context_icon = v.clone();
+          }
+        }
         "behavior.paused_icon" => {
           if let SettingValue::String(v) = &setting.value {
             self.user_config.behavior.paused_icon = v.clone();

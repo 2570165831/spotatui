@@ -510,6 +510,18 @@ impl App {
           value: SettingValue::String(self.user_config.behavior.shuffle_icon.clone()),
         },
         SettingItem {
+          id: "behavior.repeat_track_icon".to_string(),
+          name: "Repeat Track Icon".to_string(),
+          description: "Icon for repeating the current track".to_string(),
+          value: SettingValue::String(self.user_config.behavior.repeat_track_icon.clone()),
+        },
+        SettingItem {
+          id: "behavior.repeat_context_icon".to_string(),
+          name: "Repeat Context Icon".to_string(),
+          description: "Icon for repeating the playlist or album".to_string(),
+          value: SettingValue::String(self.user_config.behavior.repeat_context_icon.clone()),
+        },
+        SettingItem {
           id: "behavior.playing_icon".to_string(),
           name: "Playing Icon".to_string(),
           description: "Single-cell icon for the playing row".to_string(),
@@ -984,6 +996,29 @@ impl App {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn the_icons_tab_edits_both_repeat_icons() {
+    let mut app = App::default();
+    app.view.settings_category = SettingsCategory::Icons;
+    app.load_settings_for_category();
+    for (id, value) in [
+      ("behavior.repeat_track_icon", "R1"),
+      ("behavior.repeat_context_icon", "RA"),
+    ] {
+      let item = app
+        .settings_items
+        .iter_mut()
+        .find(|item| item.id == id)
+        .unwrap_or_else(|| panic!("{id} row"));
+      item.value = SettingValue::String(value.to_string());
+    }
+
+    app.apply_settings_changes();
+
+    assert_eq!(app.user_config.behavior.repeat_track_icon, "R1");
+    assert_eq!(app.user_config.behavior.repeat_context_icon, "RA");
+  }
 
   fn keybinding_rows_with_f5_help_and_home_search() -> App {
     let mut app = App::default();
