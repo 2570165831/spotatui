@@ -289,7 +289,7 @@ them.
 |---|---|---|---|
 | `mcp_enabled` | `mcp-server` | `false` | Open the local MCP control socket so a coding agent can drive playback |
 | `dj_backend` | `ai-dj` | `agent_cli` | `agent_cli`, `anthropic`, or `openai_compat` |
-| `dj_agent_command` | `ai-dj` | `["claude", "-p"]` | argv for `agent_cli`; a bare binary name expands to a known preset (`claude`, `codex`, `agy`, or the legacy `gemini`) |
+| `dj_agent_command` | `ai-dj` | `["claude", "-p"]` | argv for `agent_cli`; a bare binary name expands to a known preset (`claude`, `codex`, `agy`, `copilot`, `opencode`, or the legacy `gemini`) |
 | `dj_agent_model` | `ai-dj` | unset | Model passed as that CLI's own flag (`claude --model haiku`, `agy --model gemini-3.6-flash-low`); unset passes no flag |
 | `dj_agent_prompt_via` | `ai-dj` | unset (the preset decides) | `stdin` or `arg`. `agy` ignores stdin, so leaving this unset is what keeps it working |
 | `dj_agent_timeout_secs` | `ai-dj` | `90` | Clamped to 5–600 |
