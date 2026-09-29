@@ -5,9 +5,8 @@ use crate::infra::network::{IoEvent, Network};
 use super::util::{Flag, Format, FormatType, JumpDirection, Type};
 
 use anyhow::{anyhow, Result};
-use rspotify::model::{
-  context::CurrentPlaybackContext, idtypes::Id, playlist::FullPlaylist, PlayableItem,
-};
+use reqwest::Method;
+use rspotify::model::{context::CurrentPlaybackContext, idtypes::Id, PlayableItem};
 
 pub struct CliApp {
   pub net: Network,
@@ -465,11 +464,30 @@ impl CliApp {
         if let Ok(playlist_id) = rspotify::model::idtypes::PlaylistId::from_id(id_str) {
           match self
             .net
-            .spotify_get_typed::<FullPlaylist>(&format!("playlists/{}", playlist_id.id()), &[])
+            .spotify_api_request_json(
+              Method::GET,
+              &format!("playlists/{}", playlist_id.id()),
+              &[],
+              None,
+            )
             .await
+            .and_then(|payload| Ok(serde_json::from_value::<PlaylistItemsTotal>(payload)?))
           {
             Ok(p) => {
-              let Some(offset) = random_offset(p.items.total) else {
+              // A playlist the user does not own gets no item page at all in
+              // Development Mode, and that is not the same as an empty one.
+              let Some(total) = playlist_items_total(&p) else {
+                self
+                  .net
+                  .app
+                  .lock()
+                  .await
+                  .handle_error(anyhow!(
+                    "playlist track count is unavailable: Spotify sends no item page for playlists you do not own"
+                  ));
+                return;
+              };
+              let Some(offset) = random_offset(total) else {
                 self
                   .net
                   .app
@@ -670,6 +688,37 @@ impl CliApp {
   }
 }
 
+// The `--random` offset only needs the playlist's track count. The migrated
+// Web API response no longer carries the item page in the shape rspotify's
+// `FullPlaylist` expects, so decoding the whole playlist model fails. The
+// raw response is read instead: it still names the total wherever it puts
+// it, and when the user does not own the playlist in Development Mode no
+// item page exists at all - which must stay distinguishable from a real zero.
+#[derive(Debug, serde::Deserialize)]
+struct PlaylistItemsTotal {
+  #[serde(default)]
+  items: Option<PlaylistTotalRef>,
+  #[serde(default)]
+  tracks: Option<PlaylistTotalRef>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PlaylistTotalRef {
+  #[serde(default)]
+  total: Option<u32>,
+}
+
+/// The playlist's track count, or `None` when the response carries no item
+/// page at all - the Development Mode shape for a playlist the user does not
+/// own. `Some(0)` is a real empty playlist and means something different.
+fn playlist_items_total(playlist: &PlaylistItemsTotal) -> Option<u32> {
+  playlist
+    .items
+    .as_ref()
+    .and_then(|ref_| ref_.total)
+    .or_else(|| playlist.tracks.as_ref().and_then(|ref_| ref_.total))
+}
+
 fn first_result_uri(results: &SearchResult, item: &Type, name: &str) -> Result<String> {
   let (kind, id) = match item {
     Type::Track => {
@@ -758,7 +807,9 @@ fn parse_query_limit(max: &str, ceiling: u32) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
-  use super::{first_result_uri, parse_query_limit, random_offset, SearchResult, Type};
+  use super::{
+    first_result_uri, parse_query_limit, playlist_items_total, random_offset, SearchResult, Type,
+  };
   use crate::core::pagination::Paged;
   use crate::core::plugin_api::{AlbumInfo, ArtistInfo, ShowInfo, TrackInfo};
   use crate::core::test_helpers::{full_track, playlist_info};
@@ -927,6 +978,82 @@ mod tests {
   #[test]
   fn a_random_offset_into_an_empty_playlist_is_none() {
     assert_eq!(random_offset(0), None);
+  }
+
+  #[test]
+  fn the_playlist_total_survives_a_migrated_playlist_response() {
+    // After Spotify's API migration `playlists/{id}` no longer carries the
+    // item page in the shape rspotify's `FullPlaylist` expects. The raw
+    // response still names the total wherever it puts it.
+    let payload = serde_json::json!({
+      "collaborative": false,
+      "description": "",
+      "external_urls": { "spotify": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" },
+      "href": "",
+      "id": "37i9dQZF1DXcBWIGoYBM5M",
+      "images": [],
+      "name": "Today's Top Hits",
+      "owner": {
+        "external_urls": { "spotify": "https://open.spotify.com/user/spotify" },
+        "href": "",
+        "id": "spotify",
+        "type": "user",
+        "uri": "spotify:user:spotify"
+      },
+      "public": false,
+      "snapshot_id": "abc",
+      "type": "playlist",
+      "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+      "tracks": { "href": "", "total": 50 }
+    });
+    let total = playlist_items_total(&serde_json::from_value(payload).unwrap());
+    assert_eq!(total, Some(50));
+  }
+
+  #[test]
+  fn a_playlist_without_an_item_page_is_not_an_empty_playlist() {
+    // For a playlist the user does not own, Development Mode sends no item
+    // page at all - there is no total to read. That must stay apart from a
+    // real zero: the caller reports it as an unavailable count, not as an
+    // empty playlist.
+    let payload = serde_json::json!({
+      "collaborative": false,
+      "description": "The premier league of Japanese city pop",
+      "external_urls": { "spotify": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" },
+      "href": "",
+      "id": "37i9dQZF1DXcBWIGoYBM5M",
+      "images": [],
+      "name": "This Is City Pop",
+      "owner": {
+        "external_urls": { "spotify": "https://open.spotify.com/user/spotify" },
+        "href": "",
+        "id": "spotify",
+        "type": "user",
+        "uri": "spotify:user:spotify"
+      },
+      "public": false,
+      "snapshot_id": "abc",
+      "type": "playlist",
+      "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+    });
+    let total = playlist_items_total(&serde_json::from_value(payload).unwrap());
+    assert_eq!(total, None);
+  }
+
+  #[test]
+  fn a_real_zero_total_is_not_an_unavailable_count() {
+    let payload = serde_json::json!({ "items": { "total": 0 } });
+    let total = playlist_items_total(&serde_json::from_value(payload).unwrap());
+    assert_eq!(total, Some(0));
+  }
+
+  #[test]
+  fn an_items_object_without_a_total_falls_back_to_tracks() {
+    // Some shapes carry an empty items object next to a tracks ref with the
+    // real total: the fallback must read tracks.total, not give up.
+    let payload = serde_json::json!({ "items": {}, "tracks": { "total": 50 } });
+    let total = playlist_items_total(&serde_json::from_value(payload).unwrap());
+    assert_eq!(total, Some(50));
   }
 
   #[test]
