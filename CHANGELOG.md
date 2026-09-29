@@ -44,6 +44,8 @@
 
 - **The help menu no longer lists `Ctrl+p` for moving up**: the "Move selection up" and "Scroll lyrics" rows offered `<Ctrl+p>`, but with the default config `Ctrl+p` opens the Listening Party, which is checked first. Both rows now list only the keys that work there ([#599](https://github.com/LargeModGames/spotatui/issues/599)).
 
+- **The help menu lists the Library unfollow and show follow keys**: `D` to unfollow an artist in Library -> Artists, `D` to remove a saved show in Library -> Podcasts, and `s` / `D` to follow and unfollow a show from its episode list all worked but never appeared under `?`. They are listed now, and the `w` row says it also saves an album from its track list ([#546](https://github.com/LargeModGames/spotatui/issues/546)).
+
 ## [v0.43.0] 2026-09-23
 
 ### Added
