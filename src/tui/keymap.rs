@@ -358,7 +358,12 @@ pub fn help_entries() -> Vec<HelpEntry> {
       "Search input",
     ),
     row("Delete saved album", Literal("D"), "Library -> Albums").needs(SPOTIFY),
-    row("Unfollow artist", Literal("D"), "Library -> Artists").needs(SPOTIFY),
+    row(
+      "Unfollow artist",
+      Literal("D"),
+      "Library -> Artists / Artist page -> Related artists / Search result",
+    )
+    .needs(SPOTIFY),
     row("Remove saved show", Literal("D"), "Library -> Podcasts").needs(SPOTIFY),
     row("Delete saved playlist", Literal("D"), "Playlist").needs(PLAYLIST_WRITE),
     row(
@@ -372,7 +377,7 @@ pub fn help_entries() -> Vec<HelpEntry> {
     row(
       "Save (like) album to library",
       Literal("w"),
-      "Search result / Album tracks",
+      "Search result / Album tracks / Artist page -> Albums",
     )
     .needs(SPOTIFY),
     row(
