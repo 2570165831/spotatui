@@ -40,6 +40,8 @@
 
 - **An unknown theme color is an error, not black**: a color spotatui didn't recognise, such as `blue`, `#1e1e2e` or `255, 0`, was logged and turned into black. Typing one in Settings switched the theme to Custom and saved `Black`, a Custom theme in `config.yml` got black text, and the Lua `spotatui.popup` and `spotatui.set_theme` drew black instead of raising an error. Settings now refuses the value with "Invalid color" and keeps the current theme, `config.yml` keeps the default color for that field and still loads, and Lua raises. RGB values need exactly three numbers, so `1, 2, 3, 4` is refused too. Color names stay case-sensitive, like `LightBlue` ([#595](https://github.com/LargeModGames/spotatui/issues/595)).
 
+- **H, M and L work in the Queue and Stats**: the help menu offers `H`, `M` and `L` to jump to the top, middle and bottom of a list, but the Queue popup and the Stats "Top Tracks" list ignored them. Both jump now; in the Queue, `H` goes to the "Now playing" row ([#542](https://github.com/LargeModGames/spotatui/issues/542)).
+
 - **`ctrl--` and `alt--` keybindings work**: a binding with `-` as the key after a modifier was rejected with "Shortcut can only have 2 keys", so config.yml skipped it with a warning and Settings showed `alt--` while the old binding stayed active. Both now bind Ctrl+- and Alt+- ([#554](https://github.com/LargeModGames/spotatui/issues/554)).
 
 - **The help menu no longer lists `Ctrl+p` for moving up**: the "Move selection up" and "Scroll lyrics" rows offered `<Ctrl+p>`, but with the default config `Ctrl+p` opens the Listening Party, which is checked first. Both rows now list only the keys that work there ([#599](https://github.com/LargeModGames/spotatui/issues/599)).

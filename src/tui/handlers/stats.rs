@@ -24,6 +24,22 @@ pub fn handler(key: Key, app: &mut App) {
         );
       }
     }
+    k if common_key_events::high_event(k) => {
+      if app.stats_data.is_some() {
+        app.view.stats_selected_track = common_key_events::on_high_press_handler();
+      }
+    }
+    k if common_key_events::middle_event(k) => {
+      if let Some(stats) = &app.stats_data {
+        app.view.stats_selected_track =
+          common_key_events::on_middle_press_handler(&stats.top_tracks);
+      }
+    }
+    k if common_key_events::low_event(k) => {
+      if let Some(stats) = &app.stats_data {
+        app.view.stats_selected_track = common_key_events::on_low_press_handler(&stats.top_tracks);
+      }
+    }
     Key::Char('[') => cycle_period(app, false),
     Key::Char(']') => cycle_period(app, true),
     Key::Enter => {
@@ -86,6 +102,31 @@ mod tests {
       days: vec![],
     });
     (app, rx)
+  }
+
+  fn app_with_three_tracks() -> App {
+    let (mut app, _rx) = app_with_track(None);
+    let tracks = &mut app.stats_data.as_mut().expect("stats").top_tracks;
+    let first = tracks[0].clone();
+    tracks.push(first.clone());
+    tracks.push(first);
+    app
+  }
+
+  #[test]
+  fn l_selects_the_last_top_track_and_h_the_first() {
+    let mut app = app_with_three_tracks();
+    handler(Key::Char('L'), &mut app);
+    assert_eq!(app.view.stats_selected_track, 2);
+    handler(Key::Char('H'), &mut app);
+    assert_eq!(app.view.stats_selected_track, 0);
+  }
+
+  #[test]
+  fn m_selects_the_middle_top_track() {
+    let mut app = app_with_three_tracks();
+    handler(Key::Char('M'), &mut app);
+    assert_eq!(app.view.stats_selected_track, 1);
   }
 
   #[test]
