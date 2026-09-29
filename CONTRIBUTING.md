@@ -26,7 +26,7 @@ git clone --recurse-submodules https://github.com/LargeModGames/spotatui.git
 ```
 
 ### 🎨 Create Themes
-Love customization? Add a new theme preset! Check out `ThemePreset` in `src/core/user_config.rs` for examples, and `docs/themes.md` for the theming docs.
+Love customization? Add a new theme preset! Check out `ThemePreset` in `src/core/theme.rs` for examples, and `docs/themes.md` for the theming docs.
 
 ### 🧪 Test on Your Setup
 - Try pre-releases and report issues
