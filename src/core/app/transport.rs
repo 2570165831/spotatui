@@ -360,8 +360,8 @@ impl App {
 
   pub fn next_track(&mut self) {
     if self.apple_music_owns_playback() {
-      // Music's own next can be a no-op (macOS 27), so start the next track
-      // of the list by id when spotatui knows the list.
+      // A track started by itself has no queue in Music, so its own next
+      // does nothing: start the next track of the list spotatui kept.
       if !self.step_apple_music(true) {
         self.dispatch(IoEvent::NextTrack);
       }

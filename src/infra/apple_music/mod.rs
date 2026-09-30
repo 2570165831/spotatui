@@ -327,11 +327,17 @@ pub(crate) struct RemoteState {
   pub tracks: Vec<TrackInfo>,
   pub playlists: Vec<PlaylistInfo>,
   pub playing_list: Option<PlayingList>,
+  /// Music's shuffle setting as last read while a track was loaded. Stopped,
+  /// Music reports it off whatever the user chose, so that read is ignored.
+  pub shuffle: bool,
 }
 
-/// The list a Music track was started from in spotatui. Music's own
-/// next-track command can be a no-op (seen on macOS 27), so next/previous
-/// start the neighbouring track of this list by id instead.
+/// The list a Music track was started from in spotatui. Music gives a track
+/// started by itself no queue: its next-track command does nothing and
+/// playback stops at the end of the track (measured on macOS 26.5 and 27;
+/// only playing a whole playlist builds a queue). So spotatui keeps the list
+/// and starts the neighbouring track by id: on next/previous, and when the
+/// track ends.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlayingList {
   pub context: String,
