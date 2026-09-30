@@ -23,7 +23,22 @@ function run(argv) {
         if (!found.length) throw new Error('Playlist no longer exists in Music');
         return found[0];
     }
+    function page(items, offset, convert) {
+        const total = items.length;
+        const start = Math.min(Number(offset), total);
+        const rows = [];
+        for (let i = start; i < Math.min(start + 100, total); ++i) rows.push(convert(items[i]));
+        return {items: rows, offset: start, total: total};
+    }
     switch (op) {
+    case 'playlists':
+        return JSON.stringify(page(music.userPlaylists(), argv[1], function(p) {
+            return {id: p.persistentID(), name: p.name()};
+        }));
+    case 'tracks':
+        return JSON.stringify(page(playlist(argv[1]).tracks(), argv[2], trackInfo));
+    case 'search':
+        return JSON.stringify(page(music.search(music.libraryPlaylists[0], {for: argv[1], only: 'all'}) || [], argv[2], trackInfo));
     case 'play': {
         const context = argv[1] === 'track' ? music.libraryPlaylists[0] : playlist(argv[2]);
         const id = argv[1] === 'track' ? argv[2] : argv[3];

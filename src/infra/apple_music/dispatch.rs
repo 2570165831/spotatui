@@ -1,6 +1,6 @@
 //! A bounded, serial Music worker, separate from the serial IoEvent pump.
 //! A foreign start is returned to the pump only after Music acknowledged pause.
-use super::{parse_snapshot, parse_uri, Command, MusicUri};
+use super::{parse_playlists, parse_snapshot, parse_tracks, parse_uri, Browse, Command, MusicUri};
 use crate::{core::app::App, infra::network::IoEvent};
 use anyhow::{bail, ensure, Result};
 use std::{
@@ -15,8 +15,19 @@ pub(crate) trait Client: Send + 'static {
 }
 
 enum Work {
-  Transport { generation: u64, command: Command },
-  Handoff { generation: u64, event: IoEvent },
+  Transport {
+    generation: u64,
+    command: Command,
+  },
+  Handoff {
+    generation: u64,
+    event: IoEvent,
+  },
+  Browse {
+    generation: u64,
+    request: Browse,
+    offset: usize,
+  },
 }
 
 pub(crate) struct Router {
@@ -107,6 +118,20 @@ impl Router {
     // or invalidate the live claim without accepting the corresponding work.
     let mut app = self.app.lock().await;
     let work = match event {
+      IoEvent::AppleMusicPage {
+        generation,
+        request,
+        offset,
+      } => {
+        if !app.apple_music_browse_is_current(&request, generation) {
+          return None;
+        }
+        Work::Browse {
+          generation,
+          request,
+          offset,
+        }
+      }
       IoEvent::StartPlayback(ref context, ref uris, offset)
         if context.is_some() || uris.is_some() =>
       {
@@ -255,6 +280,61 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
           }
           Ok(_) => {}
           Err(error) => app.apple_music_failed(generation, error),
+        }
+      }
+      Some(Work::Browse {
+        generation,
+        request,
+        offset,
+      }) => {
+        if !app
+          .lock()
+          .await
+          .apple_music_browse_is_current(&request, generation)
+        {
+          continue;
+        }
+        let result = client
+          .execute(Command::Browse(request.clone(), offset))
+          .await;
+        let mut app = app.lock().await;
+        if !app.apple_music_browse_is_current(&request, generation) {
+          continue;
+        }
+        let next = result.and_then(|json| {
+          if request == Browse::Playlists {
+            let page = parse_playlists(&json)?;
+            ensure!(
+              page.offset == offset,
+              "Music library changed during loading; reload it"
+            );
+            let end = page.offset + page.items.len();
+            app.append_apple_music_playlists(page.items);
+            Ok((end, page.total))
+          } else {
+            let page = parse_tracks(&json)?;
+            ensure!(
+              page.offset == offset,
+              "Music library changed during loading; reload it"
+            );
+            let end = page.offset + page.items.len();
+            app.append_apple_music_tracks(page.items, matches!(request, Browse::Search(_)));
+            Ok((end, page.total))
+          }
+        });
+        match next {
+          Ok((end, total)) if end < total => {
+            app.set_status_message(format!("Loading Apple Music library: {end}/{total}"), 4);
+            // Re-enter at the tail of the pump/worker so transport is served
+            // between pages. The same generation guards every append.
+            app.dispatch_without_spinner(IoEvent::AppleMusicPage {
+              generation,
+              request,
+              offset: end,
+            });
+          }
+          Ok((end, _)) => app.set_status_message(format!("Apple Music: loaded {end} items"), 3),
+          Err(error) => app.handle_error(error),
         }
       }
       None => {

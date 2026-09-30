@@ -240,6 +240,7 @@ impl App {
   /// view resets stay with the caller.
   pub fn set_active_source(&mut self, source: Source) {
     if self.active_source != source {
+      self.cancel_apple_music_browse();
       self.display_revisions.bump(DisplayDomain::Source);
     }
     self.active_source = source;
@@ -276,9 +277,11 @@ impl App {
       Source::Radio => IoEvent::GetRadioStations,
       Source::YouTube => IoEvent::GetYouTubePlaylists,
       Source::Qobuz => IoEvent::GetQobuzPlaylists,
-      // Spotify's playlists arrive with the session; Apple Music has no
-      // browse screens yet.
-      Source::Spotify | Source::AppleMusic => return,
+      Source::AppleMusic => {
+        self.browse_apple_music(crate::infra::apple_music::Browse::Playlists);
+        return;
+      }
+      Source::Spotify => return,
     };
     self.dispatch(event);
   }

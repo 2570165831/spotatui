@@ -66,10 +66,14 @@ impl Source {
     Source::AppleMusic,
   ];
 
-  /// The sources the `d` picker offers. Apple Music stays out until its
-  /// browse screens land; its playback owner and router come first.
+  /// The sources the `d` picker offers. Apple Music is listed only in a macOS
+  /// build with the `apple-music` feature: elsewhere nothing can reach Music.
   pub fn picker_sources() -> &'static [Source] {
-    &Self::ALL[..Self::ALL.len() - 1]
+    if cfg!(all(feature = "apple-music", target_os = "macos")) {
+      &Self::ALL
+    } else {
+      &Self::ALL[..Self::ALL.len() - 1]
+    }
   }
 
   /// Human-readable label shown in the source picker.
@@ -132,7 +136,12 @@ impl Source {
   pub fn supports_search(&self) -> bool {
     matches!(
       self,
-      Source::Spotify | Source::Subsonic | Source::Radio | Source::YouTube | Source::Qobuz
+      Source::Spotify
+        | Source::Subsonic
+        | Source::Radio
+        | Source::YouTube
+        | Source::Qobuz
+        | Source::AppleMusic
     )
   }
 
@@ -178,9 +187,12 @@ mod tests {
   }
 
   #[test]
-  fn apple_music_is_not_offered_yet_and_has_no_capabilities() {
-    assert!(!Source::picker_sources().contains(&Source::AppleMusic));
-    assert!(!Source::AppleMusic.supports_search());
+  fn apple_music_is_offered_only_where_it_builds_and_only_searches() {
+    assert_eq!(
+      Source::picker_sources().contains(&Source::AppleMusic),
+      cfg!(all(feature = "apple-music", target_os = "macos"))
+    );
+    assert!(Source::AppleMusic.supports_search());
     assert!(!Source::AppleMusic.supports_library());
     assert!(!Source::AppleMusic.supports_playlist_write());
     assert!(!Source::AppleMusic.supports_like());

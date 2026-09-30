@@ -12,11 +12,21 @@ mod macos;
 #[cfg(any(test, all(feature = "apple-music", target_os = "macos")))]
 mod process;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 use std::time::Instant;
 
-use crate::core::plugin_api::TrackInfo;
+use crate::core::plugin_api::{PlaylistInfo, TrackInfo};
+
+pub(crate) const LIBRARY_URI: &str = "applemusic:library";
+pub(crate) const PAGE_SIZE: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Browse {
+  Playlists,
+  Tracks(String),
+  Search(String),
+}
 
 /// Persistent IDs are library-local 64-bit hexadecimal identifiers. Keep them
 /// as strings: JavaScript numbers would round them above 2^53.
@@ -51,6 +61,7 @@ pub(crate) fn parse_uri(uri: &str) -> Result<MusicUri> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Command {
   Snapshot,
+  Browse(Browse, usize),
   Play {
     container: MusicUri,
     track: Option<String>,
@@ -75,6 +86,22 @@ impl Command {
       Self::Previous => vec!["previous".into()],
       Self::Seek(ms) => vec!["seek".into(), ms.to_string()],
       Self::Volume(volume) => vec!["volume".into(), volume.min(&100).to_string()],
+      Self::Browse(Browse::Playlists, offset) => vec!["playlists".into(), offset.to_string()],
+      Self::Browse(Browse::Tracks(uri), offset) => {
+        let target = match parse_uri(uri)? {
+          MusicUri::Playlist(id) => id,
+          MusicUri::Library => "library".into(),
+          MusicUri::Track(_) => bail!("Expected an Apple Music playlist"),
+        };
+        vec!["tracks".into(), target, offset.to_string()]
+      }
+      Self::Browse(Browse::Search(query), offset) => {
+        ensure!(
+          !query.contains('\0') && query.len() <= 4096,
+          "Apple Music search is too long or contains NUL"
+        );
+        vec!["search".into(), query.clone(), offset.to_string()]
+      }
       Self::Play {
         container,
         track,
@@ -185,6 +212,80 @@ pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
   })
 }
 
+#[derive(Debug)]
+pub(crate) struct Page<T> {
+  pub items: Vec<T>,
+  pub offset: usize,
+  pub total: usize,
+}
+
+#[derive(Deserialize)]
+struct WirePage<T> {
+  items: Vec<T>,
+  offset: usize,
+  total: usize,
+}
+
+fn validate_page<T>(page: &WirePage<T>) -> Result<()> {
+  ensure!(
+    page.items.len() <= PAGE_SIZE
+      && page.offset <= page.total
+      && page.items.len() <= page.total - page.offset,
+    "Invalid Music page bounds"
+  );
+  ensure!(
+    !page.items.is_empty() || page.offset == page.total,
+    "Music returned an empty incomplete page"
+  );
+  Ok(())
+}
+
+pub(crate) fn parse_tracks(json: &str) -> Result<Page<TrackInfo>> {
+  let wire: WirePage<WireTrack> = serde_json::from_str(json).context("Invalid Music tracks")?;
+  validate_page(&wire)?;
+  Ok(Page {
+    items: wire
+      .items
+      .into_iter()
+      .map(WireTrack::into_track)
+      .collect::<Result<_>>()?,
+    offset: wire.offset,
+    total: wire.total,
+  })
+}
+
+pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
+  #[derive(Deserialize)]
+  struct Playlist {
+    id: String,
+    name: String,
+  }
+  let wire: WirePage<Playlist> = serde_json::from_str(json).context("Invalid Music playlists")?;
+  validate_page(&wire)?;
+  let items = wire
+    .items
+    .into_iter()
+    .map(|p| {
+      Ok(PlaylistInfo {
+        uri: format!("applemusic:playlist:{}", persistent_id(&p.id)?),
+        name: p.name,
+        owner: "Music".into(),
+        track_count: 0,
+        id: None,
+        owner_id: None,
+        collaborative: false,
+        public: None,
+        image_url: None,
+      })
+    })
+    .collect::<Result<_>>()?;
+  Ok(Page {
+    items,
+    offset: wire.offset,
+    total: wire.total,
+  })
+}
+
 #[derive(Default)]
 pub(crate) struct RemoteState {
   pub claimed: bool,
@@ -193,6 +294,10 @@ pub(crate) struct RemoteState {
   pub generation: u64,
   pub snapshot: Option<Snapshot>,
   pub observed_at: Option<Instant>,
+  pub browse_generation: u64,
+  pub browse: Option<Browse>,
+  pub tracks: Vec<TrackInfo>,
+  pub playlists: Vec<PlaylistInfo>,
 }
 
 #[cfg(test)]
@@ -214,6 +319,13 @@ mod tests {
     ] {
       assert!(parse_uri(bad).is_err());
     }
+    let query = "\"; Application('Finder').activate(); //\n歌\\曲";
+    assert_eq!(
+      Command::Browse(Browse::Search(query.into()), 0)
+        .arguments()
+        .unwrap(),
+      vec!["search", query, "0"]
+    );
   }
 
   #[test]
@@ -229,11 +341,14 @@ mod tests {
   }
 
   #[test]
-  fn apple_music_rejects_malformed_times_and_partial_json() {
+  fn apple_music_rejects_malformed_times_pages_and_partial_json() {
     for time in [-1.0, f64::NAN, f64::INFINITY, 1e20] {
       assert!(milliseconds(time).is_err());
     }
     assert!(parse_snapshot("{\"running\":true}").is_err());
+    assert!(parse_tracks(r#"{"items":[],"offset":0,"total":1}"#).is_err());
+    assert!(parse_playlists(r#"{"items":[],"offset":2,"total":1}"#).is_err());
+    assert!(parse_tracks(r#"{"items":[],"offset":0,"total":0}"#).is_ok());
     assert!(!Command::Pause.may_launch());
     assert!(!Command::Snapshot.may_launch());
   }

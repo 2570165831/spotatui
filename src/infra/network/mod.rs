@@ -271,6 +271,18 @@ pub enum IoEvent {
     generation: u64,
     event: Box<IoEvent>,
   },
+  /// Load one page of a Music list (the playlists, a playlist's tracks or a
+  /// search) at `offset`. Consumed by `infra::apple_music::dispatch`, which
+  /// drops it once `generation` or the list on screen moved on.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  AppleMusicPage {
+    request: crate::infra::apple_music::Browse,
+    offset: usize,
+    generation: u64,
+  },
   /// Load the configured internet-radio stations into the sidebar (handled by
   /// `infra::radio::dispatch`; a no-op on the Spotify network).
   GetRadioStations,
@@ -589,6 +601,7 @@ impl Network {
         | IoEvent::GetQobuzSearchResults(_)
         | IoEvent::QobuzLogin
         | IoEvent::AppleMusicHandoff { .. }
+        | IoEvent::AppleMusicPage { .. }
         | IoEvent::GetRadioStations
         | IoEvent::GetRadioSearchResults(_)
         | IoEvent::GetYouTubeSearchResults(_)
@@ -1117,7 +1130,7 @@ impl Network {
       | IoEvent::QobuzLogin => {}
       // Consumed by infra::apple_music::dispatch; only a build without the
       // Apple Music router gets here.
-      IoEvent::AppleMusicHandoff { .. } => {
+      IoEvent::AppleMusicHandoff { .. } | IoEvent::AppleMusicPage { .. } => {
         self
           .app
           .lock()
@@ -1949,7 +1962,9 @@ impl Network {
 /// not drive the host's queue slot. A parked native backend has no Spotify
 /// playback to relay or follow.
 fn party_yields_to_local_playback(app: &App) -> bool {
-  app.playback_owner().owns_local_sink() || app.native_parked_here()
+  app.apple_music_owns_playback()
+    || app.playback_owner().owns_local_sink()
+    || app.native_parked_here()
 }
 
 #[cfg(test)]

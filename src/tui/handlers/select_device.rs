@@ -98,7 +98,8 @@ pub fn handler(key: Key, app: &mut App) {
 /// This is browse-scope only: it never starts or stops playback.
 fn select_source(app: &mut App) {
   let source = Source::picker_sources()[app.view.source_list_index];
-  if app.active_source != source {
+  // Picking Apple Music again reloads it: Music's library can change under us.
+  if app.active_source != source || source == Source::AppleMusic {
     app.apply(Action::SelectSource(source));
     // Reset the sidebar playlist cursor to the top of the new source's list.
     app.view.selected_playlist_index = Some(0);

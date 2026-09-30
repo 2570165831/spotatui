@@ -213,7 +213,9 @@ fn play_random_song(app: &mut App) {
           });
         }
       }
-      TrackTableContext::LocalPlaylist | TrackTableContext::SubsonicPlaylist => {
+      TrackTableContext::AppleMusicPlaylist
+      | TrackTableContext::LocalPlaylist
+      | TrackTableContext::SubsonicPlaylist => {
         // Single-file playback: play one random track from the folder/playlist.
         // Wire shape changed with the Action conversion: this used to send the
         // track in the context slot (`StartPlayback(Some(uri), None, None)`).
@@ -322,7 +324,8 @@ fn on_enter(app: &mut App) {
         }
       }
       TrackTableContext::AlbumSearch => {}
-      TrackTableContext::LocalPlaylist
+      TrackTableContext::AppleMusicPlaylist
+      | TrackTableContext::LocalPlaylist
       | TrackTableContext::SubsonicPlaylist
       | TrackTableContext::YouTubePlaylist
       | TrackTableContext::QobuzPlaylist => {

@@ -214,10 +214,112 @@ impl App {
     self.handle_error(error);
   }
 
-  /// Start one Music library track. The browse screens will add the playlist
-  /// context later; the first version plays the track from the library.
+  pub(crate) fn apple_music_playlists(&self) -> &[PlaylistInfo] {
+    &self.apple_music.playlists
+  }
+
+  pub(crate) fn cancel_apple_music_browse(&mut self) {
+    self.apple_music.browse_generation = self.apple_music.browse_generation.wrapping_add(1);
+    self.apple_music.browse = None;
+  }
+
+  /// Load a Music list page by page. The sidebar opens with a synthetic
+  /// "All songs" row so the library is reachable before any playlist arrives.
+  pub(crate) fn browse_apple_music(&mut self, request: crate::infra::apple_music::Browse) {
+    if !cfg!(all(feature = "apple-music", target_os = "macos")) {
+      self.set_status_message("Apple Music requires macOS and the apple-music feature", 5);
+      return;
+    }
+    self.cancel_apple_music_browse();
+    self.apple_music.browse = Some(request.clone());
+    self.apple_music.tracks.clear();
+    if request == crate::infra::apple_music::Browse::Playlists {
+      self.apple_music.playlists = vec![PlaylistInfo {
+        uri: crate::infra::apple_music::LIBRARY_URI.into(),
+        name: "All songs".into(),
+        owner: "Music".into(),
+        track_count: 0,
+        id: None,
+        owner_id: None,
+        collaborative: false,
+        public: None,
+        image_url: None,
+      }];
+      self.display_revisions.bump(DisplayDomain::Library);
+    }
+    self.dispatch_without_spinner(IoEvent::AppleMusicPage {
+      request,
+      offset: 0,
+      generation: self.apple_music.browse_generation,
+    });
+  }
+
+  /// A page is only accepted for the list still on screen: same source, same
+  /// request, same generation, and for a playlist the Music track table.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn apple_music_browse_is_current(
+    &self,
+    request: &crate::infra::apple_music::Browse,
+    generation: u64,
+  ) -> bool {
+    self.active_source == Source::AppleMusic
+      && self.apple_music.browse_generation == generation
+      && self.apple_music.browse.as_ref() == Some(request)
+      && (!matches!(request, crate::infra::apple_music::Browse::Tracks(_))
+        || self.track_table.context == Some(TrackTableContext::AppleMusicPlaylist))
+  }
+
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn append_apple_music_tracks(&mut self, tracks: Vec<TrackInfo>, search: bool) {
+    self.apple_music.tracks.extend(tracks);
+    let tracks = self.apple_music.tracks.clone();
+    if search {
+      self.set_search_results(SearchResult {
+        tracks: Some(Paged {
+          total: tracks.len() as u32,
+          items: tracks,
+          ..Default::default()
+        }),
+        ..Default::default()
+      });
+      self.view.search_hovered_block = SearchResultBlock::SongSearch;
+    } else {
+      self.replace_track_table_tracks(tracks);
+    }
+  }
+
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn append_apple_music_playlists(&mut self, playlists: Vec<PlaylistInfo>) {
+    self.apple_music.playlists.extend(playlists);
+    self.display_revisions.bump(DisplayDomain::Library);
+  }
+
+  /// Start one Music track, inside the playlist on screen when it came from
+  /// one, so Music's own next/previous stay within that playlist.
   pub(crate) fn play_apple_music_track(&mut self, uri: String) {
-    self.dispatch(IoEvent::StartPlayback(None, Some(vec![uri]), None));
+    if let Some(crate::infra::apple_music::Browse::Tracks(context)) =
+      self.apple_music.browse.as_ref().filter(|_| {
+        self.track_table.context == Some(TrackTableContext::AppleMusicPlaylist)
+          && self
+            .track_table
+            .tracks
+            .iter()
+            .any(|t| t.uri.as_deref() == Some(uri.as_str()))
+      })
+    {
+      self.start_playback_track_in_context(context.clone(), uri);
+    } else {
+      self.dispatch(IoEvent::StartPlayback(None, Some(vec![uri]), None));
+    }
   }
 }
 
@@ -328,6 +430,69 @@ mod tests {
     assert!(matches!(
       rx.try_recv(),
       Ok(IoEvent::StartPlayback(None, None, None))
+    ));
+  }
+
+  #[test]
+  fn apple_music_late_pages_are_rejected_once_the_list_moved_on() {
+    use crate::infra::apple_music::{Browse, LIBRARY_URI};
+    let mut app = App::default();
+    app.active_source = Source::AppleMusic;
+    let request = Browse::Tracks(LIBRARY_URI.into());
+    app.apple_music.browse = Some(request.clone());
+    app.track_table.context = Some(TrackTableContext::AppleMusicPlaylist);
+    assert!(app.apple_music_browse_is_current(&request, 0));
+    // A newer browse bumps the generation.
+    app.cancel_apple_music_browse();
+    assert!(!app.apple_music_browse_is_current(&request, 0));
+    // Another table replaced the Music one.
+    app.apple_music.browse = Some(request.clone());
+    app.set_track_table(Vec::new(), TrackTableContext::SavedTracks);
+    assert!(!app.apple_music_browse_is_current(&request, 2));
+    // The user switched sources.
+    app.apple_music.browse = Some(request.clone());
+    app.track_table.context = Some(TrackTableContext::AppleMusicPlaylist);
+    app.set_active_source(Source::Local);
+    assert!(!app.apple_music_browse_is_current(&request, 3));
+  }
+
+  #[cfg(all(feature = "apple-music", target_os = "macos"))]
+  #[test]
+  fn apple_music_sidebar_starts_with_all_songs_and_a_track_plays_in_its_playlist() {
+    use crate::infra::apple_music::{Browse, LIBRARY_URI};
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    app.set_active_source(Source::AppleMusic);
+    app.load_source_sidebar(Source::AppleMusic);
+    assert_eq!(app.apple_music_playlists()[0].uri, LIBRARY_URI);
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicPage {
+        request: Browse::Playlists,
+        offset: 0,
+        ..
+      })
+    ));
+
+    let playlist = "applemusic:playlist:0123456789ABCDEF".to_string();
+    let track = "applemusic:FEDCBA9876543210".to_string();
+    app.open_source_playlist_tracks(playlist.clone());
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicPage { request: Browse::Tracks(ref uri), .. }) if *uri == playlist
+    ));
+    app.append_apple_music_tracks(
+      vec![crate::core::app::test_support::queue_track(
+        Some(&track),
+        "Song",
+      )],
+      false,
+    );
+    app.start_playback_uris(vec![track.clone()], Some(0));
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(Some(ref context), Some(ref uris), Some(0)))
+        if *context == playlist && uris[..] == [track]
     ));
   }
 }
