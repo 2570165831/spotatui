@@ -15,6 +15,7 @@ const song: NowPlaying = {
   is_live: false,
   shuffle: false,
   repeat: "off",
+  context_uri: null,
 };
 
 const player = (item: NowPlaying | null) =>
@@ -24,6 +25,7 @@ const player = (item: NowPlaying | null) =>
       position={{ ms: 100_000, at: 0 }}
       connected
       send={() => {}}
+      onRoom={() => {}}
     />,
   );
 
@@ -63,11 +65,29 @@ describe("PlayerBar", () => {
 });
 
 describe("TopBar", () => {
+  const bar = (device: string | null, connected: boolean) =>
+    renderToStaticMarkup(
+      <TopBar
+        area="library"
+        ready={(area) => area === "library"}
+        onArea={() => {}}
+        query=""
+        onSearch={() => {}}
+        device={device}
+        connected={connected}
+        queued={6}
+        queueOpen={false}
+        onQueue={() => {}}
+      />,
+    );
+
+  it("marks the active area and disables the areas with no screen yet", () => {
+    const html = bar("This PC", true);
+    expect(html).toMatch(/aria-current="page"[^>]*>Library<kbd>1</);
+    expect(html).toMatch(/disabled=""[^>]*>Search<kbd>2</);
+  });
+
   it("lights the device dot only for a connected device", () => {
-    const bar = (device: string | null, connected: boolean) =>
-      renderToStaticMarkup(
-        <TopBar device={device} connected={connected} queued={6} />,
-      );
     expect(bar("This PC", true)).toContain('class="dot on"');
     expect(bar(null, true)).toContain("No device");
     expect(bar(null, true)).not.toContain('class="dot on"');

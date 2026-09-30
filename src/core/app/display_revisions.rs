@@ -17,6 +17,16 @@ pub enum DisplayDomain {
   /// fetches every page, and a frontend must not resend the list per bump.
   LikedSongs,
   Queue,
+  Stats,
+  /// The album the app holds for its album page, fetched by id.
+  Album,
+  /// The plays finished since this process started.
+  Session,
+  Discover,
+  /// The playlist-sync links and the run state.
+  PlaylistSync,
+  /// The rows of the shared track table and the list they belong to.
+  TrackTable,
 }
 
 /// Per-domain revisions that move only when that domain's displayed state changed.
@@ -37,12 +47,18 @@ pub struct DisplayRevisions {
   library: u64,
   liked: u64,
   queue: u64,
+  stats: u64,
+  album: u64,
+  session: u64,
+  discover: u64,
+  playlist_sync: u64,
+  track_table: u64,
 }
 
 impl DisplayDomain {
   /// Every domain, in declaration order.
   #[cfg(feature = "gui")]
-  pub const ALL: [DisplayDomain; 13] = [
+  pub const ALL: [DisplayDomain; 19] = [
     DisplayDomain::Route,
     DisplayDomain::Status,
     DisplayDomain::Source,
@@ -56,6 +72,12 @@ impl DisplayDomain {
     DisplayDomain::Library,
     DisplayDomain::LikedSongs,
     DisplayDomain::Queue,
+    DisplayDomain::Stats,
+    DisplayDomain::Album,
+    DisplayDomain::Session,
+    DisplayDomain::Discover,
+    DisplayDomain::PlaylistSync,
+    DisplayDomain::TrackTable,
   ];
 }
 
@@ -75,6 +97,12 @@ impl DisplayRevisions {
       DisplayDomain::Library => &mut self.library,
       DisplayDomain::LikedSongs => &mut self.liked,
       DisplayDomain::Queue => &mut self.queue,
+      DisplayDomain::Stats => &mut self.stats,
+      DisplayDomain::Album => &mut self.album,
+      DisplayDomain::Session => &mut self.session,
+      DisplayDomain::Discover => &mut self.discover,
+      DisplayDomain::PlaylistSync => &mut self.playlist_sync,
+      DisplayDomain::TrackTable => &mut self.track_table,
     };
     *slot = slot.wrapping_add(1);
   }
@@ -95,6 +123,12 @@ impl DisplayRevisions {
       DisplayDomain::Library => self.library,
       DisplayDomain::LikedSongs => self.liked,
       DisplayDomain::Queue => self.queue,
+      DisplayDomain::Stats => self.stats,
+      DisplayDomain::Album => self.album,
+      DisplayDomain::Session => self.session,
+      DisplayDomain::Discover => self.discover,
+      DisplayDomain::PlaylistSync => self.playlist_sync,
+      DisplayDomain::TrackTable => self.track_table,
     }
   }
 }

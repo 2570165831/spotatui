@@ -78,6 +78,8 @@ impl App {
       Action::MoveQueueItem { uri, from, to } => {
         self.move_queue_item(&uri, from, to);
       }
+      Action::RefreshQueue => self.dispatch_without_spinner(IoEvent::GetQueue),
+      Action::RefreshDevices => self.dispatch_without_spinner(IoEvent::GetDevicesSilent),
       Action::Search(query) => {
         let country = self.get_user_country();
         self.dispatch(IoEvent::GetSearchResults(query, country));
@@ -236,6 +238,7 @@ impl App {
         super::CopyTarget::CurrentAlbum => self.copy_album_url(),
       },
       Action::GenerateRecap => self.generate_recap(),
+      Action::GenerateStatsRecap => self.generate_stats_recap(),
       Action::CycleStatsPeriod { forward } => self.cycle_stats_period(forward),
       Action::RecommendFromTrack(track) => self.load_recommendations_for_track(track),
       Action::RecommendFromArtist { id, name } => self.load_recommendations_for_artist(id, name),

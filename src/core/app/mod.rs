@@ -102,6 +102,7 @@ mod recap;
 mod route;
 mod scrollable_pages;
 mod seek;
+mod session;
 mod settings_apply;
 mod settings_schema;
 mod shuffle_repeat;
@@ -136,6 +137,7 @@ pub use queue::*;
 pub use route::*;
 pub use scrollable_pages::*;
 pub use seek::*;
+pub use session::*;
 pub use settings_schema::*;
 pub use status::*;
 pub use view::*;
@@ -396,14 +398,24 @@ pub struct App {
   pub discover_artists_mix: Vec<TrackInfo>,
   /// Whether we're currently loading discover data
   pub discover_loading: bool,
+  /// The range `discover_top_tracks` belongs to; `None` before a landing or after a terminal clear.
+  discover_top_tracks_range: Option<DiscoverTimeRange>,
+  discover_view: DiscoverView,
+  /// The liked marks the Search revision last counted.
+  search_liked_view: Vec<String>,
+  /// The decoded-source list whose rows landed in the track table.
+  source_table_uri: Option<String>,
+  track_table_view: TrackTableView,
   /// Period shown on the Stats screen
   pub stats_period: RecapPeriod,
   /// Whether we're currently loading stats data
-  pub stats_loading: bool,
+  stats_loading: bool,
   /// Aggregated listening stats for the Stats screen
   pub stats_data: Option<StatsData>,
   /// Cached listening streak summary (Home strip + Stats screen)
   pub listening_streaks: Option<StreakSummary>,
+  /// The plays finished since this process started, oldest first.
+  session_plays: Vec<SessionPlay>,
   /// Pending monthly recap popup (path + listen count)
   recap_prompt: Option<RecapPromptState>,
   /// Current sort state per context
@@ -653,14 +665,6 @@ impl App {
   /// straight down the channel instead of dispatching.
   /// The Apple Music worker also uses it for the handoff it sends back to the
   /// pump, which is not a user-visible load.
-  #[cfg_attr(
-    not(any(
-      test,
-      feature = "ai-dj",
-      all(feature = "apple-music", target_os = "macos")
-    )),
-    allow(dead_code)
-  )]
   pub fn dispatch_without_spinner(&self, action: IoEvent) {
     if let Some(io_tx) = &self.io_tx {
       if let Err(e) = io_tx.send(action) {

@@ -22,11 +22,14 @@ const PLAYLIST_KEYS: Record<
   YouTube: "youtube",
 };
 
-/** The queue after the playing track: the native queue first, then Spotify's. */
-export function upNext(queue: QueuePayload | undefined): TrackInfo[] {
+/** The queue after the playing track: the native queue first, then Spotify's while Spotify plays. */
+export function upNext(
+  queue: QueuePayload | undefined,
+  spotifyPlays: boolean,
+): TrackInfo[] {
   return [
     ...(queue?.native ?? []),
-    ...(queue?.spotify.items ?? []).flatMap((item) =>
+    ...((spotifyPlays && queue?.spotify.items) || []).flatMap((item) =>
       item.track ? [item.track] : [],
     ),
   ];
@@ -74,6 +77,29 @@ export function step(
     default:
       return null;
   }
+}
+
+/** A sidebar row's click: a station plays, any other row opens its list. */
+export function openRow(source: Source, row: SidebarRow): Action | null {
+  if (source === "Radio")
+    return row.uri.startsWith("radio:")
+      ? { PlayUris: { uris: [row.uri], offset: null } }
+      : null;
+  if (source === "Spotify")
+    return { Open: { Playlist: { id: row.uri, from_search: false } } };
+  return { Open: { SourcePlaylist: row.uri } };
+}
+
+/** Play an opened list from `cursor`: a Spotify playlist as its context, a source list as URIs. */
+export function listPlayRequest(
+  source: Source,
+  listUri: string,
+  tracks: TrackInfo[],
+  cursor: number,
+): Action | null {
+  if (source !== "Spotify") return playRequest(tracks, cursor);
+  const track = tracks[cursor]?.uri;
+  return track ? { PlayTrackInContext: { context: listUri, track } } : null;
 }
 
 /** Play the list from `cursor`, the same request the terminal sends from Liked Songs. */

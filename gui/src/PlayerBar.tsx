@@ -1,21 +1,23 @@
-import { useEffect, useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { PlaybackPayload } from "./bindings/PlaybackPayload";
 import type { Position } from "./connection";
 import { clock, sourceOf } from "./format";
 import { Icon } from "./Icon";
 import { SourceBadge } from "./SourceBadge";
+import { usePosition } from "./usePosition";
 
 export function PlayerBar({
   playback,
   position,
   connected,
   send,
+  onRoom,
 }: {
   playback: PlaybackPayload | null;
   position: Position | null;
   connected: boolean;
   send: (action: Action) => void;
+  onRoom: (lyrics: boolean) => void;
 }) {
   const item = playback?.item ?? null;
   const playing = item?.is_playing ?? false;
@@ -129,6 +131,12 @@ export function PlayerBar({
         </div>
       </div>
       <div className="side">
+        <button type="button" className="link" onClick={() => onRoom(false)}>
+          Room <kbd>r</kbd>
+        </button>
+        <button type="button" className="link" onClick={() => onRoom(true)}>
+          Lyrics <kbd>l</kbd>
+        </button>
         <Icon>
           <path d="M11 5 6 9H2v6h4l5 4V5z" />
           <path d="M15.5 8.5a5 5 0 0 1 0 7" />
@@ -199,19 +207,4 @@ function Meter({
 
 function clamp(ratio: number): number {
   return Math.min(1, Math.max(0, ratio));
-}
-
-/** The position interpolated per animation frame from the last tick while playing. */
-function usePosition(position: Position | null, playing: boolean): number {
-  const [now, setNow] = useState(() => performance.now());
-  useEffect(() => {
-    if (!playing) return;
-    let frame = requestAnimationFrame(function step(time) {
-      setNow(time);
-      frame = requestAnimationFrame(step);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [playing]);
-  if (!position || position.ms === null) return 0;
-  return playing ? position.ms + Math.max(0, now - position.at) : position.ms;
 }
