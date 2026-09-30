@@ -16,7 +16,6 @@ use tokio::sync::Mutex;
 
 use crate::core::app::App;
 use crate::core::plugin_api::TrackInfo;
-#[cfg(feature = "queue")]
 use crate::core::queue::QueueItemSource;
 use crate::core::queue::{queue_item_source, source_available, source_label};
 #[cfg(feature = "audio-decode-queue")]
@@ -295,6 +294,16 @@ async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
     QueueItemSource::YouTube => play_queued_youtube(app, track, &uri).await,
     #[cfg(feature = "streaming")]
     QueueItemSource::Spotify => play_queued_spotify(app, track, &uri).await,
+    // `add_track_to_native_queue` refuses these; a hand-edited session file
+    // is the only other way in.
+    QueueItemSource::AppleMusic => {
+      set_status(
+        app,
+        crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED.to_string(),
+      )
+      .await;
+      false
+    }
     // Reached only when a source is `source_available` but its play arm is
     // cfg'd out — impossible (the check above *is* the cfg gate), but the match
     // must be exhaustive across builds.

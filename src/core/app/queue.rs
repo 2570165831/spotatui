@@ -34,6 +34,10 @@ impl App {
       self.set_status_message("Radio stations can't be queued", 3);
       return;
     }
+    if uri.starts_with("applemusic:") {
+      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 3);
+      return;
+    }
     // A Spotify track controlled on an external device has no native sink to
     // play through, so fall back to the Spotify Web-API queue.
     if matches!(
@@ -312,6 +316,20 @@ mod tests {
     let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
     app.add_track_to_native_queue(queue_track(Some("radio:https://example.com/live"), "Live"));
     assert!(app.native_queue.is_empty());
+    assert!(rx.try_recv().is_err());
+  }
+
+  #[test]
+  fn add_track_to_native_queue_rejects_an_apple_music_track() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app.add_track_to_native_queue(queue_track(Some("applemusic:0123456789ABCDEF"), "Song"));
+    assert!(app.native_queue.is_empty());
+    assert_eq!(
+      app.status_message(),
+      Some(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED)
+    );
+    // Never handed to the Spotify Web-API queue either.
     assert!(rx.try_recv().is_err());
   }
 

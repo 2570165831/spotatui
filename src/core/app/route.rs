@@ -219,7 +219,7 @@ impl App {
   /// only), and only Spotify needs a `me/player/devices` fetch: an
   /// unauthenticated or offline session must not surface a spurious error.
   pub(crate) fn open_source_device_picker(&mut self) {
-    self.view.source_list_index = Source::ALL
+    self.view.source_list_index = Source::picker_sources()
       .iter()
       .position(|s| *s == self.active_source)
       .unwrap_or(0);
@@ -276,7 +276,9 @@ impl App {
       Source::Radio => IoEvent::GetRadioStations,
       Source::YouTube => IoEvent::GetYouTubePlaylists,
       Source::Qobuz => IoEvent::GetQobuzPlaylists,
-      Source::Spotify => return,
+      // Spotify's playlists arrive with the session; Apple Music has no
+      // browse screens yet.
+      Source::Spotify | Source::AppleMusic => return,
     };
     self.dispatch(event);
   }

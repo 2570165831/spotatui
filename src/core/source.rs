@@ -50,18 +50,27 @@ pub enum Source {
   Radio,
   YouTube,
   Qobuz,
+  /// macOS only: a remote for the Music app (feature `apple-music`).
+  AppleMusic,
 }
 
 impl Source {
-  /// Every selectable source, in display order. Add new sources here.
-  pub const ALL: [Source; 6] = [
+  /// Every source, in display order. Add new sources here.
+  pub const ALL: [Source; 7] = [
     Source::Spotify,
     Source::Local,
     Source::Subsonic,
     Source::Radio,
     Source::YouTube,
     Source::Qobuz,
+    Source::AppleMusic,
   ];
+
+  /// The sources the `d` picker offers. Apple Music stays out until its
+  /// browse screens land; its playback owner and router come first.
+  pub fn picker_sources() -> &'static [Source] {
+    &Self::ALL[..Self::ALL.len() - 1]
+  }
 
   /// Human-readable label shown in the source picker.
   pub fn label(&self) -> &'static str {
@@ -72,6 +81,7 @@ impl Source {
       Source::Radio => "Internet Radio",
       Source::YouTube => "YouTube",
       Source::Qobuz => "Qobuz",
+      Source::AppleMusic => "Apple Music",
     }
   }
 
@@ -84,6 +94,7 @@ impl Source {
       Source::Radio => "free",
       Source::Local => "free",
       Source::Qobuz => "paid subscription, logs in through the browser",
+      Source::AppleMusic => "macOS Music app, needs Automation permission",
     }
   }
 
@@ -98,6 +109,7 @@ impl Source {
       Source::Radio => "Radio",
       Source::YouTube => "YouTube",
       Source::Qobuz => "Qobuz",
+      Source::AppleMusic => "AppleMusic",
     }
   }
 
@@ -111,6 +123,7 @@ impl Source {
       "Radio" => Source::Radio,
       "YouTube" => Source::YouTube,
       "Qobuz" => Source::Qobuz,
+      "AppleMusic" => Source::AppleMusic,
       _ => Source::Spotify,
     }
   }
@@ -162,6 +175,16 @@ mod tests {
       assert_eq!(wire, format!("\"{}\"", source.to_config_str()));
       assert_eq!(serde_json::from_str::<Source>(&wire).unwrap(), source);
     }
+  }
+
+  #[test]
+  fn apple_music_is_not_offered_yet_and_has_no_capabilities() {
+    assert!(!Source::picker_sources().contains(&Source::AppleMusic));
+    assert!(!Source::AppleMusic.supports_search());
+    assert!(!Source::AppleMusic.supports_library());
+    assert!(!Source::AppleMusic.supports_playlist_write());
+    assert!(!Source::AppleMusic.supports_like());
+    assert!(!Source::AppleMusic.supports_playlist_sync());
   }
 
   #[test]

@@ -1594,7 +1594,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
   let [instructions_area, source_area, devices_area] = f.area().layout(
     &Layout::vertical([
       Constraint::Length(7),
-      Constraint::Length(Source::ALL.len() as u16 + 2),
+      Constraint::Length(Source::picker_sources().len() as u16 + 2),
       Constraint::Min(3),
     ])
     .margin(2),
@@ -1638,7 +1638,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
   } else {
     app.user_config.theme.inactive
   };
-  let source_items: Vec<ListItem> = Source::ALL
+  let source_items: Vec<ListItem> = Source::picker_sources()
     .iter()
     .map(|s| {
       let is_active = *s == app.active_source;

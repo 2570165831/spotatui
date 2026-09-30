@@ -95,6 +95,8 @@ impl App {
         crate::core::source::Source::Qobuz => {
           self.dispatch(IoEvent::GetQobuzSearchResults(query));
         }
+        // Not browsable yet: the Apple Music remote has no search screen.
+        crate::core::source::Source::AppleMusic => {}
         // Spotify and Local both land on the Web API search, exactly like
         // the search input's if-chain (which has no Local branch).
         crate::core::source::Source::Spotify | crate::core::source::Source::Local => {
