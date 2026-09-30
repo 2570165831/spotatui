@@ -167,9 +167,8 @@ impl App {
   /// dragging on the playbar progress line). The target is clamped to the track
   /// duration. Mirrors the dispatch logic of [`Self::seek_forwards`].
   pub fn seek_to(&mut self, position_ms: u32) {
-    // Music clamps the position to the track itself.
     if self.apple_music_owns_playback() {
-      self.dispatch(IoEvent::Seek(position_ms));
+      self.seek_apple_music(position_ms);
       return;
     }
     // A decoded source owns the session: seek it to the absolute target directly
@@ -256,6 +255,10 @@ impl App {
   pub fn flush_pending_source_seek(&mut self) {
     // Queued for a decoded owner; once that owner is gone the value would
     // reach whoever holds the sink now.
+    if self.apple_music_owns_playback() {
+      self.flush_apple_music_seek();
+      return;
+    }
     if self.pending_source_seek.is_some() && !self.active_decoded_source() {
       self.pending_source_seek = None;
       return;

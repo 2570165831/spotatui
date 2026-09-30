@@ -71,6 +71,47 @@ impl App {
     self.dispatch(IoEvent::ChangeVolume(value));
   }
 
+  /// Each seek is one helper run, so a drag sends the latest position at
+  /// most this often; the positions in between are dropped.
+  const APPLE_MUSIC_SEEK_THROTTLE_MS: u128 = 250;
+
+  /// Seek Music. The position is applied locally at once, so quick repeated
+  /// seeks add up instead of all starting from the last snapshot.
+  pub(crate) fn seek_apple_music(&mut self, position_ms: u32) {
+    let Some(snapshot) = self.apple_music.snapshot.as_mut() else {
+      self.dispatch(IoEvent::Seek(position_ms));
+      return;
+    };
+    let duration = snapshot.track.as_ref().map_or(0, |t| t.duration_ms as u32);
+    let position_ms = if duration > 0 {
+      position_ms.min(duration)
+    } else {
+      position_ms
+    };
+    snapshot.position_ms = position_ms;
+    self.apple_music.observed_at = Some(Instant::now());
+    self.song_progress_ms = position_ms as u128;
+    self.seek_ms = None;
+    self.pending_source_seek = Some(position_ms);
+    self.flush_apple_music_seek();
+  }
+
+  /// Send the waiting seek once the throttle allows; the tick calls this too.
+  pub(crate) fn flush_apple_music_seek(&mut self) {
+    let Some(position_ms) = self.pending_source_seek else {
+      return;
+    };
+    if self
+      .last_source_seek
+      .is_some_and(|t| t.elapsed().as_millis() < Self::APPLE_MUSIC_SEEK_THROTTLE_MS)
+    {
+      return;
+    }
+    self.pending_source_seek = None;
+    self.last_source_seek = Some(Instant::now());
+    self.dispatch(IoEvent::Seek(position_ms));
+  }
+
   /// A transport command was queued for the Music worker.
   #[cfg_attr(
     not(all(feature = "apple-music", target_os = "macos")),
@@ -232,6 +273,11 @@ impl App {
         // still show the old state: keep the state spotatui asked for.
         snapshot.playing = previous.playing;
         snapshot.volume = previous.volume;
+        // A seek still waiting in the queue: keep where spotatui put the
+        // position instead of jumping back to where Music still is.
+        if self.apple_music.pending_commands > 0 || self.pending_source_seek.is_some() {
+          snapshot.position_ms = self.apple_music_position_ms();
+        }
       }
       if snapshot.playing || snapshot.track.is_some() {
         self.apple_music.shuffle = snapshot.shuffle;
@@ -280,6 +326,8 @@ impl App {
     &self.apple_music.playlists
   }
 
+  /// Forget the track list or search being loaded. The sidebar's playlists
+  /// load in a slot of their own and are not affected.
   pub(crate) fn cancel_apple_music_browse(&mut self) {
     self.apple_music.browse_generation = self.apple_music.browse_generation.wrapping_add(1);
     self.apple_music.browse = None;
@@ -287,15 +335,18 @@ impl App {
 
   /// Load a Music list page by page. The sidebar opens with a synthetic
   /// "All songs" row so the library is reachable before any playlist arrives.
+  ///
+  /// The sidebar (`Browse::Playlists`) and the list in the main pane (a
+  /// playlist's tracks or a search) are separate slots with their own
+  /// generation: opening a playlist must not stop the sidebar from loading,
+  /// and reloading the sidebar must not drop the list a track is played from.
   pub(crate) fn browse_apple_music(&mut self, request: crate::infra::apple_music::Browse) {
     if !cfg!(all(feature = "apple-music", target_os = "macos")) {
       self.set_status_message("Apple Music requires macOS and the apple-music feature", 5);
       return;
     }
-    self.cancel_apple_music_browse();
-    self.apple_music.browse = Some(request.clone());
-    self.apple_music.tracks.clear();
     if request == crate::infra::apple_music::Browse::Playlists {
+      self.apple_music.playlists_generation = self.apple_music.playlists_generation.wrapping_add(1);
       self.apple_music.playlists = vec![PlaylistInfo {
         uri: crate::infra::apple_music::LIBRARY_URI.into(),
         name: "All songs".into(),
@@ -308,7 +359,16 @@ impl App {
         image_url: None,
       }];
       self.display_revisions.bump(DisplayDomain::Library);
+      self.dispatch_without_spinner(IoEvent::AppleMusicPage {
+        request,
+        offset: 0,
+        generation: self.apple_music.playlists_generation,
+      });
+      return;
     }
+    self.cancel_apple_music_browse();
+    self.apple_music.browse = Some(request.clone());
+    self.apple_music.tracks.clear();
     self.dispatch_without_spinner(IoEvent::AppleMusicPage {
       request,
       offset: 0,
@@ -327,6 +387,10 @@ impl App {
     request: &crate::infra::apple_music::Browse,
     generation: u64,
   ) -> bool {
+    if *request == crate::infra::apple_music::Browse::Playlists {
+      return self.active_source == Source::AppleMusic
+        && self.apple_music.playlists_generation == generation;
+    }
     self.active_source == Source::AppleMusic
       && self.apple_music.browse_generation == generation
       && self.apple_music.browse.as_ref() == Some(request)
@@ -731,6 +795,83 @@ mod tests {
     app.accept_apple_music_snapshot(generation, at(false, 98.0, true));
     assert!(rx.try_recv().is_err());
     assert!(!app.apple_music_is_playing());
+  }
+
+  #[cfg(all(feature = "apple-music", target_os = "macos"))]
+  #[test]
+  fn apple_music_sidebar_and_list_loads_do_not_cancel_each_other() {
+    use crate::infra::apple_music::{Browse, LIBRARY_URI};
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    app.set_active_source(Source::AppleMusic);
+    app.load_source_sidebar(Source::AppleMusic);
+    let sidebar = match rx.try_recv() {
+      Ok(IoEvent::AppleMusicPage {
+        request: Browse::Playlists,
+        generation,
+        ..
+      }) => generation,
+      _other => panic!("expected the sidebar load"),
+    };
+
+    // Opening a list while the sidebar is still loading keeps the sidebar's
+    // later pages welcome.
+    let tracks = Browse::Tracks(LIBRARY_URI.into());
+    app.open_source_playlist_tracks(LIBRARY_URI.into());
+    let list = match rx.try_recv() {
+      Ok(IoEvent::AppleMusicPage { generation, .. }) => generation,
+      _other => panic!("expected the track list load"),
+    };
+    assert!(app.apple_music_browse_is_current(&Browse::Playlists, sidebar));
+    assert!(app.apple_music_browse_is_current(&tracks, list));
+
+    // Reloading the sidebar keeps the list on screen and what it holds, so a
+    // row started from it still plays inside the list.
+    let track = "applemusic:FEDCBA9876543210".to_string();
+    app.append_apple_music_tracks(
+      vec![crate::core::app::test_support::queue_track(
+        Some(&track),
+        "Song",
+      )],
+      false,
+    );
+    app.load_source_sidebar(Source::AppleMusic);
+    assert!(!app.apple_music_browse_is_current(&Browse::Playlists, sidebar));
+    assert!(app.apple_music_browse_is_current(&tracks, list));
+    while rx.try_recv().is_ok() {}
+    app.play_apple_music_track(track);
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(Some(ref context), Some(_), Some(0))) if context == LIBRARY_URI
+    ));
+  }
+
+  #[test]
+  fn apple_music_quick_seeks_add_up_and_a_drag_is_throttled() {
+    use crate::infra::apple_music::parse_snapshot;
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(
+        r#"{"running":true,"playing":false,"track":{"id":"1111111111111111","name":"n","artist":"a","album":"b","duration":100},"position":10,"volume":50}"#,
+      )
+      .unwrap(),
+    );
+    let step = app.user_config.behavior.seek_milliseconds;
+    app.seek_forwards();
+    app.seek_forwards();
+    app.seek_forwards();
+    // Three presses move three steps, not one step three times.
+    assert_eq!(app.apple_music_position_ms(), 10_000 + 3 * step);
+    // Only the first went out at once; the rest wait for the throttle.
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::Seek(p)) if p == 10_000 + step));
+    assert!(rx.try_recv().is_err());
+    assert_eq!(app.pending_source_seek, Some(10_000 + 3 * step));
+    // Past the end clamps to the track.
+    app.seek_to(500_000);
+    assert_eq!(app.apple_music_position_ms(), 100_000);
   }
 
   #[test]

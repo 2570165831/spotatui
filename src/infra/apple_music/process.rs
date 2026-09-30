@@ -81,12 +81,12 @@ mod tests {
   use super::*;
   #[tokio::test]
   async fn apple_music_helper_timeout_kills_and_reaps_only_its_child() {
-    let mut unrelated = Command::new("/bin/sleep")
+    let mut unrelated = Command::new("sleep")
       .arg("20")
       .kill_on_drop(true)
       .spawn()
       .unwrap();
-    let mut command = Command::new("/bin/sleep");
+    let mut command = Command::new("sleep");
     command.arg("20");
     let start = std::time::Instant::now();
     let error = run(command, Duration::from_millis(30), "sleep")
@@ -98,7 +98,7 @@ mod tests {
     assert!(unrelated_alive);
     assert!(error.to_string().contains("timed out"));
     assert!(start.elapsed() < Duration::from_secs(3));
-    let mut echo = Command::new("/bin/echo");
+    let mut echo = Command::new("echo");
     echo.arg("still alive");
     assert_eq!(
       run(echo, Duration::from_secs(1), "echo").await.unwrap(),
@@ -118,7 +118,7 @@ mod tests {
 
   #[tokio::test]
   async fn apple_music_failure_names_the_operation_and_code_but_no_stderr_text() {
-    let mut command = Command::new("/bin/sh");
+    let mut command = Command::new("sh");
     command.args(["-c", "echo 'secret playlist name (-1728)' >&2; exit 1"]);
     let error = run(command, Duration::from_secs(1), "playlists")
       .await

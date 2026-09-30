@@ -323,6 +323,8 @@ pub(crate) struct RemoteState {
   /// old play state for a moment after a pause (about 0.35s measured).
   pub commanded_at: Option<Instant>,
   pub browse_generation: u64,
+  /// The sidebar's playlists load in their own slot, see `browse_apple_music`.
+  pub playlists_generation: u64,
   pub browse: Option<Browse>,
   pub tracks: Vec<TrackInfo>,
   pub playlists: Vec<PlaylistInfo>,

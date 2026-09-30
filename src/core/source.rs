@@ -69,10 +69,20 @@ impl Source {
   /// The sources the `d` picker offers. Apple Music is listed only in a macOS
   /// build with the `apple-music` feature: elsewhere nothing can reach Music.
   pub fn picker_sources() -> &'static [Source] {
+    // Spelled out rather than sliced off `ALL`, so a source added after
+    // Apple Music is not the one that disappears.
+    const WITHOUT_APPLE_MUSIC: [Source; 6] = [
+      Source::Spotify,
+      Source::Local,
+      Source::Subsonic,
+      Source::Radio,
+      Source::YouTube,
+      Source::Qobuz,
+    ];
     if cfg!(all(feature = "apple-music", target_os = "macos")) {
       &Self::ALL
     } else {
-      &Self::ALL[..Self::ALL.len() - 1]
+      &WITHOUT_APPLE_MUSIC
     }
   }
 
@@ -188,10 +198,14 @@ mod tests {
 
   #[test]
   fn apple_music_is_offered_only_where_it_builds_and_only_searches() {
-    assert_eq!(
-      Source::picker_sources().contains(&Source::AppleMusic),
-      cfg!(all(feature = "apple-music", target_os = "macos"))
-    );
+    let apple_music = cfg!(all(feature = "apple-music", target_os = "macos"));
+    // The picker is every source, in order, minus Apple Music where it
+    // cannot work: never a source dropped by position.
+    let expected: Vec<Source> = Source::ALL
+      .into_iter()
+      .filter(|s| apple_music || *s != Source::AppleMusic)
+      .collect();
+    assert_eq!(Source::picker_sources(), expected.as_slice());
     assert!(Source::AppleMusic.supports_search());
     assert!(!Source::AppleMusic.supports_library());
     assert!(!Source::AppleMusic.supports_playlist_write());
