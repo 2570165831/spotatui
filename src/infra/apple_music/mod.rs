@@ -183,6 +183,8 @@ pub(crate) struct Snapshot {
   pub track: Option<TrackInfo>,
   pub position_ms: u32,
   pub volume: u8,
+  /// Music's own shuffle setting, which spotatui's next follows.
+  pub shuffle: bool,
 }
 
 pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
@@ -193,6 +195,8 @@ pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
     track: Option<WireTrack>,
     position: f64,
     volume: u8,
+    #[serde(default)]
+    shuffle: bool,
   }
   let wire: Wire = serde_json::from_str(json).context("Invalid Music response")?;
   ensure!(wire.volume <= 100, "Invalid Music volume");
@@ -209,6 +213,7 @@ pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
     track,
     position_ms,
     volume: wire.volume,
+    shuffle: wire.shuffle,
   })
 }
 
@@ -217,6 +222,8 @@ pub(crate) struct Page<T> {
   pub items: Vec<T>,
   pub offset: usize,
   pub total: usize,
+  /// Where the next page starts: past any entries the helper skipped.
+  pub next: usize,
 }
 
 #[derive(Deserialize)]
@@ -224,17 +231,28 @@ struct WirePage<T> {
   items: Vec<T>,
   offset: usize,
   total: usize,
+  /// Absent from older helpers, which never skipped an entry.
+  next: Option<usize>,
+}
+
+impl<T> WirePage<T> {
+  fn next(&self) -> usize {
+    self.next.unwrap_or(self.offset + self.items.len())
+  }
 }
 
 fn validate_page<T>(page: &WirePage<T>) -> Result<()> {
+  let next = page.next();
   ensure!(
     page.items.len() <= PAGE_SIZE
-      && page.offset <= page.total
-      && page.items.len() <= page.total - page.offset,
+      && page.offset <= next
+      && next <= page.total
+      && next - page.offset <= PAGE_SIZE
+      && page.items.len() <= next - page.offset,
     "Invalid Music page bounds"
   );
   ensure!(
-    !page.items.is_empty() || page.offset == page.total,
+    next > page.offset || page.offset == page.total,
     "Music returned an empty incomplete page"
   );
   Ok(())
@@ -243,12 +261,14 @@ fn validate_page<T>(page: &WirePage<T>) -> Result<()> {
 pub(crate) fn parse_tracks(json: &str) -> Result<Page<TrackInfo>> {
   let wire: WirePage<WireTrack> = serde_json::from_str(json).context("Invalid Music tracks")?;
   validate_page(&wire)?;
+  let next = wire.next();
   Ok(Page {
     items: wire
       .items
       .into_iter()
       .map(WireTrack::into_track)
       .collect::<Result<_>>()?,
+    next,
     offset: wire.offset,
     total: wire.total,
   })
@@ -262,6 +282,7 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
   }
   let wire: WirePage<Playlist> = serde_json::from_str(json).context("Invalid Music playlists")?;
   validate_page(&wire)?;
+  let next = wire.next();
   let items = wire
     .items
     .into_iter()
@@ -281,6 +302,7 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
     .collect::<Result<_>>()?;
   Ok(Page {
     items,
+    next,
     offset: wire.offset,
     total: wire.total,
   })
@@ -294,10 +316,33 @@ pub(crate) struct RemoteState {
   pub generation: u64,
   pub snapshot: Option<Snapshot>,
   pub observed_at: Option<Instant>,
+  /// Transport commands queued for Music and not yet run. A snapshot read
+  /// meanwhile predates them, so it must not undo what they will set.
+  pub pending_commands: u32,
+  /// When the last transport command finished: Music can still report the
+  /// old play state for a moment after a pause (about 0.35s measured).
+  pub commanded_at: Option<Instant>,
   pub browse_generation: u64,
   pub browse: Option<Browse>,
   pub tracks: Vec<TrackInfo>,
   pub playlists: Vec<PlaylistInfo>,
+  pub playing_list: Option<PlayingList>,
+}
+
+/// The list a Music track was started from in spotatui. Music's own
+/// next-track command can be a no-op (seen on macOS 27), so next/previous
+/// start the neighbouring track of this list by id instead.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlayingList {
+  pub context: String,
+  pub uris: Vec<String>,
+  pub index: usize,
+  /// When spotatui last started a track: snapshots read right after a start
+  /// can still name the previous track, so they do not move `index` yet.
+  pub stepped_at: Instant,
+  /// Indexes played before `index`, most recent last, so previous retraces a
+  /// shuffled next instead of taking the row above.
+  pub history: Vec<usize>,
 }
 
 #[cfg(test)]
@@ -351,5 +396,20 @@ mod tests {
     assert!(parse_tracks(r#"{"items":[],"offset":0,"total":0}"#).is_ok());
     assert!(!Command::Pause.may_launch());
     assert!(!Command::Snapshot.may_launch());
+  }
+
+  #[test]
+  fn apple_music_pages_move_past_skipped_entries() {
+    // Every entry of the page was unreadable and skipped: still progress.
+    let page = parse_tracks(r#"{"items":[],"offset":0,"total":150,"next":100}"#).unwrap();
+    assert_eq!((page.items.len(), page.next), (0, 100));
+    // A next start beyond the list, or a page wider than a page, is bogus.
+    assert!(parse_tracks(r#"{"items":[],"offset":0,"total":50,"next":100}"#).is_err());
+    assert!(parse_tracks(r#"{"items":[],"offset":0,"total":500,"next":200}"#).is_err());
+    // Older helpers send no next: it follows the rows.
+    let page =
+      parse_playlists(r#"{"items":[{"id":"0123456789ABCDEF","name":"x"}],"offset":3,"total":9}"#)
+        .unwrap();
+    assert_eq!(page.next, 4);
   }
 }

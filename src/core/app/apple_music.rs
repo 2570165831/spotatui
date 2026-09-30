@@ -71,6 +71,25 @@ impl App {
     self.dispatch(IoEvent::ChangeVolume(value));
   }
 
+  /// A transport command was queued for the Music worker.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn note_apple_music_command_queued(&mut self) {
+    self.apple_music.pending_commands = self.apple_music.pending_commands.saturating_add(1);
+  }
+
+  /// The Music worker finished (or dropped) a queued transport command.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn finish_apple_music_command(&mut self) {
+    self.apple_music.pending_commands = self.apple_music.pending_commands.saturating_sub(1);
+    self.apple_music.commanded_at = Some(Instant::now());
+  }
+
   #[cfg_attr(
     not(all(feature = "apple-music", target_os = "macos")),
     allow(dead_code)
@@ -189,10 +208,23 @@ impl App {
       && self.apple_music.generation == generation
       && !self.apple_music.switching
     {
+      let mut snapshot = snapshot;
+      let just_commanded = self.apple_music.pending_commands > 0
+        || self
+          .apple_music
+          .commanded_at
+          .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(1_500));
+      if let (true, Some(previous)) = (just_commanded, self.apple_music.snapshot.as_ref()) {
+        // A read taken before a queued command ran, or right after one, can
+        // still show the old state: keep the state spotatui asked for.
+        snapshot.playing = previous.playing;
+        snapshot.volume = previous.volume;
+      }
       self.song_progress_ms = snapshot.position_ms as u128;
       self.apple_music.desired_playing = snapshot.playing;
       self.apple_music.snapshot = Some(snapshot);
       self.apple_music.observed_at = Some(Instant::now());
+      self.sync_apple_music_list();
       self.note_display_changes();
     }
   }
@@ -211,7 +243,18 @@ impl App {
     self.apple_music.snapshot = None;
     // Keep the last intent: a failed Play may already be audible, so the next
     // toggle must request Pause rather than accidentally issuing another Play.
-    self.handle_error(error);
+    self.report_apple_music_error(&error);
+  }
+
+  /// Music failures are status messages, like the other sources': the error
+  /// screen's Spotify device advice does not apply, and no CLI command
+  /// reaches Music, so nothing reads `api_error` for them.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn report_apple_music_error(&mut self, error: &anyhow::Error) {
+    self.set_error_status_message(format!("Apple Music: {error}"), 8);
   }
 
   pub(crate) fn apple_music_playlists(&self) -> &[PlaylistInfo] {
@@ -306,19 +349,118 @@ impl App {
   /// Start one Music track, inside the playlist on screen when it came from
   /// one, so Music's own next/previous stay within that playlist.
   pub(crate) fn play_apple_music_track(&mut self, uri: String) {
-    if let Some(crate::infra::apple_music::Browse::Tracks(context)) =
-      self.apple_music.browse.as_ref().filter(|_| {
-        self.track_table.context == Some(TrackTableContext::AppleMusicPlaylist)
-          && self
-            .track_table
-            .tracks
-            .iter()
-            .any(|t| t.uri.as_deref() == Some(uri.as_str()))
-      })
-    {
-      self.start_playback_track_in_context(context.clone(), uri);
-    } else {
-      self.dispatch(IoEvent::StartPlayback(None, Some(vec![uri]), None));
+    use crate::infra::apple_music::{Browse, PlayingList, LIBRARY_URI};
+    let uris_of = |tracks: &[TrackInfo]| -> Vec<String> {
+      tracks.iter().filter_map(|t| t.uri.clone()).collect()
+    };
+    // The list on screen the track came from: a playlist's table plays in
+    // that playlist, search results play in the library.
+    let list = match self.apple_music.browse.as_ref() {
+      Some(Browse::Tracks(context))
+        if self.track_table.context == Some(TrackTableContext::AppleMusicPlaylist) =>
+      {
+        Some((context.clone(), uris_of(&self.track_table.tracks)))
+      }
+      Some(Browse::Search(_)) => Some((LIBRARY_URI.to_string(), uris_of(&self.apple_music.tracks))),
+      _ => None,
+    };
+    match list.and_then(|(context, uris)| {
+      let index = uris.iter().position(|u| *u == uri)?;
+      Some((context, uris, index))
+    }) {
+      Some((context, uris, index)) => {
+        self.apple_music.playing_list = Some(PlayingList {
+          context: context.clone(),
+          uris,
+          index,
+          stepped_at: Instant::now(),
+          history: Vec::new(),
+        });
+        self.start_playback_track_in_context(context, uri);
+      }
+      None => {
+        self.apple_music.playing_list = None;
+        self.dispatch(IoEvent::StartPlayback(None, Some(vec![uri]), None));
+      }
+    }
+  }
+
+  /// Start the next (`forward`) or previous track of the list the current
+  /// track was started from, following Music's shuffle for next. Returns
+  /// false when there is no such list or no neighbour, so the caller falls
+  /// back to Music's own command.
+  /// Whether spotatui started a track of the list in the last 3s. The
+  /// snapshot can still carry the old track's position then, which must not
+  /// turn a quick previous into a restart.
+  pub(crate) fn apple_music_just_stepped(&self) -> bool {
+    self
+      .apple_music
+      .playing_list
+      .as_ref()
+      .is_some_and(|l| l.stepped_at.elapsed() < std::time::Duration::from_secs(3))
+  }
+
+  pub(crate) fn step_apple_music(&mut self, forward: bool) -> bool {
+    let shuffle = self
+      .apple_music
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| s.shuffle);
+    let Some(list) = self.apple_music.playing_list.as_mut() else {
+      return false;
+    };
+    let len = list.uris.len();
+    let next = match (forward, shuffle) {
+      (true, true) if len > 1 => {
+        // Any other track of the list, uniformly.
+        let pick = rand::random_range(0..len - 1);
+        Some(if pick >= list.index { pick + 1 } else { pick })
+      }
+      (true, _) => (list.index + 1 < len).then_some(list.index + 1),
+      // Retrace what was played first, then fall back to the row above.
+      (false, _) => list
+        .history
+        .last()
+        .copied()
+        .or_else(|| list.index.checked_sub(1)),
+    };
+    let Some(next) = next else {
+      return false;
+    };
+    if forward {
+      list.history.push(list.index);
+    } else if list.history.last() == Some(&next) {
+      list.history.pop();
+    }
+    list.index = next;
+    list.stepped_at = Instant::now();
+    let (context, uri) = (list.context.clone(), list.uris[next].clone());
+    self.start_playback_track_in_context(context, uri);
+    true
+  }
+
+  /// Follow Music when it moved on by itself (the track ended), so the next
+  /// step starts from the track actually playing.
+  fn sync_apple_music_list(&mut self) {
+    let Some(uri) = self
+      .apple_music
+      .snapshot
+      .as_ref()
+      .and_then(|s| s.track.as_ref())
+      .and_then(|t| t.uri.clone())
+    else {
+      return;
+    };
+    if let Some(list) = self.apple_music.playing_list.as_mut() {
+      if list.stepped_at.elapsed() < std::time::Duration::from_secs(4) {
+        return;
+      }
+      if let Some(index) = list.uris.iter().position(|u| *u == uri) {
+        if index != list.index {
+          list.history.push(list.index);
+          list.index = index;
+        }
+      }
     }
   }
 }
@@ -431,6 +573,132 @@ mod tests {
       rx.try_recv(),
       Ok(IoEvent::StartPlayback(None, None, None))
     ));
+  }
+
+  #[test]
+  fn apple_music_next_and_previous_start_neighbours_of_the_started_list() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    app.claim_apple_music();
+    let uris: Vec<String> = ["A", "B", "C"]
+      .iter()
+      .map(|c| format!("applemusic:{}", c.repeat(16)))
+      .collect();
+    app.apple_music.playing_list = Some(crate::infra::apple_music::PlayingList {
+      context: "applemusic:playlist:0123456789ABCDEF".into(),
+      uris: uris.clone(),
+      index: 0,
+      stepped_at: Instant::now(),
+      history: Vec::new(),
+    });
+    let started = |rx: &std::sync::mpsc::Receiver<IoEvent>| match rx.try_recv() {
+      Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
+      _other => panic!("expected a start inside the playlist"),
+    };
+
+    app.next_track();
+    assert_eq!(started(&rx), uris[1]);
+    app.next_track();
+    assert_eq!(started(&rx), uris[2]);
+    // The end of the list falls back to Music's own command.
+    app.next_track();
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::NextTrack)));
+    // Within the first 3s previous steps back instead of restarting.
+    app.previous_track();
+    assert_eq!(started(&rx), uris[1]);
+  }
+
+  #[test]
+  fn apple_music_a_stale_read_cannot_undo_a_queued_pause_or_volume() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    let playing = |volume: u8| {
+      crate::infra::apple_music::parse_snapshot(&format!(
+        r#"{{"running":true,"playing":true,"track":null,"position":0,"volume":{volume}}}"#
+      ))
+      .unwrap()
+    };
+    app.accept_apple_music_snapshot(generation, playing(80));
+    app.toggle_playback();
+    app.increase_volume();
+    assert_eq!(rx.try_iter().count(), 2);
+    // The router queued both; a poll that read Music before they ran returns.
+    app.note_apple_music_command_queued();
+    app.note_apple_music_command_queued();
+    app.accept_apple_music_snapshot(generation, playing(80));
+    assert!(!app.apple_music_is_playing());
+    assert_eq!(app.apple_music_volume(), 90);
+    // So a second Space resumes instead of pausing again.
+    app.toggle_playback();
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(None, None, None))
+    ));
+  }
+
+  #[test]
+  fn apple_music_a_search_result_plays_in_the_library_and_next_follows_the_results() {
+    use crate::infra::apple_music::{Browse, LIBRARY_URI};
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let uris: Vec<String> = ["1111111111111111", "2222222222222222"]
+      .iter()
+      .map(|id| format!("applemusic:{id}"))
+      .collect();
+    app.apple_music.browse = Some(Browse::Search("q".into()));
+    app.apple_music.tracks = uris
+      .iter()
+      .map(|u| crate::core::app::test_support::queue_track(Some(u), "Song"))
+      .collect();
+    app.play_apple_music_track(uris[0].clone());
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(Some(ref context), Some(_), Some(0))) if context == LIBRARY_URI
+    ));
+    app.claim_apple_music();
+    app.next_track();
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(Some(_), Some(ref next), Some(0))) if next[..] == uris[1..]
+    ));
+  }
+
+  #[test]
+  fn apple_music_previous_retraces_a_shuffled_next() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    let snapshot = crate::infra::apple_music::parse_snapshot(
+      r#"{"running":true,"playing":true,"track":null,"position":0,"volume":50,"shuffle":true}"#,
+    )
+    .unwrap();
+    app.accept_apple_music_snapshot(generation, snapshot);
+    let uris: Vec<String> = (0..8)
+      .map(|i| format!("applemusic:{:016X}", i + 1))
+      .collect();
+    app.apple_music.playing_list = Some(crate::infra::apple_music::PlayingList {
+      context: "applemusic:playlist:0123456789ABCDEF".into(),
+      uris: uris.clone(),
+      index: 3,
+      stepped_at: Instant::now(),
+      history: Vec::new(),
+    });
+    let started = |rx: &std::sync::mpsc::Receiver<IoEvent>| match rx.try_recv() {
+      Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
+      _other => panic!("expected a start inside the playlist"),
+    };
+
+    app.next_track();
+    let shuffled = started(&rx);
+    assert_ne!(shuffled, uris[3]);
+    app.next_track();
+    started(&rx);
+    // Previous walks back through what played, not the rows above.
+    app.previous_track();
+    assert_eq!(started(&rx), shuffled);
+    app.previous_track();
+    assert_eq!(started(&rx), uris[3]);
   }
 
   #[test]

@@ -18,15 +18,16 @@ impl super::dispatch::Client for MacClient {
         .args(&args);
       child
     };
-    let output = process::run(invoke(), TIMEOUT).await?;
+    let label = args[0].as_str();
+    let output = process::run(invoke(), TIMEOUT, label).await?;
     if serde_json::from_str::<serde_json::Value>(&output)?["not_running"] == true
       && operation.may_launch()
     {
       let mut open = tokio::process::Command::new("/usr/bin/open");
       // Launch hidden, without bringing Music or an existing window forward.
       open.args(["-g", "-j", "-b", "com.apple.Music"]);
-      process::run(open, TIMEOUT).await?;
-      return process::run(invoke(), TIMEOUT).await;
+      process::run(open, TIMEOUT, "launch").await?;
+      return process::run(invoke(), TIMEOUT, label).await;
     }
     Ok(output)
   }

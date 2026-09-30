@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::sync::{mpsc, Mutex};
 
-pub(crate) trait Client: Send + 'static {
+pub(crate) trait Client: Send + Sync + 'static {
   fn execute(&self, command: Command) -> impl Future<Output = Result<String>> + Send;
 }
 
@@ -138,7 +138,7 @@ impl Router {
         let command = match start_command(context, uris, offset) {
           Ok(command) => command,
           Err(error) => {
-            app.handle_error(error);
+            app.report_apple_music_error(&error);
             return None;
           }
         };
@@ -155,10 +155,11 @@ impl Router {
         match command {
           Some(command) => {
             if let Err(error) = command.arguments() {
-              app.handle_error(error);
+              app.report_apple_music_error(&error);
               return None;
             }
             let generation = app.claim_apple_music();
+            app.note_apple_music_command_queued();
             permit.send(Work::Transport {
               generation,
               command,
@@ -207,12 +208,33 @@ impl Router {
       }
       other => return Some(other),
     };
+    let transport = matches!(work, Work::Transport { .. });
     if self.tx.try_send(work).is_err() {
       app.set_error_status_message("Music is busy; retry the request", 4);
+    } else if transport {
+      app.note_apple_music_command_queued();
     }
     app.is_loading = false;
     None
   }
+}
+
+/// Music can report "playing" for a moment after a pause (about 0.35s
+/// measured), so re-read before deciding the pause did not take: up to 2s.
+async fn confirm_paused<C: Client>(client: &C, first: super::Snapshot) -> Result<super::Snapshot> {
+  let mut snapshot = first;
+  for _ in 0..8 {
+    if !snapshot.playing {
+      return Ok(snapshot);
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    snapshot = parse_snapshot(&client.execute(Command::Snapshot).await?)?;
+  }
+  ensure!(
+    !snapshot.playing,
+    "Music did not acknowledge pause; the other source was not started"
+  );
+  Ok(snapshot)
 }
 
 async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>, client: C) {
@@ -236,6 +258,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         command,
       }) => {
         if !owns_generation(&app, generation).await {
+          app.lock().await.finish_apple_music_command();
           continue;
         }
         let result = client
@@ -243,6 +266,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
           .await
           .and_then(|json| parse_snapshot(&json));
         let mut app = app.lock().await;
+        app.finish_apple_music_command();
         match result {
           Ok(snapshot) => {
             app.accept_apple_music_snapshot(generation, snapshot);
@@ -258,17 +282,14 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         if !owns_generation(&app, generation).await {
           continue;
         }
-        let result = client
+        let result = match client
           .execute(Command::Pause)
           .await
           .and_then(|json| parse_snapshot(&json))
-          .and_then(|s| {
-            ensure!(
-              !s.playing,
-              "Music did not acknowledge pause; the other source was not started"
-            );
-            Ok(s)
-          });
+        {
+          Ok(snapshot) => confirm_paused(&client, snapshot).await,
+          Err(error) => Err(error),
+        };
         let mut app = app.lock().await;
         match result {
           Ok(snapshot) if app.apple_music_state().generation == generation => {
@@ -308,7 +329,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
               page.offset == offset,
               "Music library changed during loading; reload it"
             );
-            let end = page.offset + page.items.len();
+            let end = page.next;
             app.append_apple_music_playlists(page.items);
             Ok((end, page.total))
           } else {
@@ -317,7 +338,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
               page.offset == offset,
               "Music library changed during loading; reload it"
             );
-            let end = page.offset + page.items.len();
+            let end = page.next;
             app.append_apple_music_tracks(page.items, matches!(request, Browse::Search(_)));
             Ok((end, page.total))
           }
@@ -334,7 +355,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
             });
           }
           Ok((end, _)) => app.set_status_message(format!("Apple Music: loaded {end} items"), 3),
-          Err(error) => app.handle_error(error),
+          Err(error) => app.report_apple_music_error(&error),
         }
       }
       None => {
@@ -391,6 +412,42 @@ mod tests {
       }
       Ok(r#"{"running":true,"playing":false,"track":null,"position":0,"volume":50}"#.into())
     }
+  }
+
+  /// Answers "playing" for the first `stale` reads, then "paused".
+  struct StaleClient {
+    reads: std::sync::atomic::AtomicUsize,
+    stale: usize,
+  }
+
+  impl Client for StaleClient {
+    async fn execute(&self, _command: Command) -> Result<String> {
+      let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      let playing = read < self.stale;
+      Ok(format!(
+        r#"{{"running":true,"playing":{playing},"track":null,"position":0,"volume":50}}"#
+      ))
+    }
+  }
+
+  #[tokio::test]
+  async fn apple_music_a_late_pause_report_still_hands_off() {
+    let stale = |n| StaleClient {
+      reads: std::sync::atomic::AtomicUsize::new(0),
+      stale: n,
+    };
+    let first =
+      parse_snapshot(r#"{"running":true,"playing":true,"track":null,"position":0,"volume":50}"#)
+        .unwrap();
+    // One more "playing" read, then paused: accepted.
+    assert!(
+      !confirm_paused(&stale(1), first.clone())
+        .await
+        .unwrap()
+        .playing
+    );
+    // Never pauses within the window: the other source must not start.
+    assert!(confirm_paused(&stale(usize::MAX), first).await.is_err());
   }
 
   fn apple_start() -> IoEvent {
@@ -524,7 +581,12 @@ mod tests {
       ))
       .await;
     tokio::time::timeout(Duration::from_secs(2), async {
-      while !app.lock().await.api_error().contains("permission denied") {
+      while !app
+        .lock()
+        .await
+        .status_message()
+        .is_some_and(|m| m.contains("permission denied"))
+      {
         tokio::task::yield_now().await;
       }
     })
