@@ -142,6 +142,14 @@ struct WireTrack {
   #[serde(default)]
   album: String,
   duration: f64,
+  /// False for a track Music cannot play (gone from the catalogue, or a
+  /// file track whose file is missing). Absent means playable.
+  #[serde(default = "playable_by_default")]
+  playable: bool,
+}
+
+fn playable_by_default() -> bool {
+  true
 }
 
 fn milliseconds(seconds: f64) -> Result<u32> {
@@ -167,7 +175,7 @@ impl WireTrack {
       id: None,
       album_id: None,
       artist_refs: vec![],
-      is_playable: true,
+      is_playable: self.playable,
       is_local: false,
       track_number: 0,
       explicit: false,
@@ -185,6 +193,9 @@ pub(crate) struct Snapshot {
   pub volume: u8,
   /// Music's own shuffle setting, which spotatui's next follows.
   pub shuffle: bool,
+  /// After a start or a resume: whether Music really began playing. `None`
+  /// for every other command.
+  pub started: Option<bool>,
 }
 
 pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
@@ -197,6 +208,8 @@ pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
     volume: u8,
     #[serde(default)]
     shuffle: bool,
+    #[serde(default)]
+    started: Option<bool>,
   }
   let wire: Wire = serde_json::from_str(json).context("Invalid Music response")?;
   ensure!(wire.volume <= 100, "Invalid Music volume");
@@ -214,6 +227,7 @@ pub(crate) fn parse_snapshot(json: &str) -> Result<Snapshot> {
     position_ms,
     volume: wire.volume,
     shuffle: wire.shuffle,
+    started: wire.started,
   })
 }
 

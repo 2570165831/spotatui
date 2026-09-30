@@ -64,7 +64,15 @@ impl App {
   }
 
   pub(crate) fn set_apple_music_volume(&mut self, value: u8) {
-    let value = value.min(100);
+    // 1 is the floor: at 0 Music answers the next start with a dialog in its
+    // own window and plays nothing until someone dismisses it.
+    if value == 0 {
+      self.set_status_message(
+        "Apple Music: 1% is the lowest volume (Music refuses to play at 0)",
+        4,
+      );
+    }
+    let value = value.clamp(1, 100);
     if let Some(snapshot) = &mut self.apple_music.snapshot {
       snapshot.volume = value;
     }
@@ -110,6 +118,27 @@ impl App {
     self.pending_source_seek = None;
     self.last_source_seek = Some(Instant::now());
     self.dispatch(IoEvent::Seek(position_ms));
+  }
+
+  /// Music took a start or a resume and did not begin playing. The usual
+  /// reason is a dialog waiting in the Music window, which the terminal
+  /// cannot show.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn note_apple_music_did_not_start(&mut self, generation: u64) {
+    if self.apple_music.generation != generation {
+      return;
+    }
+    self.apple_music.desired_playing = false;
+    if let Some(snapshot) = self.apple_music.snapshot.as_mut() {
+      snapshot.playing = false;
+    }
+    self.set_error_status_message(
+      "Apple Music: Music did not start playing. Check the Music window for a dialog or an unavailable track",
+      10,
+    );
   }
 
   /// A transport command was queued for the Music worker.
@@ -433,8 +462,29 @@ impl App {
   /// one, so Music's own next/previous stay within that playlist.
   pub(crate) fn play_apple_music_track(&mut self, uri: String) {
     use crate::infra::apple_music::{Browse, PlayingList, LIBRARY_URI};
+    // A track Music cannot play is refused here: sent on, Music would put a
+    // dialog up in its own window that blocks every later start.
+    let unplayable = self
+      .track_table
+      .tracks
+      .iter()
+      .chain(self.apple_music.tracks.iter())
+      .any(|t| t.uri.as_deref() == Some(uri.as_str()) && !t.is_playable);
+    if unplayable {
+      self.set_error_status_message(
+        "Apple Music: Music cannot play this track (it is no longer available, or its file is missing)",
+        6,
+      );
+      return;
+    }
+    // Next, previous and the end-of-track continuation only step through
+    // tracks Music can play, for the same reason.
     let uris_of = |tracks: &[TrackInfo]| -> Vec<String> {
-      tracks.iter().filter_map(|t| t.uri.clone()).collect()
+      tracks
+        .iter()
+        .filter(|t| t.is_playable)
+        .filter_map(|t| t.uri.clone())
+        .collect()
     };
     // The list on screen the track came from: a playlist's table plays in
     // that playlist, search results play in the library.
@@ -890,6 +940,87 @@ mod tests {
     // Past the end clamps to the track.
     app.seek_to(500_000);
     assert_eq!(app.apple_music_position_ms(), 100_000);
+  }
+
+  #[test]
+  fn apple_music_volume_never_goes_to_zero() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      crate::infra::apple_music::parse_snapshot(
+        r#"{"running":true,"playing":true,"track":null,"position":0,"volume":5}"#,
+      )
+      .unwrap(),
+    );
+    // One step down from 5% would be 0: Music refuses to play there.
+    app.decrease_volume();
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::ChangeVolume(1))));
+    assert_eq!(app.apple_music_volume(), 1);
+    assert!(app.status_message().is_some_and(|m| m.contains("1%")));
+  }
+
+  #[test]
+  fn apple_music_unplayable_tracks_are_refused_and_skipped() {
+    use crate::infra::apple_music::{parse_tracks, Browse, LIBRARY_URI};
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let page = parse_tracks(
+      r#"{"items":[
+        {"id":"1111111111111111","name":"a","duration":10},
+        {"id":"2222222222222222","name":"gone","duration":10,"playable":false},
+        {"id":"3333333333333333","name":"c","duration":10,"playable":true}
+      ],"offset":0,"total":3,"next":3}"#,
+    )
+    .unwrap();
+    assert_eq!(
+      page.items.iter().map(|t| t.is_playable).collect::<Vec<_>>(),
+      [true, false, true]
+    );
+    app.apple_music.browse = Some(Browse::Tracks(LIBRARY_URI.into()));
+    app.set_track_table(page.items, TrackTableContext::AppleMusicPlaylist);
+    app.apple_music.browse = Some(Browse::Tracks(LIBRARY_URI.into()));
+
+    // Enter on the unplayable row: nothing is sent to Music, the user is told.
+    app.play_apple_music_track("applemusic:2222222222222222".into());
+    assert!(rx.try_recv().is_err());
+    assert!(app.status_message_is_error());
+
+    // From the first row, next goes to the third: the dead row is not a stop.
+    app.play_apple_music_track("applemusic:1111111111111111".into());
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::StartPlayback(..))));
+    app.claim_apple_music();
+    app.next_track();
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::StartPlayback(Some(_), Some(ref next), Some(0)))
+        if next[0] == "applemusic:3333333333333333"
+    ));
+  }
+
+  #[test]
+  fn apple_music_a_start_music_ignored_is_reported() {
+    let mut app = App::default();
+    let generation = app.claim_apple_music();
+    let snapshot = crate::infra::apple_music::parse_snapshot(
+      r#"{"running":true,"playing":false,"track":null,"position":0,"volume":50,"started":false}"#,
+    )
+    .unwrap();
+    assert_eq!(snapshot.started, Some(false));
+    app.accept_apple_music_snapshot(generation, snapshot);
+    app.note_apple_music_did_not_start(generation);
+    assert!(!app.apple_music_is_playing());
+    assert!(app.status_message_is_error());
+    assert!(app
+      .status_message()
+      .is_some_and(|m| m.contains("did not start playing")));
+    // A stale report from before a newer start is ignored.
+    let mut app = App::default();
+    let old = app.claim_apple_music();
+    app.claim_apple_music();
+    app.note_apple_music_did_not_start(old);
+    assert!(app.status_message().is_none());
   }
 
   #[test]

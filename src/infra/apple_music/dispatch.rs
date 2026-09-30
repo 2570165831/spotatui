@@ -269,7 +269,11 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         app.finish_apple_music_command();
         match result {
           Ok(snapshot) => {
+            let refused = snapshot.started == Some(false);
             app.accept_apple_music_snapshot(generation, snapshot);
+            if refused {
+              app.note_apple_music_did_not_start(generation);
+            }
             poll_failed = false;
           }
           Err(error) => {
