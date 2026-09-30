@@ -11,6 +11,10 @@ pub struct QueueState {
 impl App {
   /// Add an item to the Spotify Web API queue of the active device.
   pub(crate) fn add_to_spotify_queue(&mut self, uri: String) {
+    if self.apple_music_owns_playback() || uri.starts_with("applemusic:") {
+      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      return;
+    }
     // No device holds a Spotify queue while the native backend is parked.
     if self.native_parked_owns_context() {
       self.refuse_parked_gesture();
@@ -26,6 +30,11 @@ impl App {
   /// queue behavior (there is no native sink to play them through); everything
   /// else is pushed onto [`Self::native_queue`].
   pub fn add_track_to_native_queue(&mut self, track: TrackInfo) {
+    // Music keeps its own queue, which spotatui can't reach.
+    if self.apple_music_owns_playback() {
+      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      return;
+    }
     let Some(uri) = track.uri.clone() else {
       self.set_status_message("Cannot queue: track has no URI", 3);
       return;
@@ -80,6 +89,10 @@ impl App {
   /// Jump to a queued item: drop everything before it and hand the sink to
   /// the queue, suspending a playing context mid-track first.
   pub(crate) fn play_queue_item(&mut self, uri: &str, position: usize) {
+    if self.apple_music_owns_playback() || uri.starts_with("applemusic:") {
+      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      return;
+    }
     let Some(skip) = self.queue_position_for(uri, position) else {
       return;
     };

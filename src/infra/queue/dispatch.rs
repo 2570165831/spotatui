@@ -37,6 +37,21 @@ use std::time::Duration;
 /// return `false` (the per-source teardowns/starts still run) but first clear
 /// the queue slot so a new play cleanly takes over.
 pub async fn route_queue_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
+  // Music owns playback: the queue slot was cleared by the claim, and an
+  // advance must not start a second player under it.
+  if app.lock().await.apple_music_owns_playback() {
+    if matches!(
+      event,
+      IoEvent::AdvanceNativeQueue | IoEvent::FinishNativeQueue
+    ) {
+      app
+        .lock()
+        .await
+        .set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      return true;
+    }
+    return false;
+  }
   if let IoEvent::AdvanceNativeQueue = event {
     advance_native_queue(app).await;
     return true;

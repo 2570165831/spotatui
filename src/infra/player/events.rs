@@ -607,6 +607,16 @@ async fn handle_player_events(
       _ => {}
     }
 
+    // Music owns the output: a librespot that starts playing anyway (a late
+    // load, a remote Connect command) is paused before anyone hears both.
+    if app.lock().await.apple_music_owns_playback() {
+      if matches!(event, PlayerEvent::Playing { .. }) {
+        player.pause();
+        app.lock().await.set_native_playback_intent(false);
+      }
+      continue;
+    }
+
     let notes_playback = !matches!(
       event,
       PlayerEvent::PositionChanged { .. } | PlayerEvent::Preloading { .. }

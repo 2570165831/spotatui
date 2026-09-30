@@ -61,6 +61,10 @@ impl App {
   }
 
   pub fn toggle_playback(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.toggle_apple_music();
+      return;
+    }
     // The native queue slot owns the sink: toggle its player directly (covers the
     // idle-app case where no per-source context is set).
     #[cfg(feature = "audio-decode-queue")]
@@ -218,6 +222,10 @@ impl App {
   }
 
   pub fn previous_track(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.dispatch(IoEvent::PreviousTrack);
+      return;
+    }
     info!("playing previous track or restarting current track");
     // A skip drops a waiting start, except one that waits for the rebuild of
     // a parked backend: the skip is refused there.
@@ -290,6 +298,10 @@ impl App {
   }
 
   pub fn force_previous_track(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.dispatch(IoEvent::ForcePreviousTrack);
+      return;
+    }
     info!("force skipping to previous track");
     // A skip drops a waiting start, except one that waits for the rebuild of
     // a parked backend: the skip is refused there.
@@ -340,6 +352,10 @@ impl App {
   }
 
   pub fn next_track(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.dispatch(IoEvent::NextTrack);
+      return;
+    }
     info!("skipping to next track");
     // A skip drops a waiting start, except one that waits for the rebuild of
     // a parked backend: the skip is refused there, unless queued items take
@@ -424,6 +440,13 @@ impl App {
     if uris.is_empty() {
       return;
     }
+    // One Music track at a time: there is no cross-source queue for Apple Music.
+    if uris.iter().all(|uri| uri.starts_with("applemusic:")) {
+      if let Some(uri) = uris.get(offset.unwrap_or(0)) {
+        self.play_apple_music_track(uri.clone());
+      }
+      return;
+    }
     self.dispatch(IoEvent::StartPlayback(None, Some(uris), offset));
   }
 
@@ -450,7 +473,7 @@ impl App {
   /// Transfer Spotify playback to a Connect device, refused while another
   /// source owns the sink.
   pub(crate) fn transfer_playback_to_device(&mut self, device_id: String, persist: bool) {
-    if self.active_decoded_source() {
+    if self.apple_music_owns_playback() || self.active_decoded_source() {
       self.set_status_message("Another source owns playback", 4);
       return;
     }

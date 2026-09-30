@@ -27,6 +27,14 @@ impl App {
   }
 
   pub fn seek_forwards(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.seek_to(
+        self
+          .apple_music_position_ms()
+          .saturating_add(self.user_config.behavior.seek_milliseconds),
+      );
+      return;
+    }
     info!(
       "seeking forwards by {} ms",
       self.user_config.behavior.seek_milliseconds
@@ -96,6 +104,14 @@ impl App {
   }
 
   pub fn seek_backwards(&mut self) {
+    if self.apple_music_owns_playback() {
+      self.seek_to(
+        self
+          .apple_music_position_ms()
+          .saturating_sub(self.user_config.behavior.seek_milliseconds),
+      );
+      return;
+    }
     info!(
       "seeking backwards by {} ms",
       self.user_config.behavior.seek_milliseconds
@@ -151,6 +167,11 @@ impl App {
   /// dragging on the playbar progress line). The target is clamped to the track
   /// duration. Mirrors the dispatch logic of [`Self::seek_forwards`].
   pub fn seek_to(&mut self, position_ms: u32) {
+    // Music clamps the position to the track itself.
+    if self.apple_music_owns_playback() {
+      self.dispatch(IoEvent::Seek(position_ms));
+      return;
+    }
     // A decoded source owns the session: seek it to the absolute target directly
     // (the source player clamps to the track duration internally). Never read
     // the stale Spotify context duration for a source. Radio has no position

@@ -202,6 +202,14 @@ impl App {
   /// another owner of the sink. An install ends the park.
   #[cfg(feature = "streaming")]
   pub(crate) fn accept_rebuilt_native_backend(&mut self) -> bool {
+    // A rebuild may have started before Music took over. Park it, so an
+    // explicit Spotify start later reacquires it instead of it resuming now.
+    if self.apple_music_owns_playback() {
+      self.park_native_backend();
+      self.native_parked = true;
+      self.native_backend_pending = false;
+      return false;
+    }
     if self.native_parked && !self.native_should_drive() {
       return false;
     }

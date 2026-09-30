@@ -260,6 +260,17 @@ pub enum IoEvent {
   /// Start the in-TUI Qobuz browser login (handled by `infra::qobuz::dispatch`).
   #[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
   QobuzLogin,
+  /// A start held back while Music paused: sent only after Music acknowledged
+  /// the pause, and consumed by `infra::apple_music::dispatch`, which hands
+  /// `event` back to the pump. Never bypasses the claim gate.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  AppleMusicHandoff {
+    generation: u64,
+    event: Box<IoEvent>,
+  },
   /// Load the configured internet-radio stations into the sidebar (handled by
   /// `infra::radio::dispatch`; a no-op on the Spotify network).
   GetRadioStations,
@@ -577,6 +588,7 @@ impl Network {
         | IoEvent::GetQobuzTracks(_)
         | IoEvent::GetQobuzSearchResults(_)
         | IoEvent::QobuzLogin
+        | IoEvent::AppleMusicHandoff { .. }
         | IoEvent::GetRadioStations
         | IoEvent::GetRadioSearchResults(_)
         | IoEvent::GetYouTubeSearchResults(_)
@@ -1103,6 +1115,15 @@ impl Network {
       | IoEvent::GetQobuzTracks(_)
       | IoEvent::GetQobuzSearchResults(_)
       | IoEvent::QobuzLogin => {}
+      // Consumed by infra::apple_music::dispatch; only a build without the
+      // Apple Music router gets here.
+      IoEvent::AppleMusicHandoff { .. } => {
+        self
+          .app
+          .lock()
+          .await
+          .set_status_message("Apple Music requires macOS and the apple-music feature", 5);
+      }
       // Radio browse/search events are handled by infra::radio::dispatch before
       // reaching the network; they only arrive here when the feature is off.
       IoEvent::GetRadioStations | IoEvent::GetRadioSearchResults(_) => {}
