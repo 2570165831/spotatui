@@ -351,6 +351,10 @@ pub(crate) struct PlayingList {
   /// Indexes played before `index`, most recent last, so previous retraces a
   /// shuffled next instead of taking the row above.
   pub history: Vec<usize>,
+  /// The shuffled tracks still to play in this round, next one last. Filled
+  /// when empty with every track but the current one, so no track repeats
+  /// before the whole list played. Only used while Music's shuffle is on.
+  pub upcoming: Vec<usize>,
 }
 
 #[cfg(test)]

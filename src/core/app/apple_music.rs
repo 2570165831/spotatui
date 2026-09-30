@@ -458,6 +458,7 @@ impl App {
           index,
           stepped_at: Instant::now(),
           history: Vec::new(),
+          upcoming: Vec::new(),
         });
         self.start_playback_track_in_context(context, uri);
       }
@@ -491,9 +492,14 @@ impl App {
     let len = list.uris.len();
     let next = match (forward, shuffle) {
       (true, true) if len > 1 => {
-        // Any other track of the list, uniformly.
-        let pick = rand::random_range(0..len - 1);
-        Some(if pick >= list.index { pick + 1 } else { pick })
+        // A real shuffle: deal the rest of the list in random order and only
+        // reshuffle once every track played, so nothing repeats in a round.
+        if list.upcoming.is_empty() {
+          use rand::seq::SliceRandom;
+          list.upcoming = (0..len).filter(|i| *i != list.index).collect();
+          list.upcoming.shuffle(&mut rand::rng());
+        }
+        list.upcoming.pop()
       }
       (true, _) => (list.index + 1 < len).then_some(list.index + 1),
       // Retrace what was played first, then fall back to the row above.
@@ -508,9 +514,18 @@ impl App {
     };
     if forward {
       list.history.push(list.index);
-    } else if list.history.last() == Some(&next) {
-      list.history.pop();
+    } else {
+      if list.history.last() == Some(&next) {
+        list.history.pop();
+      }
+      // The track being left comes back on the next forward step, so
+      // previous then next returns to it and the round still plays it.
+      if shuffle {
+        list.upcoming.retain(|i| *i != list.index);
+        list.upcoming.push(list.index);
+      }
     }
+    list.upcoming.retain(|i| *i != next);
     list.index = next;
     list.stepped_at = Instant::now();
     let (context, uri) = (list.context.clone(), list.uris[next].clone());
@@ -537,6 +552,7 @@ impl App {
       if let Some(index) = list.uris.iter().position(|u| *u == uri) {
         if index != list.index {
           list.history.push(list.index);
+          list.upcoming.retain(|i| *i != index);
           list.index = index;
         }
       }
@@ -669,6 +685,7 @@ mod tests {
       index: 0,
       stepped_at: Instant::now(),
       history: Vec::new(),
+      upcoming: Vec::new(),
     });
     let started = |rx: &std::sync::mpsc::Receiver<IoEvent>| match rx.try_recv() {
       Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
@@ -771,6 +788,7 @@ mod tests {
         index: 0,
         stepped_at: Instant::now(),
         history: Vec::new(),
+        upcoming: Vec::new(),
       });
       app.accept_apple_music_snapshot(generation, at(true, position, true));
       (app, rx, generation)
@@ -899,6 +917,57 @@ mod tests {
   }
 
   #[test]
+  fn apple_music_shuffle_plays_every_track_once_before_any_repeats() {
+    use std::collections::HashSet;
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      crate::infra::apple_music::parse_snapshot(
+        r#"{"running":true,"playing":true,"track":null,"position":0,"volume":50,"shuffle":true}"#,
+      )
+      .unwrap(),
+    );
+    let uris: Vec<String> = (0..6)
+      .map(|i| format!("applemusic:{:016X}", i + 1))
+      .collect();
+    app.apple_music.playing_list = Some(crate::infra::apple_music::PlayingList {
+      context: "applemusic:playlist:0123456789ABCDEF".into(),
+      uris: uris.clone(),
+      index: 2,
+      stepped_at: Instant::now(),
+      history: Vec::new(),
+      upcoming: Vec::new(),
+    });
+    let mut next = |app: &mut App| {
+      app.next_track();
+      match rx.try_recv() {
+        Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
+        _other => panic!("expected a start inside the playlist"),
+      }
+    };
+
+    // One round: the five other tracks, each exactly once.
+    let round: Vec<String> = (0..5).map(|_| next(&mut app)).collect();
+    let distinct: HashSet<&String> = round.iter().collect();
+    assert_eq!(distinct.len(), 5);
+    assert!(!round.contains(&uris[2]));
+    // The next round starts on another track than the one just played, and
+    // again covers the other five without a repeat.
+    let second: Vec<String> = (0..5).map(|_| next(&mut app)).collect();
+    assert_ne!(second[0], round[4]);
+    assert_eq!(second.iter().collect::<HashSet<_>>().len(), 5);
+    assert!(!second.contains(&round[4]));
+
+    // Previous then next comes back to the track that was left.
+    let left = second[4].clone();
+    app.previous_track();
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::StartPlayback(..))));
+    assert_eq!(next(&mut app), left);
+  }
+
+  #[test]
   fn apple_music_previous_retraces_a_shuffled_next() {
     let (tx, rx) = channel();
     let mut app = App::new(tx, UserConfig::new(), None);
@@ -917,6 +986,7 @@ mod tests {
       index: 3,
       stepped_at: Instant::now(),
       history: Vec::new(),
+      upcoming: Vec::new(),
     });
     let started = |rx: &std::sync::mpsc::Receiver<IoEvent>| match rx.try_recv() {
       Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
