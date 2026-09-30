@@ -1071,7 +1071,7 @@ mod tests {
       history: Vec::new(),
       upcoming: Vec::new(),
     });
-    let mut next = |app: &mut App| {
+    let next = |app: &mut App| {
       app.next_track();
       match rx.try_recv() {
         Ok(IoEvent::StartPlayback(Some(_), Some(uris), Some(0))) => uris[0].clone(),
