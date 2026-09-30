@@ -17,6 +17,8 @@ pub(crate) trait Client: Send + Sync + 'static {
 enum Work {
   Transport {
     generation: u64,
+    /// `RemoteState::intent_revision` when the command was queued.
+    revision: u64,
     command: Command,
   },
   Handoff {
@@ -162,6 +164,7 @@ impl Router {
             app.note_apple_music_command_queued();
             permit.send(Work::Transport {
               generation,
+              revision: app.apple_music_state().intent_revision,
               command,
             });
           }
@@ -203,6 +206,7 @@ impl Router {
         };
         Work::Transport {
           generation: app.apple_music_state().generation,
+          revision: app.apple_music_state().intent_revision,
           command,
         }
       }
@@ -255,6 +259,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
     match work {
       Some(Work::Transport {
         generation,
+        revision,
         command,
       }) => {
         if !owns_generation(&app, generation).await {
@@ -272,7 +277,7 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
             let refused = snapshot.started == Some(false);
             app.accept_apple_music_snapshot(generation, snapshot);
             if refused {
-              app.note_apple_music_did_not_start(generation);
+              app.note_apple_music_did_not_start(generation, revision);
             }
             poll_failed = false;
           }

@@ -53,6 +53,7 @@ impl App {
     }
     let playing = self.apple_music_is_playing();
     self.apple_music.desired_playing = !playing;
+    self.apple_music.intent_revision = self.apple_music.intent_revision.wrapping_add(1);
     if let Some(snapshot) = &mut self.apple_music.snapshot {
       snapshot.playing = !playing;
     }
@@ -127,13 +128,17 @@ impl App {
     not(all(feature = "apple-music", target_os = "macos")),
     allow(dead_code)
   )]
-  pub(crate) fn note_apple_music_did_not_start(&mut self, generation: u64) {
+  pub(crate) fn note_apple_music_did_not_start(&mut self, generation: u64, revision: u64) {
     if self.apple_music.generation != generation {
       return;
     }
-    self.apple_music.desired_playing = false;
-    if let Some(snapshot) = self.apple_music.snapshot.as_mut() {
-      snapshot.playing = false;
+    // A pause or resume asked for while this start waited is newer than it:
+    // keep that intent, the commands queued behind this one carry it out.
+    if self.apple_music.intent_revision == revision {
+      self.apple_music.desired_playing = false;
+      if let Some(snapshot) = self.apple_music.snapshot.as_mut() {
+        snapshot.playing = false;
+      }
     }
     self.set_error_status_message(
       "Apple Music: Music did not start playing. Check the Music window for a dialog or an unavailable track",
@@ -169,6 +174,7 @@ impl App {
     // resume the player we are handing off from.
     self.apple_music.claimed = true;
     self.apple_music.desired_playing = true;
+    self.apple_music.intent_revision = self.apple_music.intent_revision.wrapping_add(1);
     #[cfg(all(feature = "macos-media", target_os = "macos"))]
     if let Some(manager) = &self.macos_media_manager {
       manager.set_remote_owned(true);
@@ -1008,8 +1014,9 @@ mod tests {
     )
     .unwrap();
     assert_eq!(snapshot.started, Some(false));
+    let revision = app.apple_music_state().intent_revision;
     app.accept_apple_music_snapshot(generation, snapshot);
-    app.note_apple_music_did_not_start(generation);
+    app.note_apple_music_did_not_start(generation, revision);
     assert!(!app.apple_music_is_playing());
     assert!(app.status_message_is_error());
     assert!(app
@@ -1019,8 +1026,43 @@ mod tests {
     let mut app = App::default();
     let old = app.claim_apple_music();
     app.claim_apple_music();
-    app.note_apple_music_did_not_start(old);
+    let revision = app.apple_music_state().intent_revision;
+    app.note_apple_music_did_not_start(old, revision);
     assert!(app.status_message().is_none());
+  }
+
+  #[test]
+  fn apple_music_a_failed_resume_keeps_a_newer_pause_and_resume() {
+    use crate::infra::apple_music::parse_snapshot;
+    let mut app = App::default();
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(r#"{"running":true,"playing":false,"track":null,"position":0,"volume":50}"#)
+        .unwrap(),
+    );
+    // Resume is queued and runs; meanwhile the user pauses and resumes again.
+    app.toggle_apple_music();
+    let resume_revision = app.apple_music_state().intent_revision;
+    app.note_apple_music_command_queued();
+    app.toggle_apple_music();
+    app.note_apple_music_command_queued();
+    app.toggle_apple_music();
+    app.note_apple_music_command_queued();
+    assert!(app.apple_music_is_playing());
+    // The first resume comes back: Music did not start.
+    app.finish_apple_music_command();
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(
+        r#"{"running":true,"playing":false,"track":null,"position":0,"volume":50,"started":false}"#,
+      )
+      .unwrap(),
+    );
+    app.note_apple_music_did_not_start(generation, resume_revision);
+    // The newer resume still stands, so Space sends Pause next.
+    assert!(app.apple_music_is_playing());
+    assert!(app.status_message_is_error());
   }
 
   #[test]

@@ -10,6 +10,8 @@ function run(argv) {
     // Music cannot play a track its cloud status rules out, nor a file track
     // whose file is gone: it answers with a dialog that blocks every later
     // start until someone dismisses it. Such rows are shown but not played.
+    // For a file track the file decides: one removed from the cloud library
+    // still has its local copy.
     const UNPLAYABLE = ['no longer available', 'error', 'removed'];
     // The ids of a list's unplayable tracks, in a handful of bulk reads.
     function unplayableIds(list) {
@@ -18,7 +20,10 @@ function run(argv) {
             const ids = list.tracks.persistentID(), cloud = list.tracks.cloudStatus();
             for (let i = 0; i < ids.length; ++i) if (UNPLAYABLE.indexOf(cloud[i]) >= 0) bad[ids[i]] = true;
             const fileIds = list.fileTracks.persistentID(), locations = list.fileTracks.location();
-            for (let i = 0; i < fileIds.length; ++i) if (!locations[i]) bad[fileIds[i]] = true;
+            for (let i = 0; i < fileIds.length; ++i) {
+                if (locations[i]) delete bad[fileIds[i]];
+                else bad[fileIds[i]] = true;
+            }
         } catch (e) {}
         return bad;
     }

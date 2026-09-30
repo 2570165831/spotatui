@@ -327,6 +327,9 @@ pub(crate) struct RemoteState {
   pub claimed: bool,
   pub switching: bool,
   pub desired_playing: bool,
+  /// Bumped whenever the user asks for play or pause. A start that Music
+  /// ignored only clears `desired_playing` when no newer request came since.
+  pub intent_revision: u64,
   pub generation: u64,
   pub snapshot: Option<Snapshot>,
   pub observed_at: Option<Instant>,
