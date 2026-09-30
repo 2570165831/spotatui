@@ -12,33 +12,42 @@ const SECTIONS = [
   "Radio stations",
 ];
 
-/** The library sections, Library health, and the playlists of the active source. Liked Songs and Library health are live. */
+/** The library sections, Library health, and the playlists of the active source. Liked Songs, Library health and the playlists are live. */
 export function LibrarySidebar({
   source,
   playlists,
+  openUri,
   unmatched,
   onOpenLiked,
+  onOpenRow,
   onOpenHealth,
 }: {
   source: Source | null;
   playlists: SidebarRow[];
+  openUri: string | null;
   unmatched: number;
   onOpenLiked: () => void;
+  onOpenRow: (row: SidebarRow) => void;
   onOpenHealth: () => void;
 }) {
   return (
     <aside className="sections" aria-label="Library">
       <nav>
-        {SECTIONS.map((section, index) => (
-          <a
-            key={section}
-            aria-current={index === 0 ? "page" : undefined}
-            onClick={index === 0 ? onOpenLiked : undefined}
-          >
-            {section}
-          </a>
-        ))}
-        <button type="button" className="health-row" onClick={onOpenHealth}>
+        {SECTIONS.map((section, index) =>
+          index === 0 ? (
+            <button
+              key={section}
+              type="button"
+              aria-current={openUri === null ? "page" : undefined}
+              onClick={onOpenLiked}
+            >
+              {section}
+            </button>
+          ) : (
+            <a key={section}>{section}</a>
+          ),
+        )}
+        <button type="button" onClick={onOpenHealth}>
           Library health
           {unmatched > 0 && (
             <span className="count warn">{unmatched} unmatched</span>
@@ -50,11 +59,17 @@ export function LibrarySidebar({
           PLAYLISTS{source && ` · ${source.toUpperCase()}`}
         </span>
         {playlists.map((row) => (
-          <a key={row.uri} title={row.name}>
+          <button
+            key={row.uri}
+            type="button"
+            title={row.name}
+            aria-current={row.uri === openUri ? "page" : undefined}
+            onClick={() => onOpenRow(row)}
+          >
             {source && <Swatch source={source} />}
             <span className="name">{row.name}</span>
             {row.count !== null && <span className="count">{row.count}</span>}
-          </a>
+          </button>
         ))}
       </div>
     </aside>
