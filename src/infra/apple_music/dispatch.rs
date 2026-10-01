@@ -184,6 +184,14 @@ impl Router {
           app.set_status_message("Waiting for Music to pause before switching source", 4);
           return None;
         }
+        // Music was just found quit: a key now would launch it again and
+        // keep the claim. Starting a Music track still works.
+        if app.apple_music_state().quit_seen.is_some()
+          && crate::infra::network::Network::event_is_transport(&other)
+        {
+          app.set_status_message("Music is not running; choose a Music track to start it", 4);
+          return None;
+        }
         let command = match other {
           IoEvent::StartPlayback(None, None, None) => Command::Resume,
           IoEvent::PausePlayback => Command::Pause,
@@ -706,6 +714,41 @@ mod tests {
     .await
     .unwrap();
     assert!(!app.lock().await.apple_music_owns_playback());
+  }
+
+  #[tokio::test]
+  async fn apple_music_keys_do_not_relaunch_a_music_just_found_quit() {
+    let (tx, _rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    {
+      let mut app = app.lock().await;
+      let generation = app.claim_apple_music();
+      app.accept_apple_music_snapshot(
+        generation,
+        parse_snapshot(r#"{"running":false,"playing":false,"track":null,"position":0,"volume":0}"#)
+          .unwrap(),
+      );
+      assert!(app.apple_music_owns_playback());
+    }
+    let calls = Arc::new(Mutex::new(vec![]));
+    let router = Router::with_client(
+      &app,
+      FakeClient {
+        calls: Arc::clone(&calls),
+        fail_pause: false,
+      },
+    );
+    assert!(router
+      .route_apple_music_event(IoEvent::ChangeVolume(40))
+      .await
+      .is_none());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!calls.lock().await.contains(&Command::Volume(40)));
+    assert!(app
+      .lock()
+      .await
+      .status_message()
+      .is_some_and(|m| m.contains("not running")));
   }
 
   #[tokio::test]

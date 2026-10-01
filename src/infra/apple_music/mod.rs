@@ -342,6 +342,10 @@ pub(crate) struct RemoteState {
   /// When a read first found Music not running. The claim is let go only
   /// once later reads still find it gone, see `accept_apple_music_snapshot`.
   pub quit_seen: Option<Instant>,
+  /// Wall-clock time of the last accepted read. Unlike `observed_at` it
+  /// counts time asleep, so a track that ended while the Mac slept or while
+  /// reads failed is still recognised as ended.
+  pub read_at: Option<std::time::SystemTime>,
   pub browse_generation: u64,
   /// The sidebar's playlists load in their own slot, see `browse_apple_music`.
   pub playlists_generation: u64,

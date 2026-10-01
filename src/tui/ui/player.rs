@@ -1867,7 +1867,9 @@ mod tests {
 
   #[test]
   fn apple_music_playbar_offers_previous_and_next_but_not_the_modes() {
-    let controls = apple_music_controls(playbar_supported_controls_for(false, true, false));
+    let mut app = App::default();
+    app.claim_apple_music();
+    let controls = playbar_supported_controls(&app);
     for expected in [
       PlaybarControl::Prev,
       PlaybarControl::PlayPause,

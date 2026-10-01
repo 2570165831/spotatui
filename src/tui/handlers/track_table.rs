@@ -244,6 +244,11 @@ fn play_random_song(app: &mut App) {
           .track_table
           .tracks
           .iter()
+          // Music: never draw a track it cannot play (it would only be refused).
+          .filter(|track| {
+            app.track_table.context != Some(TrackTableContext::AppleMusicPlaylist)
+              || track.is_playable
+          })
           .filter_map(|track| track.uri.clone())
           .collect();
         if !playable_ids.is_empty() {

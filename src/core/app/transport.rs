@@ -223,6 +223,9 @@ impl App {
 
   pub fn previous_track(&mut self) {
     if self.apple_music_owns_playback() {
+      if self.apple_music_refuses_while_switching() {
+        return;
+      }
       // Past the first 3s Music's own previous restarts the track, which
       // works; earlier, step back in the list the track was started from.
       let restart = self.apple_music_position_ms() > 3_000 && !self.apple_music_just_stepped();
@@ -304,6 +307,9 @@ impl App {
 
   pub fn force_previous_track(&mut self) {
     if self.apple_music_owns_playback() {
+      if self.apple_music_refuses_while_switching() {
+        return;
+      }
       if !self.step_apple_music(false) {
         self.dispatch(IoEvent::ForcePreviousTrack);
       }
@@ -360,6 +366,9 @@ impl App {
 
   pub fn next_track(&mut self) {
     if self.apple_music_owns_playback() {
+      if self.apple_music_refuses_while_switching() {
+        return;
+      }
       // A track started by itself has no queue in Music, so its own next
       // does nothing: start the next track of the list spotatui kept.
       if !self.step_apple_music(true) {
