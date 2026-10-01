@@ -209,6 +209,7 @@ impl App {
     self.apple_music.generation = self.apple_music.generation.wrapping_add(1);
     self.apple_music.snapshot = None;
     self.apple_music.observed_at = None;
+    self.apple_music.quit_seen = None;
     self.cancel_volume_change();
     self.pending_api_seek = None;
     self.pending_source_seek = None;
@@ -319,14 +320,24 @@ impl App {
           .apple_music
           .commanded_at
           .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(1_500));
-      // Music quit (or crashed) under spotatui. Read outside a command, that
-      // is final: let go of the claim, so the keys stop relaunching Music and
-      // the other sources play again. A command still running may be the one
-      // launching it, so a read near one does not count.
-      if !snapshot.running && !just_commanded {
-        self.release_apple_music();
+      // Music quit (or crashed) under spotatui: let go of the claim, so the
+      // keys stop relaunching Music and the other sources play again. Only
+      // once reads 2s apart, outside any command, still find it gone: a start
+      // can be launching it. Until then nothing of this read is kept: it is
+      // neither the end of a track nor a state to show.
+      if !snapshot.running {
+        if !just_commanded {
+          match self.apple_music.quit_seen {
+            Some(at) if at.elapsed() >= std::time::Duration::from_secs(2) => {
+              self.release_apple_music()
+            }
+            Some(_) => {}
+            None => self.apple_music.quit_seen = Some(Instant::now()),
+          }
+        }
         return;
       }
+      self.apple_music.quit_seen = None;
       // A track started by itself has no queue behind it in Music: at its end
       // Music stops with no current track. That is the moment to start the
       // next track of the list ourselves. A pause keeps the current track, and
@@ -398,6 +409,7 @@ impl App {
     self.apple_music.snapshot = None;
     self.apple_music.observed_at = None;
     self.apple_music.playing_list = None;
+    self.apple_music.quit_seen = None;
     self.pending_source_seek = None;
     self.set_status_message("Apple Music: Music quit", 5);
     self.note_display_changes();
@@ -414,7 +426,8 @@ impl App {
     // Retain the claim on failure: a timed-out Apple Event may have executed.
     // Only an acknowledged pause can release it to a different player.
     self.apple_music.switching = false;
-    self.apple_music.snapshot = None;
+    // The last snapshot stays until the next read replaces it: cleared, a
+    // track ending meanwhile could no longer be recognised.
     // Keep the last intent: a failed Play may already be audible, so the next
     // toggle must request Pause rather than accidentally issuing another Play.
     self.report_apple_music_error(&error);
@@ -564,6 +577,10 @@ impl App {
   /// `occurrence`-th row holding `uri` (from 0): a playlist can hold a song
   /// twice, and next must go on from the row that was chosen.
   pub(crate) fn play_apple_music_track_at(&mut self, uri: String, occurrence: usize) {
+    if self.apple_music.claimed && self.apple_music.switching {
+      self.set_status_message("Waiting for Music to pause before switching source", 4);
+      return;
+    }
     use crate::infra::apple_music::{Browse, PlayingList, LIBRARY_URI};
     // A track Music cannot play is refused here: sent on, Music would put a
     // dialog up in its own window that blocks every later start.
@@ -651,6 +668,11 @@ impl App {
   }
 
   pub(crate) fn step_apple_music(&mut self, forward: bool) -> bool {
+    // Handing off: a start now would cancel the switch to the other source.
+    // Music's own command, the fallback, is refused with a message instead.
+    if self.apple_music.switching {
+      return false;
+    }
     let shuffle = self.apple_music.shuffle;
     let Some(list) = self.apple_music.playing_list.as_mut() else {
       return false;
@@ -1022,6 +1044,32 @@ mod tests {
     assert!(rx.try_recv().is_err());
     let kept = app.apple_music.snapshot.as_ref().unwrap();
     assert!(kept.track.is_some() && kept.playing);
+    // Once the start is old, the next read finds that end.
+    if let Some(list) = app.apple_music.playing_list.as_mut() {
+      list.stepped_at = Instant::now() - std::time::Duration::from_secs(10);
+    }
+    app.accept_apple_music_snapshot(generation, at(false, 0.0, false));
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::StartPlayback(..))));
+
+    // A command that failed in the last seconds keeps the track too.
+    let (mut app, rx, generation) = setup(98.0);
+    app.finish_apple_music_command();
+    app.apple_music_failed(generation, anyhow!("Music helper failed"));
+    app.accept_apple_music_snapshot(generation, at(false, 0.0, false));
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::StartPlayback(..))));
+
+    // Music quitting near the end of a track, with a command in flight, is
+    // not an end: nothing starts, and nothing of that read is shown.
+    let (mut app, rx, generation) = setup(98.0);
+    app.note_apple_music_command_queued();
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(r#"{"running":false,"playing":false,"track":null,"position":0,"volume":0}"#)
+        .unwrap(),
+    );
+    assert!(rx.try_recv().is_err());
+    let kept = app.apple_music.snapshot.as_ref().unwrap();
+    assert!(kept.running && kept.track.is_some());
   }
 
   #[test]
@@ -1040,6 +1088,11 @@ mod tests {
     assert!(app.apple_music_owns_playback());
     app.finish_apple_music_command();
     app.apple_music.commanded_at = None;
+    // One read is not enough: Music may still be starting.
+    app.accept_apple_music_snapshot(generation, quit());
+    assert!(app.apple_music_owns_playback());
+    // Still gone 2s later: Music quit.
+    app.apple_music.quit_seen = Some(Instant::now() - std::time::Duration::from_secs(3));
     app.accept_apple_music_snapshot(generation, quit());
     assert!(!app.apple_music_owns_playback());
     assert!(!app.apple_music_is_playing());
@@ -1103,15 +1156,33 @@ mod tests {
       )
       .unwrap(),
     );
+    app.apple_music.playing_list = Some(crate::infra::apple_music::PlayingList {
+      context: "applemusic:playlist:0123456789ABCDEF".into(),
+      uris: vec![
+        "applemusic:1111111111111111".into(),
+        "applemusic:2222222222222222".into(),
+      ],
+      index: 0,
+      stepped_at: Instant::now(),
+      history: Vec::new(),
+      upcoming: Vec::new(),
+      browse_generation: None,
+      resync: false,
+    });
     app.seek_to(20_000);
     app.seek_to(30_000);
     assert!(app.pending_source_seek.is_some());
     let handoff = app.begin_apple_music_handoff();
     // A drag during the handoff is not queued either.
     app.seek_to(40_000);
+    assert_eq!(app.pending_source_seek, Some(30_000));
+    // Nor does next start a Music track, which would cancel the switch: it
+    // goes to the router, which refuses it with a message.
+    app.next_track();
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::Seek(20_000))));
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::NextTrack)));
     assert!(app.finish_apple_music_handoff(handoff));
     assert_eq!(app.pending_source_seek, None);
-    assert!(matches!(rx.try_recv(), Ok(IoEvent::Seek(20_000))));
     assert!(rx.try_recv().is_err());
   }
 
@@ -1191,8 +1262,11 @@ mod tests {
     });
     app.next_track();
     assert_eq!(app.apple_music.playing_list.as_ref().unwrap().index, 1);
-    // The router found Music busy and dropped it: Music still plays the first.
-    app.resync_apple_music_list();
+    // Music refused it (or the router found Music busy and dropped it):
+    // Music still plays the first.
+    let revision = app.apple_music.intent_revision;
+    app.note_apple_music_did_not_start(generation, revision);
+    assert!(app.apple_music.playing_list.as_ref().unwrap().resync);
     app.accept_apple_music_snapshot(
       generation,
       crate::infra::apple_music::parse_snapshot(

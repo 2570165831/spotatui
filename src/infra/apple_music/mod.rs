@@ -339,6 +339,9 @@ pub(crate) struct RemoteState {
   /// When the last transport command finished: Music can still report the
   /// old play state for a moment after a pause (about 0.35s measured).
   pub commanded_at: Option<Instant>,
+  /// When a read first found Music not running. The claim is let go only
+  /// once later reads still find it gone, see `accept_apple_music_snapshot`.
+  pub quit_seen: Option<Instant>,
   pub browse_generation: u64,
   /// The sidebar's playlists load in their own slot, see `browse_apple_music`.
   pub playlists_generation: u64,

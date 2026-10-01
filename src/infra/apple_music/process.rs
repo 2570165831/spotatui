@@ -96,7 +96,7 @@ mod tests {
     unrelated.kill().await.unwrap();
     unrelated.wait().await.unwrap();
     assert!(unrelated_alive);
-    assert!(error.to_string().contains("timed out"));
+    assert!(error.to_string().contains("timed out (sleep)"));
     assert!(start.elapsed() < Duration::from_secs(3));
     let mut echo = Command::new("echo");
     echo.arg("still alive");
