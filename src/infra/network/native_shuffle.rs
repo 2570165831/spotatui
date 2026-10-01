@@ -574,7 +574,8 @@ impl Network {
 
   #[cfg(feature = "streaming")]
   async fn fallback_spirc_shuffle(&self, on: bool) {
-    if let Some(player) = { self.app.lock().await.streaming_player.clone() } {
+    let player = self.app.lock().await.streaming_player.clone();
+    if let Some(player) = player {
       let _ = player.set_shuffle(on);
     }
   }
