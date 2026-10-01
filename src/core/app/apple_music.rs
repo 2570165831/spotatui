@@ -132,6 +132,9 @@ impl App {
 
   /// Send the waiting seek once the throttle allows; the tick calls this too.
   pub(crate) fn flush_apple_music_seek(&mut self) {
+    if self.apple_music.switching {
+      return;
+    }
     let Some(position_ms) = self.pending_source_seek else {
       return;
     };
@@ -247,6 +250,9 @@ impl App {
   pub(crate) fn begin_apple_music_handoff(&mut self) -> u64 {
     self.apple_music.generation = self.apple_music.generation.wrapping_add(1);
     self.apple_music.switching = true;
+    // A Music seek still held back by the throttle would be queued behind
+    // the handoff and reach the next source.
+    self.pending_source_seek = None;
     self.apple_music.generation
   }
 
@@ -355,7 +361,19 @@ impl App {
               self.apple_music_position_ms().saturating_add(5_000) >= track.duration_ms as u32
             })
         });
-      if just_commanded && !ended {
+      // Stopped with no track inside that start guard: a track shorter than
+      // the guard, or a seek to the end of the new one. Held like a read
+      // near a command, the track is kept, so a read after the guard still
+      // sees the end.
+      let held_end = !snapshot.playing
+        && snapshot.track.is_none()
+        && self.apple_music_just_stepped()
+        && self
+          .apple_music
+          .snapshot
+          .as_ref()
+          .is_some_and(|previous| previous.playing && previous.track.is_some());
+      if (just_commanded || held_end) && !ended {
         // A read taken before a queued command ran, or right after one, can
         // still show the old state: keep the state spotatui asked for. That is
         // the intent, not the last snapshot, which a first start has not got.
@@ -534,12 +552,20 @@ impl App {
       .as_mut()
       .filter(|list| list.browse_generation == browse_generation)
     {
+      let start = list.uris.len();
       list.uris.extend(
         tracks
           .iter()
           .filter(|t| t.is_playable)
           .filter_map(|t| t.uri.clone()),
       );
+      // A shuffle round already dealt takes the new tracks in too, so they
+      // play before anything repeats.
+      if !list.upcoming.is_empty() {
+        use rand::seq::SliceRandom;
+        list.upcoming.extend(start..list.uris.len());
+        list.upcoming.shuffle(&mut rand::rng());
+      }
     }
     self.apple_music.tracks.extend(tracks);
     let tracks = self.apple_music.tracks.clone();
@@ -745,7 +771,9 @@ impl App {
       if !list.resync && list.stepped_at.elapsed() < std::time::Duration::from_secs(4) {
         return;
       }
-      list.resync = false;
+      // After a dropped start `index` names a track that never played: it
+      // does not go into the history previous retraces.
+      let played = !std::mem::take(&mut list.resync);
       // Already there: a song in the list twice must not jump back to its
       // first row.
       if list.uris.get(list.index) == Some(&uri) {
@@ -753,7 +781,11 @@ impl App {
       }
       if let Some(index) = list.uris.iter().position(|u| *u == uri) {
         if index != list.index {
-          list.history.push(list.index);
+          if played {
+            list.history.push(list.index);
+          } else if list.history.last() == Some(&index) {
+            list.history.pop();
+          }
           list.upcoming.retain(|i| *i != index);
           list.index = index;
         }
@@ -1044,6 +1076,12 @@ mod tests {
     assert!(rx.try_recv().is_err());
     let kept = app.apple_music.snapshot.as_ref().unwrap();
     assert!(kept.track.is_some() && kept.playing);
+    // Still inside the start guard but past the command window (a track
+    // shorter than the guard): the track is still kept.
+    app.apple_music.commanded_at = None;
+    app.accept_apple_music_snapshot(generation, at(false, 0.0, false));
+    assert!(rx.try_recv().is_err());
+    assert!(app.apple_music.snapshot.as_ref().unwrap().track.is_some());
     // Once the start is old, the next read finds that end.
     if let Some(list) = app.apple_music.playing_list.as_mut() {
       list.stepped_at = Instant::now() - std::time::Duration::from_secs(10);
@@ -1173,9 +1211,13 @@ mod tests {
     app.seek_to(30_000);
     assert!(app.pending_source_seek.is_some());
     let handoff = app.begin_apple_music_handoff();
+    // The held-back seek is dropped as the handoff starts: the tick cannot
+    // queue it behind the handoff.
+    assert_eq!(app.pending_source_seek, None);
+    app.flush_pending_source_seek();
     // A drag during the handoff is not queued either.
     app.seek_to(40_000);
-    assert_eq!(app.pending_source_seek, Some(30_000));
+    assert_eq!(app.pending_source_seek, None);
     // Nor does next start a Music track, which would cancel the switch: it
     // goes to the router, which refuses it with a message.
     app.next_track();
@@ -1235,10 +1277,24 @@ mod tests {
     app.play_apple_music_track(format!("applemusic:{}", "A".repeat(16)));
     app.append_apple_music_tracks(vec![track("B"), track("C")], true);
     assert_eq!(app.apple_music.playing_list.as_ref().unwrap().uris.len(), 3);
+    // A shuffle round already dealt takes later pages in.
+    if let Some(list) = app.apple_music.playing_list.as_mut() {
+      list.upcoming = vec![1, 2];
+    }
+    app.append_apple_music_tracks(vec![track("E")], true);
+    let mut upcoming = app
+      .apple_music
+      .playing_list
+      .as_ref()
+      .unwrap()
+      .upcoming
+      .clone();
+    upcoming.sort();
+    assert_eq!(upcoming, vec![1, 2, 3]);
     // A different list on screen no longer feeds it.
     app.cancel_apple_music_browse();
     app.append_apple_music_tracks(vec![track("D")], true);
-    assert_eq!(app.apple_music.playing_list.as_ref().unwrap().uris.len(), 3);
+    assert_eq!(app.apple_music.playing_list.as_ref().unwrap().uris.len(), 4);
   }
 
   #[test]
@@ -1262,6 +1318,10 @@ mod tests {
     });
     app.next_track();
     assert_eq!(app.apple_music.playing_list.as_ref().unwrap().index, 1);
+    assert_eq!(
+      app.apple_music.playing_list.as_ref().unwrap().history,
+      vec![0]
+    );
     // Music refused it (or the router found Music busy and dropped it):
     // Music still plays the first.
     let revision = app.apple_music.intent_revision;
@@ -1274,7 +1334,10 @@ mod tests {
       )
       .unwrap(),
     );
-    assert_eq!(app.apple_music.playing_list.as_ref().unwrap().index, 0);
+    let list = app.apple_music.playing_list.as_ref().unwrap();
+    assert_eq!(list.index, 0);
+    // The track that never played is not in what previous retraces.
+    assert!(list.history.is_empty());
   }
 
   #[cfg(all(feature = "apple-music", target_os = "macos"))]
