@@ -627,6 +627,35 @@ mod tests {
   }
 
   #[test]
+  fn random_play_in_a_music_playlist_never_draws_a_track_music_cannot_play() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    let track = |id: &str, playable: bool| -> TrackInfo {
+      serde_json::from_value(serde_json::json!({
+        "uri": format!("applemusic:{}", id.repeat(16)),
+        "name": id,
+        "artists": [],
+        "album": "",
+        "duration_ms": 1000,
+        "is_playable": playable,
+      }))
+      .unwrap()
+    };
+    // Seeded through App methods: the handler write counter scans this file.
+    app.set_track_table(
+      vec![track("X", false), track("A", true), track("Y", false)],
+      TrackTableContext::AppleMusicPlaylist,
+    );
+    // A drawn unplayable track would be refused with an error and start
+    // nothing; the playable one starts every time.
+    for _ in 0..20 {
+      handler(Key::Char('S'), &mut app);
+      assert!(rx.try_recv().is_ok(), "each press starts a track");
+      assert!(!app.status_message_is_error(), "no track was refused");
+    }
+  }
+
+  #[test]
   fn random_play_on_an_empty_playlist_does_nothing() {
     let (tx, rx) = channel();
     let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));

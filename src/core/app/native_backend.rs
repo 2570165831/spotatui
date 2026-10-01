@@ -241,6 +241,31 @@ impl App {
     }
   }
 
+  /// The configured Spotify startup Play/Pause, sent once deferred native
+  /// init is over (before that, the device transfer had not completed and
+  /// these 404'd onto the Error screen). A start the user parked during init
+  /// is newer, and so is Music started meanwhile: routed now, the pause or
+  /// play would reach Music.
+  #[cfg(feature = "streaming")]
+  pub(crate) fn run_spotify_startup_behavior(
+    &mut self,
+    behavior: Option<crate::core::user_config::StartupBehavior>,
+    shuffle: bool,
+  ) {
+    use crate::core::user_config::StartupBehavior;
+    if self.pending_start_playback.is_some() || self.apple_music_owns_playback() {
+      return;
+    }
+    match behavior {
+      Some(StartupBehavior::Play) => {
+        self.dispatch(IoEvent::Shuffle(shuffle));
+        self.dispatch(IoEvent::StartPlayback(None, None, None));
+      }
+      Some(StartupBehavior::Pause) => self.dispatch(IoEvent::PausePlayback),
+      Some(StartupBehavior::Continue) | None => {}
+    }
+  }
+
   /// Replay a parked StartPlayback through the normal dispatch path. No-op
   /// when nothing is parked.
   #[cfg(feature = "streaming")]
@@ -329,6 +354,20 @@ impl App {
 #[cfg(all(test, feature = "streaming"))]
 mod tests {
   use super::*;
+
+  #[test]
+  fn spotify_startup_play_or_pause_never_reaches_music() {
+    use crate::core::user_config::StartupBehavior;
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app.run_spotify_startup_behavior(Some(StartupBehavior::Pause), false);
+    assert!(matches!(rx.try_recv(), Ok(IoEvent::PausePlayback)));
+    // Music started while Spotify was still starting up: nothing is sent.
+    app.claim_apple_music();
+    app.run_spotify_startup_behavior(Some(StartupBehavior::Pause), false);
+    app.run_spotify_startup_behavior(Some(StartupBehavior::Play), true);
+    assert!(rx.try_recv().is_err());
+  }
 
   #[cfg(feature = "streaming")]
   #[test]

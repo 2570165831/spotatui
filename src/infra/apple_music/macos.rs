@@ -29,21 +29,78 @@ impl super::dispatch::Client for MacClient {
       // Launch hidden, without bringing Music or an existing window forward.
       open.args(["-g", "-j", "-b", "com.apple.Music"]);
       process::run(open, TIMEOUT, "launch").await?;
-      // `open` can return before Music answers: give it up to 5s in all, or
-      // a cold start fails, and the status reads would take it for a quit.
-      let deadline = tokio::time::Instant::now() + LAUNCH_WAIT;
-      loop {
-        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if left.is_zero() {
-          anyhow::bail!("Music did not start");
-        }
-        let output = process::run(invoke(), left.min(TIMEOUT), label).await?;
-        if serde_json::from_str::<serde_json::Value>(&output)?["not_running"] != true {
-          return Ok(output);
-        }
-        tokio::time::sleep(Duration::from_millis(500).min(left)).await;
-      }
+      return answer_after_launch(LAUNCH_WAIT, Duration::from_millis(500), |left| {
+        process::run(invoke(), left.min(TIMEOUT), label)
+      })
+      .await;
     }
     Ok(output)
+  }
+}
+
+/// `open` can return before Music answers: ask again until it does, within
+/// `wait` in all, or a cold start fails, and the status reads would take it
+/// for a quit. `ask` gets the time left.
+async fn answer_after_launch<F, Fut>(wait: Duration, retry: Duration, mut ask: F) -> Result<String>
+where
+  F: FnMut(Duration) -> Fut,
+  Fut: std::future::Future<Output = Result<String>>,
+{
+  let deadline = tokio::time::Instant::now() + wait;
+  loop {
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if left.is_zero() {
+      anyhow::bail!("Music did not start");
+    }
+    let output = ask(left).await?;
+    if serde_json::from_str::<serde_json::Value>(&output)?["not_running"] != true {
+      return Ok(output);
+    }
+    tokio::time::sleep(retry.min(left)).await;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::sync::atomic::{AtomicUsize, Ordering};
+
+  #[tokio::test]
+  async fn a_launched_music_is_asked_again_until_it_answers() {
+    let asked = AtomicUsize::new(0);
+    let output = answer_after_launch(Duration::from_secs(2), Duration::from_millis(10), |_| {
+      let n = asked.fetch_add(1, Ordering::SeqCst);
+      async move {
+        Ok(
+          if n < 3 {
+            r#"{"not_running":true}"#
+          } else {
+            r#"{"running":true}"#
+          }
+          .to_string(),
+        )
+      }
+    })
+    .await
+    .unwrap();
+    assert_eq!(output, r#"{"running":true}"#);
+    assert_eq!(asked.load(Ordering::SeqCst), 4);
+  }
+
+  #[tokio::test]
+  async fn a_music_that_never_answers_fails_within_the_wait() {
+    let start = std::time::Instant::now();
+    let error = answer_after_launch(
+      Duration::from_millis(200),
+      Duration::from_millis(20),
+      |left| {
+        assert!(left <= Duration::from_millis(200));
+        async { Ok(r#"{"not_running":true}"#.to_string()) }
+      },
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("did not start"));
+    assert!(start.elapsed() < Duration::from_secs(1));
   }
 }
