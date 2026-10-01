@@ -1456,8 +1456,8 @@ fn route_apple_music_macos_event(event: &macos_media::MacMediaEvent, app: &mut A
   }
   match event {
     MacMediaEvent::PlayPause => app.toggle_playback(),
-    MacMediaEvent::Play => app.dispatch(IoEvent::StartPlayback(None, None, None)),
-    MacMediaEvent::Pause | MacMediaEvent::Stop => app.dispatch(IoEvent::PausePlayback),
+    MacMediaEvent::Play => app.set_apple_music_playing(true),
+    MacMediaEvent::Pause | MacMediaEvent::Stop => app.set_apple_music_playing(false),
     MacMediaEvent::Next => app.next_track(),
     MacMediaEvent::Previous => app.previous_track(),
   }

@@ -53,7 +53,7 @@ pub(super) async fn run(mut command: Command, deadline: Duration, label: &str) -
       let _ = child.wait().await;
       return match other {
         Err(_) => Err(anyhow::anyhow!(
-          "Music helper timed out; check macOS Automation permission and retry"
+          "Music helper timed out ({label}); Music may be busy, or macOS Automation permission may be missing"
         )),
         Ok(Err(error)) => Err(error.into()),
         Ok(Ok(_)) => unreachable!(),

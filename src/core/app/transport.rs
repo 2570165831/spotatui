@@ -453,8 +453,10 @@ impl App {
     }
     // One Music track at a time: there is no cross-source queue for Apple Music.
     if uris.iter().all(|uri| uri.starts_with("applemusic:")) {
-      if let Some(uri) = uris.get(offset.unwrap_or(0)) {
-        self.play_apple_music_track(uri.clone());
+      let offset = offset.unwrap_or(0);
+      if let Some(uri) = uris.get(offset) {
+        let occurrence = uris[..offset].iter().filter(|u| *u == uri).count();
+        self.play_apple_music_track_at(uri.clone(), occurrence);
       }
       return;
     }

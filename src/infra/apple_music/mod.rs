@@ -372,6 +372,12 @@ pub(crate) struct PlayingList {
   /// when empty with every track but the current one, so no track repeats
   /// before the whole list played. Only used while Music's shuffle is on.
   pub upcoming: Vec<usize>,
+  /// The browse the list was taken from while its later pages still load:
+  /// they are added to the list as they arrive.
+  pub browse_generation: Option<u64>,
+  /// A start was dropped or refused, so `index` may name a track Music is
+  /// not playing: follow the next snapshot at once.
+  pub resync: bool,
 }
 
 #[cfg(test)]

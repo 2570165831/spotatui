@@ -378,11 +378,25 @@ fn cover_playbar_artist_area(
 /// hit-testing accepted only Play/Pause — which left inert Shuffle/Repeat
 /// buttons sitting on the local playbar, inviting a click that did nothing.
 fn playbar_supported_controls(app: &App) -> Vec<PlaybarControl> {
-  playbar_supported_controls_for(
+  let controls = playbar_supported_controls_for(
     app.queue_owns_playback(),
     non_spotify_source_playback_active(app),
     app.active_queueable_decoded_source(),
-  )
+  );
+  if !app.apple_music_owns_playback() {
+    return controls;
+  }
+  apple_music_controls(controls)
+}
+
+/// Music keeps Prev/Next: `App::next_track` and `previous_track` step through
+/// the list a track was started from. Shuffle and repeat stay Music's own.
+fn apple_music_controls(controls: Vec<PlaybarControl>) -> Vec<PlaybarControl> {
+  PLAYBAR_CONTROLS
+    .iter()
+    .copied()
+    .filter(|c| controls.contains(c) || matches!(c, PlaybarControl::Prev | PlaybarControl::Next))
+    .collect()
 }
 
 /// The pure core of [`playbar_supported_controls`], taking the three facts it
@@ -1849,6 +1863,25 @@ mod tests {
     assert!(!local.contains(&PlaybarControl::Like));
     let radio = playbar_supported_controls_for(false, true, false);
     assert!(!radio.contains(&PlaybarControl::Shuffle));
+  }
+
+  #[test]
+  fn apple_music_playbar_offers_previous_and_next_but_not_the_modes() {
+    let controls = apple_music_controls(playbar_supported_controls_for(false, true, false));
+    for expected in [
+      PlaybarControl::Prev,
+      PlaybarControl::PlayPause,
+      PlaybarControl::Next,
+    ] {
+      assert!(controls.contains(&expected), "{expected:?} missing");
+    }
+    for absent in [
+      PlaybarControl::Shuffle,
+      PlaybarControl::Repeat,
+      PlaybarControl::Like,
+    ] {
+      assert!(!controls.contains(&absent), "{absent:?} offered");
+    }
   }
 
   #[test]

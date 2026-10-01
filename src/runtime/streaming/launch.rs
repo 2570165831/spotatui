@@ -233,7 +233,9 @@ pub(crate) fn deferred_streaming_startup(ctx: DeferredStreamingContext) {
     // and firing these earlier 404s with NO_ACTIVE_DEVICE straight onto the
     // Error screen. A request the user parked during init takes precedence
     // over the configured startup behavior — their intent is newer.
-    if app.pending_start_playback.is_none() {
+    // Nor over Music started meanwhile: the pause or play is meant for
+    // Spotify, and routed now it would reach Music.
+    if app.pending_start_playback.is_none() && !app.apple_music_owns_playback() {
       match spotify_startup_behavior {
         Some(StartupBehavior::Play) => {
           app.dispatch(IoEvent::Shuffle(initial_shuffle_enabled));

@@ -151,6 +151,7 @@ impl Router {
           Ok(permit) => permit,
           Err(_) => {
             app.set_error_status_message("Music is busy; retry the playback request", 4);
+            app.resync_apple_music_list();
             return None;
           }
         };
