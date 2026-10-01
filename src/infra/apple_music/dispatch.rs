@@ -242,40 +242,57 @@ async fn confirm_paused<C: Client>(client: &C, first: super::Snapshot) -> Result
 }
 
 /// After a failed status read, polling continues at a growing interval
-/// (2 s, 4 s, ... up to 30 s) instead of every second, and only the first
-/// failure of a run is reported. Stopping for good would freeze the playbar
-/// and the end-of-track continuation while Music kept playing.
+/// (2 s, 4 s, ... up to 30 s) instead of every second. Stopping for good would
+/// freeze the playbar and the end-of-track continuation while Music kept
+/// playing. A poll error is reported at most once a minute: an error status
+/// holds back every ordinary status message while it lasts, so a Music that
+/// fails and recovers in turn must not keep one up.
 #[derive(Default)]
 struct PollBackoff {
   failures: u32,
   next: Option<Instant>,
+  reported_at: Option<Instant>,
 }
 
 impl PollBackoff {
   const MAX_WAIT: Duration = Duration::from_secs(30);
+  const REPORT_GAP: Duration = Duration::from_secs(60);
 
   fn ready(&self, now: Instant) -> bool {
     self.next.is_none_or(|at| now >= at)
   }
 
-  /// Records a failure; true for the first one of a run, the one to report.
-  fn failed(&mut self, now: Instant) -> bool {
+  /// A status read or a command failed: wait longer before the next read.
+  fn failed(&mut self, now: Instant) {
     self.failures = self.failures.saturating_add(1);
     let wait = Duration::from_secs(1 << self.failures.min(5)).min(Self::MAX_WAIT);
     self.next = Some(now + wait);
-    self.failures == 1
   }
 
+  /// Whether a poll error may be shown now; records it when it may.
+  fn take_report(&mut self, now: Instant) -> bool {
+    if self
+      .reported_at
+      .is_some_and(|at| now.duration_since(at) < Self::REPORT_GAP)
+    {
+      return false;
+    }
+    self.reported_at = Some(now);
+    true
+  }
+
+  /// Music answered: poll every tick again. The report gap is kept.
   fn succeeded(&mut self) {
-    *self = Self::default();
+    self.failures = 0;
+    self.next = None;
   }
 }
 
 async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>, client: C) {
   let mut poll = tokio::time::interval(Duration::from_secs(1));
   poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-  // Explicit commands always report their own failures; poll errors only the
-  // first of a run (see `PollBackoff`).
+  // Explicit commands always report their own failures; poll errors are
+  // rate-limited (see `PollBackoff`).
   let mut backoff = PollBackoff::default();
   loop {
     let work = tokio::select! {
@@ -419,7 +436,11 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
             backoff.succeeded();
           }
           Err(error) => {
-            if app.apple_music_state().generation == generation && backoff.failed(Instant::now()) {
+            let now = Instant::now();
+            backoff.failed(now);
+            // A read that a newer start overtook says nothing about Music now.
+            let current = app.apple_music_state().generation == generation;
+            if current && backoff.take_report(now) {
               app.set_error_status_message(
                 format!("Music status unavailable: {error}. Retrying in the background."),
                 8,
@@ -448,21 +469,80 @@ mod tests {
     let start = Instant::now();
     let mut backoff = PollBackoff::default();
     assert!(backoff.ready(start));
-    // The first failure is reported and waits 2 s; later ones are quiet and wait longer.
-    assert!(backoff.failed(start));
-    assert!(!backoff.ready(start + Duration::from_secs(1)));
-    assert!(backoff.ready(start + Duration::from_secs(2)));
-    assert!(!backoff.failed(start));
-    assert!(!backoff.ready(start + Duration::from_secs(3)));
-    assert!(backoff.ready(start + Duration::from_secs(4)));
-    for _ in 0..10 {
+    // Each failure doubles the wait from 2 s, capped at 30 s.
+    for wait in [2, 4, 8, 16, 30, 30, 30] {
       backoff.failed(start);
+      assert!(
+        !backoff.ready(start + Duration::from_secs(wait - 1)),
+        "{wait}"
+      );
+      assert!(backoff.ready(start + Duration::from_secs(wait)), "{wait}");
     }
-    assert!(backoff.ready(start + PollBackoff::MAX_WAIT));
-    // A good read starts a fresh run: polling every tick, the next failure reported again.
+    // A good read resumes polling every tick; the next failure waits 2 s again.
     backoff.succeeded();
     assert!(backoff.ready(start));
-    assert!(backoff.failed(start));
+    backoff.failed(start);
+    assert!(!backoff.ready(start + Duration::from_secs(1)));
+    assert!(backoff.ready(start + Duration::from_secs(2)));
+  }
+
+  #[test]
+  fn a_poll_error_is_reported_at_most_once_a_minute_even_when_reads_recover_in_between() {
+    let start = Instant::now();
+    let mut backoff = PollBackoff::default();
+    assert!(backoff.take_report(start));
+    backoff.succeeded();
+    assert!(!backoff.take_report(start + Duration::from_secs(5)));
+    assert!(!backoff.take_report(start + Duration::from_secs(59)));
+    assert!(backoff.take_report(start + PollBackoff::REPORT_GAP));
+  }
+
+  /// Fails the first `failing` reads, then reports the volume it was given.
+  struct FlakyClient {
+    reads: std::sync::atomic::AtomicUsize,
+    failing: usize,
+    volume: u8,
+  }
+
+  impl Client for FlakyClient {
+    async fn execute(&self, _command: Command) -> Result<String> {
+      let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      if read < self.failing {
+        bail!("Music timed out");
+      }
+      Ok(format!(
+        r#"{{"running":true,"playing":true,"track":null,"position":0,"volume":{}}}"#,
+        self.volume
+      ))
+    }
+  }
+
+  #[tokio::test]
+  async fn apple_music_polling_resumes_after_a_failed_read() {
+    let app = Arc::new(Mutex::new(App::default()));
+    app.lock().await.claim_apple_music();
+    let (_tx, rx) = mpsc::channel(4);
+    let client = FlakyClient {
+      reads: std::sync::atomic::AtomicUsize::new(0),
+      failing: 1,
+      volume: 77,
+    };
+    tokio::spawn(worker(Arc::downgrade(&app), rx, client));
+    // The first read fails at once; the retry comes 2 s later.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    {
+      let app = app.lock().await;
+      assert!(app.apple_music_state().snapshot.is_none());
+      assert!(app
+        .status_message()
+        .is_some_and(|m| m.contains("Music status unavailable")));
+    }
+    tokio::time::sleep(Duration::from_millis(3_000)).await;
+    let app = app.lock().await;
+    assert_eq!(
+      app.apple_music_state().snapshot.as_ref().map(|s| s.volume),
+      Some(77)
+    );
   }
 
   struct FakeClient {
