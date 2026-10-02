@@ -574,8 +574,9 @@ impl Network {
 
   #[cfg(feature = "streaming")]
   async fn fallback_spirc_shuffle(&self, on: bool) {
-    let player = self.app.lock().await.streaming_player.clone();
-    if let Some(player) = player {
+    // Held across the command: it only queues it, and the lock keeps a
+    // backend replacement from shutting this player down in between.
+    if let Some(player) = self.app.lock().await.streaming_player.clone() {
       let _ = player.set_shuffle(on);
     }
   }

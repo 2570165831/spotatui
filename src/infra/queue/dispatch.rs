@@ -166,8 +166,9 @@ async fn route_spotify_queue_transport(app: &Arc<Mutex<App>>, event: &IoEvent) -
   }
   match event {
     IoEvent::PausePlayback => {
-      let player = app.lock().await.streaming_player.clone();
-      if let Some(player) = player {
+      // Held across the command: it only queues it, and the lock keeps a
+      // backend replacement from shutting this player down in between.
+      if let Some(player) = app.lock().await.streaming_player.clone() {
         player.pause();
       }
       let mut guard = app.lock().await;
@@ -179,8 +180,7 @@ async fn route_spotify_queue_transport(app: &Arc<Mutex<App>>, event: &IoEvent) -
       Some(true)
     }
     IoEvent::StartPlayback(None, None, None) => {
-      let player = app.lock().await.streaming_player.clone();
-      if let Some(player) = player {
+      if let Some(player) = app.lock().await.streaming_player.clone() {
         player.play();
       }
       let mut guard = app.lock().await;
@@ -198,8 +198,7 @@ async fn route_spotify_queue_transport(app: &Arc<Mutex<App>>, event: &IoEvent) -
       Some(true)
     }
     IoEvent::PreviousTrack | IoEvent::ForcePreviousTrack => {
-      let player = app.lock().await.streaming_player.clone();
-      if let Some(player) = player {
+      if let Some(player) = app.lock().await.streaming_player.clone() {
         player.seek(0);
       }
       Some(true)
