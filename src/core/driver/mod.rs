@@ -125,6 +125,11 @@ pub struct Driver {
   script_engine: Option<ScriptEngine>,
   #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
   audio_capture: Option<audio::AudioCaptureManager>,
+  /// Set when opening the capture failed during this visit to the
+  /// visualizer, so the tick does not retry (and re-report) every frame.
+  /// Cleared when the visualizer closes, so reopening it tries again.
+  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+  audio_capture_failed: bool,
   /// Previous tick's `is_streaming_active`, so a native session that ends can
   /// push a final stopped state to MPRIS clients.
   #[cfg(all(feature = "mpris", target_os = "linux"))]
@@ -154,6 +159,33 @@ pub struct Driver {
   /// died / drained" — both of which report `is_finished()` (empty sink).
   #[cfg(feature = "internet-radio")]
   radio_stream_started: bool,
+}
+
+/// Shown once per visit to the visualizer when the capture cannot open.
+#[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+const AUDIO_CAPTURE_UNAVAILABLE: &str =
+  "Visualizer can't capture system audio - see the log for details.";
+
+/// Opens the visualizer's capture unless one is open or this visit already
+/// failed. A failure is reported once and latched: opening a capture blocks
+/// the tick while it waits on the audio system, so it is never retried
+/// per frame.
+#[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+fn open_audio_capture<C>(
+  capture: &mut Option<C>,
+  failed: &mut bool,
+  app: &mut App,
+  open: impl FnOnce() -> Option<C>,
+) {
+  if capture.is_some() || *failed {
+    return;
+  }
+  *capture = open();
+  app.audio_capture_active = capture.is_some();
+  if capture.is_none() {
+    *failed = true;
+    app.set_status_message(AUDIO_CAPTURE_UNAVAILABLE, 8);
+  }
 }
 
 /// The startup route's data fetch, gated on what the route needs.
@@ -220,6 +252,8 @@ impl Driver {
       script_engine,
       #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
       audio_capture: None,
+      #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+      audio_capture_failed: false,
       #[cfg(all(feature = "mpris", target_os = "linux"))]
       prev_is_streaming_active: false,
       #[cfg(feature = "discord-rpc")]
@@ -823,12 +857,14 @@ impl Driver {
     #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
     match env.viz_bars {
       Some(desired_bars) => {
-        if self.audio_capture.is_none() {
-          // Built at the count we are about to ask for, so the first frame
-          // does not immediately throw the fresh cavacore plan away.
-          self.audio_capture = audio::AudioCaptureManager::new(desired_bars);
-          app.audio_capture_active = self.audio_capture.is_some();
-        }
+        // Built at the count we are about to ask for, so the first frame
+        // does not immediately throw the fresh cavacore plan away.
+        open_audio_capture(
+          &mut self.audio_capture,
+          &mut self.audio_capture_failed,
+          app,
+          || audio::AudioCaptureManager::new(desired_bars),
+        );
 
         if let Some(ref capture) = self.audio_capture {
           if let Some(spectrum) = capture.get_spectrum(desired_bars) {
@@ -840,6 +876,7 @@ impl Driver {
         }
       }
       None => {
+        self.audio_capture_failed = false;
         if self.audio_capture.is_some() {
           self.audio_capture = None;
           app.audio_capture_active = false;
@@ -976,5 +1013,26 @@ mod tests {
     assert!(rx
       .try_iter()
       .any(|event| matches!(event, IoEvent::LoadListeningStats(_))));
+  }
+
+  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+  #[test]
+  fn a_capture_that_fails_to_open_is_reported_once_and_not_retried() {
+    let (mut app, _rx) = app_on(RouteId::Analysis, ActiveBlock::Analysis, false);
+    let mut capture: Option<()> = None;
+    let mut failed = false;
+    let mut attempts = 0;
+
+    for _ in 0..3 {
+      open_audio_capture(&mut capture, &mut failed, &mut app, || {
+        attempts += 1;
+        None
+      });
+    }
+
+    assert_eq!(attempts, 1);
+    assert!(!app.audio_capture_active);
+    assert_eq!(app.status_message(), Some(AUDIO_CAPTURE_UNAVAILABLE));
+    assert!(!app.status_message_is_error());
   }
 }
