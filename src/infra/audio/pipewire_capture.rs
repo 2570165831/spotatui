@@ -13,7 +13,8 @@ use std::thread;
 use std::time::Duration;
 
 /// How long `new` waits for the capture thread to finish connecting. Setup is
-/// local IPC, so this only bounds a wedged PipeWire; the tick waits on it.
+/// local IPC, so this only bounds a wedged PipeWire. The driver calls `new` on
+/// a background thread, so this wait never holds up the tick.
 const INIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Manages audio capture from PipeWire sink monitors
@@ -117,10 +118,15 @@ fn quiet_libpipewire_log(pipewire_debug: Option<&std::ffi::OsStr>) {
   // pw_init (run once) applies PIPEWIRE_DEBUG; run it first so the level set
   // below is the one that sticks.
   pw::init();
-  if pipewire_debug.is_none() {
+  if silences_libpipewire_log(pipewire_debug) {
     // SAFETY: pw_init has run; pw_log_set_level only stores the global level.
     unsafe { pw::sys::pw_log_set_level(pw::spa::sys::SPA_LOG_LEVEL_NONE) };
   }
+}
+
+/// Whether libpipewire's own logging is turned off, given `PIPEWIRE_DEBUG`.
+fn silences_libpipewire_log(pipewire_debug: Option<&std::ffi::OsStr>) -> bool {
+  pipewire_debug.is_none()
 }
 
 fn run_pipewire_capture(
@@ -288,7 +294,13 @@ mod tests {
   }
 
   #[test]
-  fn libpipewire_logging_is_silenced_without_pipewire_debug() {
+  fn libpipewire_logging_is_silenced_only_without_pipewire_debug() {
+    assert!(silences_libpipewire_log(None));
+    assert!(!silences_libpipewire_log(Some(std::ffi::OsStr::new("2"))));
+  }
+
+  #[test]
+  fn quieting_libpipewire_sets_its_global_log_level_to_none() {
     quiet_libpipewire_log(None);
 
     // SAFETY: a plain read of libpipewire's global level after pw_init.
