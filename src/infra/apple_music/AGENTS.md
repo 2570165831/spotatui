@@ -29,7 +29,9 @@
   (cloud status "no longer available"/"error"/"removed" without a local file, or
   a file track whose file is gone), Music puts a modal in its own window that
   cancels every later start until someone dismisses it, and a terminal user
-  cannot see it. So volume has a floor of 1, unplayable rows carry
+  cannot see it. So volume has a floor just above 0 (`setVolume` in
+  `music.js` reads the level back: Music on macOS 27.2 stores 1 as 0, so it
+  lands on 2 there), unplayable rows carry
   `playable: false` and are refused and skipped, and the script never activates
   or reveals Music (`open -g -j` launches it hidden).
 - **The script is constant.** `music.js` takes every input as an argv value and

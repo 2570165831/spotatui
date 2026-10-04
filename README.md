@@ -266,7 +266,7 @@ macOS only. Pick **Apple Music** in the first-run picker or the `d` menu. Unlike
 
 The sidebar lists **All songs** and your playlists, including Apple Music playlists you added to your library; search looks through your library. Play/pause, next, previous, seek, volume, the media keys and the playbar follow Music. Next and previous step through the playlist or search results a song was started from, and follow Music's shuffle setting. Only one player is audible when you switch inside spotatui: starting a Music song from spotatui pauses Spotify and the other sources, and starting one of those pauses Music first. Pressing play in the Music app itself while another source is playing is not detected.
 
-Not available for Apple Music songs: the queue, the shuffle and repeat toggles (change them in Music), likes, and playlist edits. Songs Music cannot play (no longer available, or a local file that is missing) are listed, but choosing one shows a message instead of playing it, and next and previous skip them: Music would answer them with a dialog that blocks every later start. spotatui never sets Music's volume below 1 for the same reason.
+Not available for Apple Music songs: the queue, the shuffle and repeat toggles (change them in Music), likes, and playlist edits. Songs Music cannot play (no longer available, or a local file that is missing) are listed, but choosing one shows a message instead of playing it, and next and previous skip them: Music would answer them with a dialog that blocks every later start. spotatui never lets Music's volume reach 0 for the same reason.
 
 ## AI DJ
 

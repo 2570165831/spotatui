@@ -120,11 +120,12 @@ impl App {
     if self.apple_music_refuses_while_switching() {
       return;
     }
-    // 1 is the floor: at 0 Music answers the next start with a dialog in its
-    // own window and plays nothing until someone dismisses it.
+    // Never 0: at 0 Music answers the next start with a dialog in its own
+    // window and plays nothing until someone dismisses it. The script raises
+    // a level Music stores as 0 (1 on some versions) to the next that sticks.
     if value == 0 {
       self.set_status_message(
-        "Apple Music: 1% is the lowest volume (Music refuses to play at 0)",
+        "Apple Music: the volume stops just above 0 (Music refuses to play at 0)",
         4,
       );
     }
@@ -1678,7 +1679,9 @@ mod tests {
       Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 1 }) if queued == generation
     ));
     assert_eq!(app.apple_music_volume(), 1);
-    assert!(app.status_message().is_some_and(|m| m.contains("1%")));
+    assert!(app
+      .status_message()
+      .is_some_and(|m| m.contains("just above 0")));
   }
 
   #[test]

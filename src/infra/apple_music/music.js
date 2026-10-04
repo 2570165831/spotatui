@@ -41,9 +41,21 @@ function run(argv) {
         };
     }
     // At volume 0 Music answers a start with a "volume is at its lowest"
-    // dialog and plays nothing until it is dismissed, so 1 is the floor.
+    // dialog and plays nothing until it is dismissed, so the floor is the
+    // lowest level that reads back above 0. Music on macOS 27.2 stores 1 as
+    // 0, so a level is read back and raised (at most to 5) until it is not.
+    // Music drops a second change made within about 0.1s of the first, so
+    // each retry waits 0.2s.
+    function setVolume(level) {
+        let v = Math.max(1, level);
+        music.soundVolume = v;
+        while (music.soundVolume() === 0 && v < 5) {
+            delay(0.2);
+            music.soundVolume = ++v;
+        }
+    }
     function ensureAudible() {
-        if (music.soundVolume() === 0) music.soundVolume = 1;
+        if (music.soundVolume() === 0) setVolume(1);
     }
     // Whether Music really started: up to 3s for the state to read playing.
     let started = null;
@@ -167,7 +179,7 @@ function run(argv) {
     case 'next': music.nextTrack(); awaitCurrentTrack(); break;
     case 'previous': music.previousTrack(); awaitCurrentTrack(); break;
     case 'seek': music.playerPosition = Math.min(Number(argv[1]) / 1000, music.currentTrack.duration()); break;
-    case 'volume': music.soundVolume = Math.max(1, Number(argv[1])); break;
+    case 'volume': setVolume(Number(argv[1])); break;
     case 'snapshot': break;
     default: throw new Error('Unknown Music operation');
     }
