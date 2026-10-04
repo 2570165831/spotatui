@@ -67,7 +67,20 @@ impl<C: Send + 'static> VizCapture<C> {
     if let Slot::Opening(rx) = &self.slot {
       match rx.try_recv() {
         Ok(Some(capture)) => self.slot = Slot::Open(capture),
-        Ok(None) | Err(TryRecvError::Disconnected) => self.slot = Slot::Failed { reported: false },
+        // Logged once, on the transition: the status message points at the
+        // log, and the cpal backend returns None without logging anything.
+        Ok(None) => {
+          log::warn!(
+            "[audio-viz] the audio capture could not be opened; the visualizer has no audio"
+          );
+          self.slot = Slot::Failed { reported: false };
+        }
+        Err(TryRecvError::Disconnected) => {
+          log::warn!(
+            "[audio-viz] the capture thread ended without a result; the visualizer has no audio"
+          );
+          self.slot = Slot::Failed { reported: false };
+        }
         Err(TryRecvError::Empty) => {}
       }
     }
