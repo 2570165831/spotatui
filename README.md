@@ -582,6 +582,9 @@ Originally forked from [spotify-tui](https://github.com/Rigellute/spotify-tui) b
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/drakeo338"><img src="https://avatars.githubusercontent.com/u/328244157?v=4?s=100" width="100px;" alt="Y.B."/><br /><sub><b>Y.B.</b></sub></a><br /><a href="https://github.com/LargeModGames/spotatui/commits?author=drakeo338" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/uemrey0"><img src="https://avatars.githubusercontent.com/u/64688960?v=4?s=100" width="100px;" alt="Ufuk Emre Yücetürk"/><br /><sub><b>Ufuk Emre Yücetürk</b></sub></a><br /><a href="https://github.com/LargeModGames/spotatui/commits?author=uemrey0" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/WaterWhisperer"><img src="https://avatars.githubusercontent.com/u/164724580?v=4?s=100" width="100px;" alt="WaterWhisperer"/><br /><sub><b>WaterWhisperer</b></sub></a><br /><a href="https://github.com/LargeModGames/spotatui/commits?author=WaterWhisperer" title="Documentation">📖</a></td>
+    </tr>
   </tbody>
 </table>
 
