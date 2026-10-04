@@ -433,6 +433,9 @@ impl App {
       && !self.apple_music.switching
     {
       let mut snapshot = snapshot;
+      // Music's own report, read before the command window below adjusts it:
+      // stopped, Music reports shuffle as off whatever the user chose.
+      let reported_active = snapshot.playing || snapshot.track.is_some();
       let just_commanded = self.apple_music.pending_commands > 0
         || self
           .apple_music
@@ -518,7 +521,7 @@ impl App {
       {
         snapshot.volume = volume;
       }
-      if snapshot.playing || snapshot.track.is_some() {
+      if reported_active {
         self.apple_music.shuffle = snapshot.shuffle;
       }
       self.song_progress_ms = snapshot.position_ms as u128;
@@ -1931,6 +1934,25 @@ mod tests {
     );
     assert!(app.apple_music.shuffle);
     // Stopped, Music says shuffle is off whatever the user chose.
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(
+        r#"{"running":true,"playing":false,"track":null,"position":0,"volume":50,"shuffle":false}"#,
+      )
+      .unwrap(),
+    );
+    assert!(app.apple_music.shuffle);
+    // Nor right after a command, where the read is held to the asked-for
+    // playing state and the last track: Music itself still reported stopped.
+    app.accept_apple_music_snapshot(
+      generation,
+      parse_snapshot(
+        r#"{"running":true,"playing":true,"track":{"id":"1111111111111111","name":"n","artist":"a","album":"b","duration":100},"position":1,"volume":50,"shuffle":true}"#,
+      )
+      .unwrap(),
+    );
+    app.note_apple_music_command_queued();
+    app.finish_apple_music_command();
     app.accept_apple_music_snapshot(
       generation,
       parse_snapshot(

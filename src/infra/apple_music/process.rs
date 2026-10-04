@@ -77,6 +77,16 @@ pub(super) async fn run(mut command: Command, deadline: Duration, label: &str) -
   String::from_utf8(out).context("Music returned invalid UTF-8")
 }
 
+/// A readiness probe failed or ran out of time before the real command was
+/// sent, so Music never got that command. A typed error keeps its type.
+fn not_delivered(error: anyhow::Error) -> anyhow::Error {
+  if error.is::<CommandError>() {
+    error
+  } else {
+    CommandError::LaunchFailed(error).into()
+  }
+}
+
 /// `open` can return before Music answers. Give readiness its own bounded
 /// window, then give the requested command its full timeout. Readiness never
 /// retries a mutating command whose result could be delayed.
@@ -97,9 +107,9 @@ where
   loop {
     let left = deadline.saturating_duration_since(tokio::time::Instant::now());
     if left.is_zero() {
-      bail!("Music did not start");
+      return Err(CommandError::LaunchFailed(anyhow::anyhow!("Music did not start")).into());
     }
-    if ready(left).await? {
+    if ready(left).await.map_err(not_delivered)? {
       return answer(command_timeout).await;
     }
     let left = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -155,7 +165,40 @@ mod tests {
     .await
     .unwrap_err();
     assert!(error.to_string().contains("did not start"));
+    // The real command was never sent: the claim may be released.
+    assert!(crate::infra::apple_music::event_not_delivered(&error));
     assert!(start.elapsed() < Duration::from_secs(1));
+  }
+
+  #[tokio::test]
+  async fn a_failed_readiness_probe_counts_as_not_delivered() {
+    let probe_failed = answer_after_launch(
+      Duration::from_secs(1),
+      Duration::from_millis(10),
+      Duration::from_secs(8),
+      |_| async { Err(anyhow::anyhow!("probe failed")) },
+      |_| async { panic!("a command must not be sent after a failed probe") },
+    )
+    .await
+    .unwrap_err();
+    assert!(crate::infra::apple_music::event_not_delivered(
+      &probe_failed
+    ));
+
+    // A typed probe failure keeps its own type (and message).
+    let denied = answer_after_launch(
+      Duration::from_secs(1),
+      Duration::from_millis(10),
+      Duration::from_secs(8),
+      |_| async { Err(CommandError::AutomationDenied.into()) },
+      |_| async { panic!("a command must not be sent after a denied probe") },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+      denied.downcast_ref::<CommandError>(),
+      Some(CommandError::AutomationDenied)
+    ));
   }
 
   #[tokio::test]
