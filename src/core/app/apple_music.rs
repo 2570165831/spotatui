@@ -25,8 +25,8 @@ impl App {
       .apple_music
       .observed_at
       .map_or(0, |at| at.elapsed().as_millis());
-    let extra = if snapshot.playing && elapsed < 10_000 {
-      elapsed
+    let extra = if snapshot.playing {
+      elapsed.min(10_000)
     } else {
       0
     };
@@ -41,9 +41,10 @@ impl App {
   pub(crate) fn apple_music_volume(&self) -> u8 {
     self
       .apple_music
-      .snapshot
-      .as_ref()
-      .map_or(self.runtime_state.volume_percent, |s| s.volume)
+      .pending_volume
+      .or(self.apple_music.volume_in_flight)
+      .or_else(|| self.apple_music.snapshot.as_ref().map(|s| s.volume))
+      .unwrap_or(self.runtime_state.volume_percent)
   }
 
   pub(crate) fn toggle_apple_music(&mut self) {
@@ -128,15 +129,57 @@ impl App {
       );
     }
     let value = value.clamp(1, 100);
+    if value == self.apple_music_volume() {
+      return;
+    }
     if let Some(snapshot) = &mut self.apple_music.snapshot {
       snapshot.volume = value;
     }
-    self.dispatch(IoEvent::ChangeVolume(value));
+    self.apple_music.pending_volume = Some(value);
+    self.flush_apple_music_volume();
   }
 
-  /// Each seek is one helper run, so a drag sends the latest position at
-  /// most this often; the positions in between are dropped.
-  const APPLE_MUSIC_SEEK_THROTTLE_MS: u128 = 250;
+  /// A seek or volume change is one helper run: coalesce rapid gestures.
+  const APPLE_MUSIC_CONTROL_THROTTLE_MS: u128 = 250;
+
+  /// Keep only the latest volume while a helper is queued or running. The
+  /// tick sends it once that helper finishes and the throttle permits it.
+  pub(crate) fn flush_apple_music_volume(&mut self) {
+    if !self.apple_music.claimed
+      || self.apple_music.switching
+      || self.apple_music.volume_in_flight.is_some()
+      || self
+        .apple_music
+        .last_volume
+        .is_some_and(|at| at.elapsed().as_millis() < Self::APPLE_MUSIC_CONTROL_THROTTLE_MS)
+    {
+      return;
+    }
+    if let Some(volume) = self.apple_music.pending_volume.take() {
+      self.apple_music.last_volume = Some(Instant::now());
+      self.apple_music.volume_in_flight = Some(volume);
+      self.dispatch(IoEvent::AppleMusicVolume {
+        generation: self.apple_music.generation,
+        volume,
+      });
+    }
+  }
+
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn finish_apple_music_volume(&mut self, generation: u64) {
+    if self.apple_music.generation == generation {
+      self.apple_music.volume_in_flight = None;
+    }
+  }
+
+  fn cancel_apple_music_volume(&mut self) {
+    self.apple_music.pending_volume = None;
+    self.apple_music.volume_in_flight = None;
+    self.apple_music.last_volume = None;
+  }
 
   /// Seek Music. The position is applied locally at once, so quick repeated
   /// seeks add up instead of all starting from the last snapshot.
@@ -174,7 +217,7 @@ impl App {
     };
     if self
       .last_source_seek
-      .is_some_and(|t| t.elapsed().as_millis() < Self::APPLE_MUSIC_SEEK_THROTTLE_MS)
+      .is_some_and(|t| t.elapsed().as_millis() < Self::APPLE_MUSIC_CONTROL_THROTTLE_MS)
     {
       return;
     }
@@ -248,11 +291,13 @@ impl App {
       manager.set_remote_owned(true);
     }
     self.apple_music.switching = false;
+    self.apple_music.recovered_handoff = None;
     self.apple_music.generation = self.apple_music.generation.wrapping_add(1);
     self.apple_music.snapshot = None;
     self.apple_music.observed_at = None;
     self.apple_music.quit_seen = None;
     self.cancel_volume_change();
+    self.cancel_apple_music_volume();
     self.pending_api_seek = None;
     self.pending_source_seek = None;
     self.seek_ms = None;
@@ -289,9 +334,10 @@ impl App {
   pub(crate) fn begin_apple_music_handoff(&mut self) -> u64 {
     self.apple_music.generation = self.apple_music.generation.wrapping_add(1);
     self.apple_music.switching = true;
-    // A Music seek still held back by the throttle would be queued behind
-    // the handoff and reach the next source.
+    // A seek or volume still held back would be queued behind the handoff
+    // and reach the next source.
     self.pending_source_seek = None;
+    self.cancel_apple_music_volume();
     self.apple_music.generation
   }
 
@@ -329,6 +375,12 @@ impl App {
     allow(dead_code)
   )]
   pub(crate) fn finish_apple_music_handoff(&mut self, generation: u64) -> bool {
+    if self.apple_music.recovered_handoff == Some(generation)
+      && self.apple_music.generation == generation
+    {
+      self.apple_music.recovered_handoff = None;
+      return true;
+    }
     if !self.apple_music_handoff_is_current(generation) {
       return false;
     }
@@ -343,7 +395,28 @@ impl App {
     // A Music seek still held back by the throttle shares this slot with the
     // decoded sources: left set, the next tick would send it to them.
     self.pending_source_seek = None;
+    self.cancel_apple_music_volume();
     true
+  }
+
+  /// A proven undelivered pause released the claim. Keep a token for its held
+  /// start, so a newer start can invalidate the replay before the pump sees it.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn defer_recovered_apple_music_handoff(&mut self) -> u64 {
+    let generation = self.apple_music.generation;
+    self.apple_music.recovered_handoff = Some(generation);
+    generation
+  }
+
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn cancel_recovered_apple_music_handoff(&mut self) {
+    self.apple_music.recovered_handoff = None;
   }
 
   #[cfg_attr(
@@ -374,7 +447,8 @@ impl App {
         if !just_commanded {
           match self.apple_music.quit_seen {
             Some(at) if at.elapsed() >= std::time::Duration::from_secs(2) => {
-              self.release_apple_music()
+              self.release_apple_music();
+              self.set_status_message("Apple Music: Music quit", 5);
             }
             Some(_) => {}
             None => self.apple_music.quit_seen = Some(Instant::now()),
@@ -435,6 +509,15 @@ impl App {
           }
         }
       }
+      // A coalesced volume may still be waiting for the next helper, even
+      // after the last command's optimistic-state window has expired.
+      if let Some(volume) = self
+        .apple_music
+        .pending_volume
+        .or(self.apple_music.volume_in_flight)
+      {
+        snapshot.volume = volume;
+      }
       if snapshot.playing || snapshot.track.is_some() {
         self.apple_music.shuffle = snapshot.shuffle;
       }
@@ -451,8 +534,8 @@ impl App {
     }
   }
 
-  /// Music went away under spotatui: drop the claim at once. There is
-  /// nothing left to pause, so the handshake a handoff needs does not apply.
+  /// Drop a claim when Music is gone or an error proves the event was not
+  /// delivered. Invalidate queued work and any held handoff start together.
   fn release_apple_music(&mut self) {
     self.apple_music.claimed = false;
     #[cfg(all(feature = "macos-media", target_os = "macos"))]
@@ -460,16 +543,17 @@ impl App {
       manager.set_remote_owned(false);
     }
     self.apple_music.switching = false;
+    self.apple_music.recovered_handoff = None;
     self.apple_music.desired_playing = false;
     self.apple_music.intent_revision = self.apple_music.intent_revision.wrapping_add(1);
-    // Results of commands sent before the quit are dropped.
+    // Results of commands sent before the release are dropped.
     self.apple_music.generation = self.apple_music.generation.wrapping_add(1);
     self.apple_music.snapshot = None;
     self.apple_music.observed_at = None;
     self.apple_music.playing_list = None;
     self.apple_music.quit_seen = None;
     self.pending_source_seek = None;
-    self.set_status_message("Apple Music: Music quit", 5);
+    self.cancel_apple_music_volume();
     self.note_display_changes();
   }
 
@@ -477,18 +561,24 @@ impl App {
     not(all(feature = "apple-music", target_os = "macos")),
     allow(dead_code)
   )]
-  pub(crate) fn apple_music_failed(&mut self, generation: u64, error: anyhow::Error) {
+  pub(crate) fn apple_music_failed(&mut self, generation: u64, error: anyhow::Error) -> bool {
     if self.apple_music.generation != generation {
-      return;
+      return false;
     }
-    // Retain the claim on failure: a timed-out Apple Event may have executed.
-    // Only an acknowledged pause can release it to a different player.
+    if self.apple_music.claimed && crate::infra::apple_music::event_not_delivered(&error) {
+      self.release_apple_music();
+      self.report_apple_music_error(&error);
+      return true;
+    }
+    // A timeout or an unknown failure may have executed the Apple Event.
+    // Retain the claim until a pause is acknowledged in that case.
     self.apple_music.switching = false;
     // The last snapshot stays until the next read replaces it: cleared, a
     // track ending meanwhile could no longer be recognised.
     // Keep the last intent: a failed Play may already be audible, so the next
     // toggle must request Pause rather than accidentally issuing another Play.
     self.report_apple_music_error(&error);
+    false
   }
 
   /// Music failures are status messages, like the other sources': the error
@@ -870,7 +960,10 @@ mod tests {
     app.seek_to(5000);
     assert!(matches!(rx.try_recv(), Ok(IoEvent::Seek(5000))));
     app.set_volume_percent(23);
-    assert!(matches!(rx.try_recv(), Ok(IoEvent::ChangeVolume(23))));
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 23 }) if queued == generation
+    ));
     let newer = app.begin_apple_music_handoff();
     assert!(!app.finish_apple_music_handoff(generation));
     assert!(app.finish_apple_music_handoff(newer));
@@ -888,6 +981,57 @@ mod tests {
     app.active_source = Source::Local;
     assert_eq!(app.playback_owner(), PlaybackOwner::AppleMusic);
     assert!(!PlaybackOwner::AppleMusic.owns_local_sink());
+  }
+
+  #[test]
+  fn apple_music_undelivered_errors_release_only_the_current_claim() {
+    use crate::infra::apple_music::CommandError;
+    let errors = [
+      anyhow::Error::new(CommandError::AutomationDenied),
+      anyhow::Error::new(CommandError::HelperSpawn(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "helper missing",
+      ))),
+    ];
+    for error in errors {
+      let mut app = App::default();
+      let generation = app.claim_apple_music();
+      app.apple_music.pending_volume = Some(42);
+      app.pending_source_seek = Some(1_000);
+      assert!(app.apple_music_failed(generation, error));
+      assert!(!app.apple_music_owns_playback());
+      assert!(!app.apple_music_is_playing());
+      assert_ne!(app.apple_music.generation, generation);
+      assert!(app.apple_music.pending_volume.is_none());
+      assert!(app.pending_source_seek.is_none());
+      assert!(app.status_message_is_error());
+
+      let newer = app.claim_apple_music();
+      assert!(!app.apple_music_failed(generation, CommandError::AutomationDenied.into()));
+      assert!(app.apple_music_owns_playback());
+      assert_eq!(app.apple_music.generation, newer);
+    }
+  }
+
+  #[test]
+  fn apple_music_recovered_handoff_is_one_shot_and_new_starts_cancel_it() {
+    use crate::infra::apple_music::CommandError;
+    let mut app = App::default();
+    for replacement in 0..3 {
+      app.claim_apple_music();
+      let generation = app.begin_apple_music_handoff();
+      assert!(app.apple_music_failed(generation, CommandError::AutomationDenied.into()));
+      let recovered = app.defer_recovered_apple_music_handoff();
+      assert!(!app.apple_music_owns_playback());
+      match replacement {
+        0 => assert!(app.finish_apple_music_handoff(recovered)),
+        1 => app.cancel_recovered_apple_music_handoff(),
+        _ => {
+          app.claim_apple_music();
+        }
+      }
+      assert!(!app.finish_apple_music_handoff(recovered));
+    }
   }
 
   #[test]
@@ -1526,9 +1670,153 @@ mod tests {
     );
     // One step down from 5% would be 0: Music refuses to play there.
     app.decrease_volume();
-    assert!(matches!(rx.try_recv(), Ok(IoEvent::ChangeVolume(1))));
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 1 }) if queued == generation
+    ));
     assert_eq!(app.apple_music_volume(), 1);
     assert!(app.status_message().is_some_and(|m| m.contains("1%")));
+  }
+
+  #[test]
+  fn apple_music_unchanged_volume_and_boundary_repeats_send_nothing() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    for (volume, increase) in [(100, true), (1, false)] {
+      app.accept_apple_music_snapshot(
+        generation,
+        crate::infra::apple_music::parse_snapshot(&format!(
+          r#"{{"running":true,"playing":false,"track":null,"position":0,"volume":{volume}}}"#
+        ))
+        .unwrap(),
+      );
+      for _ in 0..100 {
+        app.set_volume_percent(volume);
+        if increase {
+          app.increase_volume();
+        } else {
+          app.decrease_volume();
+        }
+      }
+      assert_eq!(app.apple_music_volume(), volume);
+      assert!(rx.try_recv().is_err());
+      assert!(app.apple_music.pending_volume.is_none());
+      assert!(app.apple_music.volume_in_flight.is_none());
+    }
+  }
+
+  #[test]
+  fn apple_music_volume_coalesces_while_busy_and_throttles_the_latest_value() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let generation = app.claim_apple_music();
+    app.runtime_state.volume_percent = 50;
+    // No snapshot yet: the next key still adds to the optimistic volume.
+    app.increase_volume();
+    let first = app.apple_music_volume();
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume })
+        if queued == generation && volume == first
+    ));
+    app.increase_volume();
+    assert_eq!(
+      app.apple_music_volume(),
+      first + app.user_config.behavior.volume_increment
+    );
+    app.set_volume_percent(73);
+    app.set_volume_percent(89);
+    assert_eq!(app.apple_music.pending_volume, Some(89));
+    assert!(rx.try_recv().is_err());
+    // A slow helper does not turn the 250ms throttle into an unbounded queue.
+    app.apple_music.last_volume = Some(Instant::now() - std::time::Duration::from_secs(8));
+    app.flush_apple_music_volume();
+    assert!(rx.try_recv().is_err());
+    // Even a late snapshot must not replace the latest value still waiting.
+    app.accept_apple_music_snapshot(
+      generation,
+      crate::infra::apple_music::parse_snapshot(
+        r#"{"running":true,"playing":false,"track":null,"position":0,"volume":55}"#,
+      )
+      .unwrap(),
+    );
+    assert_eq!(app.apple_music_volume(), 89);
+    assert_eq!(app.apple_music.snapshot.as_ref().unwrap().volume, 89);
+    app.finish_apple_music_volume(generation);
+    app.apple_music.last_volume = Some(Instant::now());
+    app.flush_apple_music_volume();
+    assert!(rx.try_recv().is_err());
+    app.apple_music.last_volume = Some(Instant::now() - std::time::Duration::from_millis(251));
+    app.flush_apple_music_volume();
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 89 }) if queued == generation
+    ));
+    assert!(rx.try_recv().is_err());
+    assert!(app.apple_music.pending_volume.is_none());
+  }
+
+  #[test]
+  fn apple_music_volume_handoff_and_new_claim_drop_old_pending_values() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    let old = app.claim_apple_music();
+    app.set_volume_percent(23);
+    app.set_volume_percent(42);
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 23 }) if queued == old
+    ));
+    let handoff = app.begin_apple_music_handoff();
+    assert!(app.apple_music.pending_volume.is_none());
+    assert!(app.apple_music.volume_in_flight.is_none());
+    app.set_volume_percent(99);
+    app.flush_apple_music_volume();
+    assert!(rx.try_recv().is_err());
+    assert!(app.finish_apple_music_handoff(handoff));
+    app.flush_apple_music_volume();
+    assert!(rx.try_recv().is_err());
+
+    // A new claim has no old throttle; an old helper completion cannot clear
+    // the new claim's in-flight latch or let another volume flood the queue.
+    let current = app.claim_apple_music();
+    app.set_volume_percent(67);
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::AppleMusicVolume { generation: queued, volume: 67 }) if queued == current
+    ));
+    app.finish_apple_music_volume(old);
+    assert_eq!(app.apple_music.volume_in_flight, Some(67));
+    app.set_volume_percent(72);
+    app.finish_apple_music_volume(current);
+    assert!(app.apple_music.volume_in_flight.is_none());
+    assert_eq!(app.apple_music.pending_volume, Some(72));
+    app.claim_apple_music();
+    assert!(app.apple_music.pending_volume.is_none());
+    assert!(app.apple_music.last_volume.is_none());
+  }
+
+  #[test]
+  fn apple_music_position_freezes_after_ten_seconds_without_jumping_back() {
+    let mut app = App::default();
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      crate::infra::apple_music::parse_snapshot(
+        r#"{"running":true,"playing":true,"track":{"id":"1111111111111111","name":"n","artist":"a","album":"b","duration":100},"position":10,"volume":50}"#,
+      )
+      .unwrap(),
+    );
+    for gap in [10, 11, 20] {
+      app.apple_music.observed_at = Some(Instant::now() - std::time::Duration::from_secs(gap));
+      assert_eq!(app.apple_music_position_ms(), 20_000);
+    }
+    // The same cap still respects the track duration and a paused snapshot.
+    app.apple_music.snapshot.as_mut().unwrap().position_ms = 95_000;
+    assert_eq!(app.apple_music_position_ms(), 100_000);
+    app.apple_music.snapshot.as_mut().unwrap().playing = false;
+    assert_eq!(app.apple_music_position_ms(), 95_000);
   }
 
   #[test]

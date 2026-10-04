@@ -284,6 +284,7 @@ impl Driver {
     app.flush_pending_native_seek();
     app.flush_pending_api_seek();
     app.flush_pending_source_seek();
+    app.flush_apple_music_volume();
     app.flush_pending_volume();
     app.flush_state_save(false);
 

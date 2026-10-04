@@ -135,7 +135,8 @@ pub(super) async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, netwo
       }
       // The Apple Music router runs before every other router: while Music owns
       // playback it takes the transport events, and it holds a start for
-      // another player back until Music has acknowledged a pause. That start
+      // another player back until Music acknowledges a pause or a failure
+      // proves that its Apple Event was not delivered. That start
       // comes back here as `AppleMusicHandoff` and meets the claim gate again.
       #[cfg(all(feature = "apple-music", target_os = "macos"))]
       let io_event = {

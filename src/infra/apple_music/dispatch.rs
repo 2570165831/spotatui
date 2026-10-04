@@ -1,5 +1,5 @@
 //! A bounded, serial Music worker, separate from the serial IoEvent pump.
-//! A foreign start is returned to the pump only after Music acknowledged pause.
+//! A foreign start returns after pause, or proof that its Apple Event was not delivered.
 use super::{parse_playlists, parse_snapshot, parse_tracks, parse_uri, Browse, Command, MusicUri};
 use crate::{core::app::App, infra::network::IoEvent};
 use anyhow::{bail, ensure, Result};
@@ -119,7 +119,27 @@ impl Router {
     // Reserve before changing ownership. A busy helper must not lose a start
     // or invalidate the live claim without accepting the corresponding work.
     let mut app = self.app.lock().await;
+    let volume_generation = match &event {
+      IoEvent::AppleMusicVolume { generation, .. } => Some(*generation),
+      _ => None,
+    };
     let work = match event {
+      IoEvent::AppleMusicVolume { generation, volume } => {
+        if !app.apple_music_owns_playback()
+          || app.apple_music_state().generation != generation
+          || app.apple_music_state().switching
+          || app.apple_music_state().quit_seen.is_some()
+        {
+          app.finish_apple_music_volume(generation);
+          app.is_loading = false;
+          return None;
+        }
+        Work::Transport {
+          generation,
+          revision: app.apple_music_state().intent_revision,
+          command: Command::Volume(volume),
+        }
+      }
       IoEvent::AppleMusicPage {
         generation,
         request,
@@ -145,6 +165,7 @@ impl Router {
           }
         };
         if command.is_none() && !app.apple_music_owns_playback() {
+          app.cancel_recovered_apple_music_handoff();
           return Some(event);
         }
         let permit = match self.tx.try_reserve() {
@@ -223,6 +244,9 @@ impl Router {
     };
     let transport = matches!(work, Work::Transport { .. });
     if self.tx.try_send(work).is_err() {
+      if let Some(generation) = volume_generation {
+        app.finish_apple_music_volume(generation);
+      }
       app.set_error_status_message("Music is busy; retry the request", 4);
     } else if transport {
       app.note_apple_music_command_queued();
@@ -318,8 +342,13 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         revision,
         command,
       }) => {
+        let volume = matches!(command, Command::Volume(_));
         if !owns_generation(&app, generation).await {
-          app.lock().await.finish_apple_music_command();
+          let mut app = app.lock().await;
+          app.finish_apple_music_command();
+          if volume {
+            app.finish_apple_music_volume(generation);
+          }
           continue;
         }
         let result = client
@@ -328,6 +357,9 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
           .and_then(|json| parse_snapshot(&json));
         let mut app = app.lock().await;
         app.finish_apple_music_command();
+        if volume {
+          app.finish_apple_music_volume(generation);
+        }
         match result {
           Ok(snapshot) => {
             let refused = snapshot.started == Some(false);
@@ -365,7 +397,15 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
             });
           }
           Ok(_) => {}
-          Err(error) => app.apple_music_failed(generation, error),
+          Err(error) => {
+            if app.apple_music_failed(generation, error) {
+              let generation = app.defer_recovered_apple_music_handoff();
+              app.dispatch_without_spinner(IoEvent::AppleMusicHandoff {
+                generation,
+                event: Box::new(event),
+              });
+            }
+          }
         }
       }
       Some(Work::Browse {
@@ -607,6 +647,291 @@ mod tests {
 
   fn apple_start() -> IoEvent {
     IoEvent::StartPlayback(None, Some(vec!["applemusic:0123456789ABCDEF".into()]), None)
+  }
+
+  #[derive(Clone, Copy)]
+  enum Rejection {
+    Permission,
+    Spawn,
+    Launch,
+    Timeout,
+    Unknown,
+  }
+
+  struct RejectingClient(Rejection);
+
+  impl Client for RejectingClient {
+    async fn execute(&self, _command: Command) -> Result<String> {
+      use super::super::CommandError;
+      Err(match self.0 {
+        Rejection::Permission => CommandError::AutomationDenied.into(),
+        Rejection::Spawn => CommandError::HelperSpawn(std::io::Error::new(
+          std::io::ErrorKind::NotFound,
+          "missing helper",
+        ))
+        .into(),
+        Rejection::Launch => CommandError::LaunchFailed(anyhow::anyhow!("open failed")).into(),
+        Rejection::Timeout => anyhow::anyhow!("Music helper timed out"),
+        Rejection::Unknown => anyhow::anyhow!("Music helper failed, error -1728"),
+      })
+    }
+  }
+
+  async fn wait_for_failure(app: &Arc<Mutex<App>>) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+      while !app.lock().await.status_message_is_error() {
+        tokio::task::yield_now().await;
+      }
+    })
+    .await
+    .unwrap();
+  }
+
+  #[tokio::test]
+  async fn apple_music_undelivered_start_releases_the_claim_for_the_next_source() {
+    for failure in [Rejection::Permission, Rejection::Spawn, Rejection::Launch] {
+      let (tx, _rx) = channel();
+      let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+      let router = Router::with_client(&app, RejectingClient(failure));
+      assert!(router
+        .route_apple_music_event(apple_start())
+        .await
+        .is_none());
+      wait_for_failure(&app).await;
+      assert!(!app.lock().await.apple_music_owns_playback());
+      assert!(matches!(
+        router
+          .route_apple_music_event(IoEvent::StartPlayback(
+            None,
+            Some(vec!["spotify:track:next".into()]),
+            None,
+          ))
+          .await,
+        Some(IoEvent::StartPlayback(..))
+      ));
+    }
+  }
+
+  #[tokio::test]
+  async fn apple_music_undelivered_handoff_pause_releases_its_held_start_once() {
+    for failure in [Rejection::Permission, Rejection::Spawn, Rejection::Launch] {
+      let (tx, rx) = channel();
+      let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+      app.lock().await.claim_apple_music();
+      let router = Router::with_client(&app, RejectingClient(failure));
+      assert!(router
+        .route_apple_music_event(IoEvent::StartPlayback(
+          None,
+          Some(vec!["file:///held.flac".into()]),
+          None,
+        ))
+        .await
+        .is_none());
+      wait_for_failure(&app).await;
+      assert!(!app.lock().await.apple_music_owns_playback());
+      let event = rx
+        .try_recv()
+        .expect("the held start must return to the pump");
+      assert!(matches!(
+        router.route_apple_music_event(event).await,
+        Some(IoEvent::StartPlayback(_, Some(uris), _)) if uris == ["file:///held.flac"]
+      ));
+      assert!(rx.try_recv().is_err());
+      assert!(app
+        .lock()
+        .await
+        .apple_music_state()
+        .recovered_handoff
+        .is_none());
+    }
+  }
+
+  #[tokio::test]
+  async fn apple_music_recovered_handoff_cannot_overtake_a_newer_foreign_start() {
+    let (tx, rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    app.lock().await.claim_apple_music();
+    let router = Router::with_client(&app, RejectingClient(Rejection::Permission));
+    router
+      .route_apple_music_event(IoEvent::StartPlayback(
+        None,
+        Some(vec!["file:///old.flac".into()]),
+        None,
+      ))
+      .await;
+    wait_for_failure(&app).await;
+    let held = rx.try_recv().unwrap();
+    assert!(matches!(
+      router
+        .route_apple_music_event(IoEvent::StartPlayback(
+          None,
+          Some(vec!["spotify:track:new".into()]),
+          None,
+        ))
+        .await,
+      Some(IoEvent::StartPlayback(..))
+    ));
+    assert!(router.route_apple_music_event(held).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn apple_music_uncertain_start_or_handoff_failure_keeps_the_claim() {
+    for failure in [Rejection::Timeout, Rejection::Unknown] {
+      for handoff in [false, true] {
+        let (tx, rx) = channel();
+        let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+        let event = if handoff {
+          app.lock().await.claim_apple_music();
+          IoEvent::StartPlayback(None, Some(vec!["file:///held.flac".into()]), None)
+        } else {
+          apple_start()
+        };
+        let router = Router::with_client(&app, RejectingClient(failure));
+        router.route_apple_music_event(event).await;
+        wait_for_failure(&app).await;
+        assert!(app.lock().await.apple_music_owns_playback());
+        assert!(rx.try_recv().is_err());
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn apple_music_rejected_volume_clears_its_in_flight_slot() {
+    let (tx, rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    let generation = app.lock().await.claim_apple_music();
+    let (tx, _worker_rx) = mpsc::channel(1);
+    tx.try_send(Work::Transport {
+      generation,
+      revision: 0,
+      command: Command::Pause,
+    })
+    .ok()
+    .unwrap();
+    let router = Router {
+      app: Arc::clone(&app),
+      tx,
+    };
+    app.lock().await.set_apple_music_volume(73);
+    assert_eq!(
+      app.lock().await.apple_music_state().volume_in_flight,
+      Some(73)
+    );
+    router.route_apple_music_event(rx.try_recv().unwrap()).await;
+    assert!(app
+      .lock()
+      .await
+      .apple_music_state()
+      .volume_in_flight
+      .is_none());
+    assert!(app.lock().await.status_message_is_error());
+  }
+
+  #[tokio::test]
+  async fn apple_music_queued_volume_cannot_escape_after_release_or_change_a_new_claim() {
+    let (tx, rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    let generation = app.lock().await.claim_apple_music();
+    app.lock().await.set_apple_music_volume(73);
+    let old_volume = rx.try_recv().unwrap();
+    assert!(app.lock().await.apple_music_failed(
+      generation,
+      super::super::CommandError::AutomationDenied.into(),
+    ));
+    let (tx, mut work) = mpsc::channel(4);
+    let router = Router {
+      app: Arc::clone(&app),
+      tx,
+    };
+    // Consumed even with no Music claim, instead of falling through to Spotify.
+    assert!(router.route_apple_music_event(old_volume).await.is_none());
+    assert!(work.try_recv().is_err());
+
+    app.lock().await.claim_apple_music();
+    app.lock().await.set_apple_music_volume(84);
+    assert!(router
+      .route_apple_music_event(IoEvent::AppleMusicVolume {
+        generation,
+        volume: 73,
+      })
+      .await
+      .is_none());
+    assert!(work.try_recv().is_err());
+    assert_eq!(
+      app.lock().await.apple_music_state().volume_in_flight,
+      Some(84)
+    );
+    router.route_apple_music_event(rx.try_recv().unwrap()).await;
+    assert!(matches!(
+      work.try_recv(),
+      Ok(Work::Transport {
+        command: Command::Volume(84),
+        ..
+      })
+    ));
+  }
+
+  #[tokio::test]
+  async fn apple_music_stale_volume_work_does_not_clear_a_newer_in_flight_volume() {
+    let (tx, _rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    let old = app.lock().await.claim_apple_music();
+    app.lock().await.claim_apple_music();
+    app.lock().await.set_apple_music_volume(73);
+    let (tx, rx) = mpsc::channel(1);
+    tx.try_send(Work::Transport {
+      generation: old,
+      revision: 0,
+      command: Command::Volume(20),
+    })
+    .ok()
+    .unwrap();
+    drop(tx);
+    let calls = Arc::new(Mutex::new(vec![]));
+    worker(
+      Arc::downgrade(&app),
+      rx,
+      FakeClient {
+        calls: Arc::clone(&calls),
+        fail_pause: false,
+      },
+    )
+    .await;
+    assert!(calls.lock().await.is_empty());
+    assert_eq!(
+      app.lock().await.apple_music_state().volume_in_flight,
+      Some(73)
+    );
+  }
+
+  #[tokio::test]
+  async fn apple_music_completed_volume_clears_its_in_flight_slot() {
+    let (tx, rx) = channel();
+    let app = Arc::new(Mutex::new(App::new(tx, UserConfig::new(), None)));
+    app.lock().await.claim_apple_music();
+    app.lock().await.set_apple_music_volume(73);
+    let router = Router::with_client(
+      &app,
+      FakeClient {
+        calls: Arc::new(Mutex::new(vec![])),
+        fail_pause: false,
+      },
+    );
+    router.route_apple_music_event(rx.try_recv().unwrap()).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+      while app
+        .lock()
+        .await
+        .apple_music_state()
+        .volume_in_flight
+        .is_some()
+      {
+        tokio::task::yield_now().await;
+      }
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.lock().await.apple_music_state().pending_commands, 0);
   }
 
   #[test]

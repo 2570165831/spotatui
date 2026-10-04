@@ -27,7 +27,7 @@ impl App {
   }
 
   pub fn flush_pending_volume(&mut self) {
-    // Music applies a volume change right away; nothing is pending for it.
+    // Music has its own coalescing state; discard any Spotify volume request.
     if self.apple_music_owns_playback() {
       self.cancel_volume_change();
       return;

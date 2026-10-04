@@ -260,8 +260,8 @@ pub enum IoEvent {
   /// Start the in-TUI Qobuz browser login (handled by `infra::qobuz::dispatch`).
   #[cfg_attr(not(feature = "qobuz"), allow(dead_code))]
   QobuzLogin,
-  /// A start held back while Music paused: sent only after Music acknowledged
-  /// the pause, and consumed by `infra::apple_music::dispatch`, which hands
+  /// A start held back while Music paused: sent after an acknowledged pause
+  /// or proof the Apple Event was not delivered. The Music router hands
   /// `event` back to the pump. Never bypasses the claim gate.
   #[cfg_attr(
     not(all(feature = "apple-music", target_os = "macos")),
@@ -270,6 +270,17 @@ pub enum IoEvent {
   AppleMusicHandoff {
     generation: u64,
     event: Box<IoEvent>,
+  },
+  /// Coalesced Music volume for one ownership generation. Always consumed by
+  /// the Music router, even after ownership changed, so it cannot reach a
+  /// different player. Without the router the network fallback discards it.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  AppleMusicVolume {
+    generation: u64,
+    volume: u8,
   },
   /// Load one page of a Music list (the playlists, a playlist's tracks or a
   /// search) at `offset`. Consumed by `infra::apple_music::dispatch`, which
@@ -601,6 +612,7 @@ impl Network {
         | IoEvent::GetQobuzSearchResults(_)
         | IoEvent::QobuzLogin
         | IoEvent::AppleMusicHandoff { .. }
+        | IoEvent::AppleMusicVolume { .. }
         | IoEvent::AppleMusicPage { .. }
         | IoEvent::GetRadioStations
         | IoEvent::GetRadioSearchResults(_)
@@ -1136,6 +1148,9 @@ impl Network {
           .lock()
           .await
           .set_status_message("Apple Music requires macOS and the apple-music feature", 5);
+      }
+      IoEvent::AppleMusicVolume { generation, .. } => {
+        self.app.lock().await.finish_apple_music_volume(generation);
       }
       // Radio browse/search events are handled by infra::radio::dispatch before
       // reaching the network; they only arrive here when the feature is off.
@@ -2083,6 +2098,18 @@ mod tests {
       assert!(!Network::runs_on_service_lane(&event));
       assert!(!Network::event_bypasses_spotify_auth(&event));
     }
+  }
+
+  #[test]
+  fn apple_music_volume_stays_serial_and_cannot_replay_to_another_owner() {
+    let event = IoEvent::AppleMusicVolume {
+      generation: 4,
+      volume: 73,
+    };
+    assert!(Network::event_bypasses_spotify_auth(&event));
+    assert!(!Network::runs_on_service_lane(&event));
+    // This targets one Music generation, not whoever owns the sink.
+    assert!(!Network::event_is_transport(&event));
   }
 
   #[test]

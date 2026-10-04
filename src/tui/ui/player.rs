@@ -659,17 +659,21 @@ pub(crate) fn playbar_progress_line(app: &App, playbar_area: Rect) -> Option<Pla
     crate::infra::media_metadata::current_playback_snapshot(app)?
       .metadata
       .duration_ms
-  } else if let Some(native_info) = &app.native_track_info {
-    native_info.duration_ms
   } else {
+    // The Spotify playbar renders no gauge without an item, even if native
+    // metadata has arrived. Only Music's own playbar bypasses this guard.
     let item = app
       .current_playback_context
       .as_ref()
       .and_then(|ctx| ctx.item.as_ref())?;
-    match item {
-      PlayableItem::Track(track) => track.duration.num_milliseconds() as u32,
-      PlayableItem::Episode(episode) => episode.duration.num_milliseconds() as u32,
-      _ => return None,
+    if let Some(native_info) = &app.native_track_info {
+      native_info.duration_ms
+    } else {
+      match item {
+        PlayableItem::Track(track) => track.duration.num_milliseconds() as u32,
+        PlayableItem::Episode(episode) => episode.duration.num_milliseconds() as u32,
+        _ => return None,
+      }
     }
   };
 
@@ -1813,8 +1817,12 @@ mod tests {
     DeviceType,
   };
 
-  #[allow(deprecated)]
   fn idle_native_app() -> App {
+    native_app_with_item(None)
+  }
+
+  #[allow(deprecated)]
+  fn native_app_with_item(item: Option<PlayableItem>) -> App {
     let mut app = App::default();
     app.is_streaming_active = true;
     app.native_device_id = Some("native-device".to_string());
@@ -1834,7 +1842,7 @@ mod tests {
       timestamp: Utc::now(),
       progress: None,
       is_playing: false,
-      item: None,
+      item,
       currently_playing_type: CurrentlyPlayingType::Unknown,
       actions: Actions::default(),
     });
@@ -1884,6 +1892,48 @@ mod tests {
     ] {
       assert!(!controls.contains(&absent), "{absent:?} offered");
     }
+  }
+
+  #[test]
+  fn native_metadata_without_a_playback_item_has_no_seekable_line() {
+    let mut app = idle_native_app();
+    app.native_track_info = Some(crate::core::app::NativeTrackInfo {
+      duration_ms: 180_000,
+      ..Default::default()
+    });
+    let area = Rect::new(0, 0, 160, 6);
+    assert!(playbar_progress_line(&app, area).is_none());
+    app.current_playback_context = None;
+    assert!(playbar_progress_line(&app, area).is_none());
+  }
+
+  #[test]
+  fn native_metadata_with_a_playback_item_keeps_its_seekable_line() {
+    let mut app = native_app_with_item(Some(PlayableItem::Track(
+      crate::core::test_helpers::full_track("0123456789012345678901", "Track"),
+    )));
+    app.native_track_info = Some(crate::core::app::NativeTrackInfo {
+      duration_ms: 240_000,
+      ..Default::default()
+    });
+    let line = playbar_progress_line(&app, Rect::new(0, 0, 160, 6)).unwrap();
+    assert_eq!(line.duration_ms, 240_000);
+  }
+
+  #[test]
+  fn apple_music_owner_can_seek_without_a_spotify_playback_item() {
+    // A fresh app has no Spotify context to supply the item guard.
+    let mut app = App::default();
+    let generation = app.claim_apple_music();
+    app.accept_apple_music_snapshot(
+      generation,
+      crate::infra::apple_music::parse_snapshot(
+        r#"{"running":true,"playing":true,"track":{"id":"0123456789ABCDEF","name":"Music track","artist":"Artist","album":"Album","duration":100},"position":1,"volume":23}"#,
+      )
+      .unwrap(),
+    );
+    let line = playbar_progress_line(&app, Rect::new(0, 0, 160, 6)).unwrap();
+    assert_eq!(line.duration_ms, 100_000);
   }
 
   #[test]

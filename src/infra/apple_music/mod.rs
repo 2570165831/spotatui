@@ -21,6 +21,39 @@ use crate::core::plugin_api::{PlaylistInfo, TrackInfo};
 pub(crate) const LIBRARY_URI: &str = "applemusic:library";
 pub(crate) const PAGE_SIZE: usize = 100;
 
+/// Failures that prove the requested Apple Event never reached Music. Other
+/// helper failures (especially timeouts) leave the outcome unknown.
+#[derive(Debug)]
+pub(crate) enum CommandError {
+  AutomationDenied,
+  HelperSpawn(std::io::Error),
+  LaunchFailed(anyhow::Error),
+}
+
+impl std::fmt::Display for CommandError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::AutomationDenied => f.write_str("Music automation was denied. Allow your terminal/spotatui to control Music in System Settings > Privacy & Security > Automation"),
+      Self::HelperSpawn(_) => f.write_str("Cannot start Music helper"),
+      Self::LaunchFailed(error) => write!(f, "Cannot launch Music: {error}"),
+    }
+  }
+}
+
+impl std::error::Error for CommandError {
+  fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    match self {
+      Self::HelperSpawn(error) => Some(error),
+      Self::LaunchFailed(error) => Some(error.as_ref()),
+      Self::AutomationDenied => None,
+    }
+  }
+}
+
+pub(crate) fn event_not_delivered(error: &anyhow::Error) -> bool {
+  error.downcast_ref::<CommandError>().is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Browse {
   Playlists,
@@ -326,6 +359,9 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
 pub(crate) struct RemoteState {
   pub claimed: bool,
   pub switching: bool,
+  /// A failed handoff proved no event reached Music. Its held start can be
+  /// released once, unless a newer explicit start supersedes this token.
+  pub recovered_handoff: Option<u64>,
   pub desired_playing: bool,
   /// Bumped whenever the user asks for play or pause. A start that Music
   /// ignored only clears `desired_playing` when no newer request came since.
@@ -339,6 +375,10 @@ pub(crate) struct RemoteState {
   /// When the last transport command finished: Music can still report the
   /// old play state for a moment after a pause (about 0.35s measured).
   pub commanded_at: Option<Instant>,
+  /// Latest volume while the throttle or an earlier volume command holds it.
+  pub pending_volume: Option<u8>,
+  pub last_volume: Option<Instant>,
+  pub volume_in_flight: Option<u8>,
   /// When a read first found Music not running. The claim is let go only
   /// once later reads still find it gone, see `accept_apple_music_snapshot`.
   pub quit_seen: Option<Instant>,
