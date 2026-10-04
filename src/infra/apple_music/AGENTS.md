@@ -6,8 +6,11 @@
   source goes through `Work::Handoff`: the worker pauses Music, re-reads until
   it really reports paused (`confirm_paused`: Music says "playing" for about
   0.35 s after a pause), and only then sends `IoEvent::AppleMusicHandoff` back
-  to the pump. The claim is released only by an acknowledged pause; a failed or
-  timed-out command keeps it, because the Apple Event may still have run.
+  to the pump. An acknowledged pause releases the claim, as does a typed error
+  proving Music never received the event (Automation denied, -1743, a failed
+  Music launch, or an `osascript` spawn failure); a failed handoff pause in those
+  cases also sends the held start. Other failures and timeouts keep the claim,
+  because the Apple Event may still have run.
 - **Every worker result is checked before it is written.** Results carry the
   `generation` they were queued under and are dropped when it moved. A snapshot
   read while transport commands are queued, or within 1.5 s of one finishing
@@ -32,8 +35,9 @@
 - **The script is constant.** `music.js` takes every input as an argv value and
   never builds or evaluates code from them. Read lists with bulk property reads
   (`list.tracks.persistentID()` and so on): a per-item read costs a round trip
-  per track. Each run has an 8 s timeout (`macos.rs`); `process.rs` maps
-  Apple Event errors (-1743 means the Automation permission is missing).
+  per track. `LAUNCH_WAIT` bounds only the wait for Music to answer after launch;
+  the real command then gets the full 8 s timeout (`macos.rs`). `process.rs`
+  maps Apple Event errors (-1743 means the Automation permission is missing).
 - **Errors are status messages** (`report_apple_music_error`), never
   `handle_error`: Music being busy or slow is not a failed CLI command.
 - **Tests never drive the real Music app.** State logic is tested in

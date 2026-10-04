@@ -400,6 +400,7 @@ reads a file in that directory. Other agents must open it.
 | A new `Action` variant | `src/core/action/AGENTS.md` |
 | A new `IoEvent`, the listening party | `src/infra/network/AGENTS.md` |
 | Native streaming (librespot) | `src/infra/player/AGENTS.md` |
+| Apple Music remote (macOS) | `src/infra/apple_music/AGENTS.md` |
 | `LocalPlayer`, macOS playback, output-device loss | `src/infra/audio/AGENTS.md` |
 | Decoded repeat/shuffle | `src/infra/queue/AGENTS.md` |
 | Radio tune-in | `src/infra/radio/AGENTS.md` |
@@ -428,6 +429,9 @@ reads a file in that directory. Other agents must open it.
   which PO-token enforcement leaves tokenless for embeddable videos - most
   label uploads. A non-embeddable gated video still fails.
 
+Details: `src/infra/audio/AGENTS.md` (`LocalPlayer`, output-device loss),
+`src/infra/queue/AGENTS.md`, `src/infra/radio/AGENTS.md`, `src/infra/qobuz/AGENTS.md`.
+
 ### Apple Music (feature `apple-music`, macOS only)
 
 Not a decoded source: the Music app plays, with the user's own login and
@@ -435,9 +439,6 @@ library, and spotatui is a remote for it. Every command is one constant JXA
 program (`infra/apple_music/music.js`) run by `osascript` on the Apple Music
 router's own serial worker, never on the pump. Details:
 `src/infra/apple_music/AGENTS.md`.
-
-Details: `src/infra/audio/AGENTS.md` (`LocalPlayer`, output-device loss),
-`src/infra/queue/AGENTS.md`, `src/infra/radio/AGENTS.md`, `src/infra/qobuz/AGENTS.md`.
 
 ### Testing conventions
 
