@@ -135,6 +135,10 @@ impl Default for App {
       keepawake: None,
       last_device_activation: None,
       native_activation_pending: false,
+      #[cfg(feature = "streaming")]
+      native_handed_off: false,
+      #[cfg(feature = "streaming")]
+      native_handoff_resume_tried: false,
       // Sort menu defaults
       playlist_sort: SortState::new(),
       album_sort: SortState::new(),
