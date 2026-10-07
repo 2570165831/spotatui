@@ -165,6 +165,29 @@ impl App {
     }
   }
 
+  /// What a Spotify Connect handoff (or local stop) does to the native queue
+  /// today: the published Spotify slot goes, so it cannot ghost-own the
+  /// playbar and transport (#437).
+  #[cfg(feature = "streaming")]
+  pub(crate) fn forget_queue_slot_after_handoff(&mut self) {
+    if self.queue_now_is_spotify() {
+      self.queue_now = None;
+      self.spotify_queue_guard_reloads = 0;
+      // The queue episode ends with the slot: a context left suspended under it
+      // would read as "between two queue items" and re-pause whatever plays next.
+      self.queue_suspended = None;
+      self.queue_slot_desired_playing = true;
+    }
+  }
+
+  /// Whether a librespot `Playing` event is stray and must be re-paused: a
+  /// decoded owner holds the sink, or a context is suspended under the queue
+  /// with no Spotify slot (meant for the window between two queue items).
+  #[cfg(feature = "streaming")]
+  pub(crate) fn librespot_playing_is_stray(&self) -> bool {
+    !self.native_should_drive() || (!self.queue_now_is_spotify() && self.queue_suspended.is_some())
+  }
+
   /// The queue slot's player when it is playing a *decoded* queued track (local /
   /// Subsonic / Qobuz / YouTube). `None` for a Spotify slot or an empty slot. Gated
   /// on exactly those four sources: they are the decoded ones a queue item can
@@ -436,6 +459,36 @@ mod tests {
 
     assert!(app.queue_suspended.is_none());
     assert!(rx.try_recv().is_err());
+  }
+
+  /// #708: hand playback to a phone while a queued Spotify track plays over a
+  /// suspended playlist, then pick spotatui again. The transfer's Playing
+  /// event must not be re-paused.
+  #[cfg(feature = "streaming")]
+  #[test]
+  fn playback_handed_back_after_a_handoff_mid_queue_is_not_re_paused() {
+    use crate::core::queue::SuspendedContext;
+    use crate::infra::queue::QueueNowPlaying;
+    let (tx, _rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app.queue_suspended = Some(SuspendedContext::Spotify {
+      context_uri: Some("spotify:playlist:ctx".to_string()),
+      resume_track_uri: Some("spotify:track:ctx".to_string()),
+    });
+    app.queue_now = Some(QueueNowPlaying::Spotify {
+      track: queue_track(Some("spotify:track:queued"), "Queued"),
+    });
+    assert!(
+      !app.librespot_playing_is_stray(),
+      "the queued track itself plays"
+    );
+
+    app.forget_queue_slot_after_handoff();
+
+    assert!(
+      !app.librespot_playing_is_stray(),
+      "the transferred track would be re-paused on every Playing event"
+    );
   }
 
   #[cfg(feature = "streaming")]

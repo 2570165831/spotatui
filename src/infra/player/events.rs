@@ -658,11 +658,7 @@ async fn handle_player_events(
         // next one not yet published), it never is. One-shot: a paused Spirc
         // emits no further Playing events, so this can't ping-pong.
         {
-          let stray_over_owner = {
-            let guard = app.lock().await;
-            !guard.native_should_drive()
-              || (!guard.queue_now_is_spotify() && guard.queue_suspended.is_some())
-          };
+          let stray_over_owner = app.lock().await.librespot_playing_is_stray();
           if stray_over_owner {
             player.pause();
             app.lock().await.set_native_playback_intent(false);
@@ -1471,10 +1467,7 @@ async fn disconnect_streaming_player(
     // published queue slot; replaying either would steal playback back, and a
     // leftover slot would ghost-own the playbar and transport (#437).
     app_lock.pending_start_playback = None;
-    if app_lock.queue_now_is_spotify() {
-      app_lock.queue_now = None;
-      app_lock.spotify_queue_guard_reloads = 0;
-    }
+    app_lock.forget_queue_slot_after_handoff();
   }
 
   app_lock.streaming_player = None;
