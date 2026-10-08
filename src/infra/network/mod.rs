@@ -732,6 +732,9 @@ impl Network {
     // failing loudly; otherwise ensure the token is fresh before proceeding.
     let bypass_auth = Self::event_bypasses_spotify_auth(&io_event);
     let on_spotify_lane = Self::runs_on_spotify_lane(&io_event);
+    // Only the `GetCurrentPlayback` handler releases the tick's poll latch, so
+    // a poll dropped at the gate below must release it here (#563).
+    let is_playback_poll = matches!(io_event, IoEvent::GetCurrentPlayback);
 
     if !bypass_auth {
       if self.spotify.is_none() {
@@ -741,6 +744,9 @@ impl Network {
         let mut app = self.app.lock().await;
         app.is_loading = false;
         app.is_volume_change_in_flight = false;
+        if is_playback_poll {
+          app.is_fetching_current_playback = false;
+        }
         if pending_playlist_id
           .as_deref()
           .is_some_and(|id| app.pending_playlist_open.as_deref() == Some(id))
@@ -754,8 +760,11 @@ impl Network {
         None => return,
       };
       if !self.ensure_authentication_fresh(false).await {
+        let mut app = self.app.lock().await;
+        if is_playback_poll {
+          app.is_fetching_current_playback = false;
+        }
         if let Some(id) = pending_playlist_id.as_deref() {
-          let mut app = self.app.lock().await;
           if app.pending_playlist_open.as_deref() == Some(id) {
             app.pending_playlist_open = None;
           }
@@ -2253,6 +2262,52 @@ mod tests {
     let app = app.lock().await;
     assert!(!app.is_loading);
     assert!(!app.auth_refresh_in_progress);
+
+    let _ = std::fs::remove_file(token_cache_path);
+  }
+
+  #[tokio::test]
+  async fn a_playback_poll_dropped_by_a_failed_refresh_lets_the_tick_poll_again() {
+    use std::time::Instant;
+    let expired_token_without_refresh = Token {
+      access_token: "expired_access_token".to_string(),
+      refresh_token: None,
+      expires_in: TimeDelta::seconds(3600),
+      expires_at: Some(Utc::now() - TimeDelta::seconds(60)),
+      scopes: Default::default(),
+    };
+    let spotify = spotify_with_token(expired_token_without_refresh).await;
+    let token_cache_path = temp_token_cache_path();
+    let (io_tx, io_rx) = std::sync::mpsc::channel();
+    let app = Arc::new(Mutex::new(App::new(
+      io_tx,
+      UserConfig::new(),
+      Some(SystemTime::now() - Duration::from_secs(60)),
+    )));
+    let tick_polls = |app: &mut App| {
+      app.instant_since_last_current_playback_poll = Instant::now() - Duration::from_secs(10);
+      app.update_on_tick(Duration::from_millis(250));
+      io_rx
+        .try_iter()
+        .any(|event| matches!(event, IoEvent::GetCurrentPlayback))
+    };
+    // The tick polls and latches until the poll's handler runs.
+    assert!(tick_polls(&mut *app.lock().await));
+    assert!(app.lock().await.is_fetching_current_playback);
+
+    let mut network = Network::new(
+      Some(spotify),
+      ClientConfig::new(),
+      &app,
+      token_cache_path.clone(),
+    );
+    network
+      .handle_network_event(IoEvent::GetCurrentPlayback)
+      .await;
+
+    let mut app = app.lock().await;
+    assert!(!app.is_fetching_current_playback);
+    assert!(tick_polls(&mut app), "the tick polls again after the drop");
 
     let _ = std::fs::remove_file(token_cache_path);
   }
