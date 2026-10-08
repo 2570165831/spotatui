@@ -47,6 +47,14 @@ pub fn snapshot_tracks(
     .collect()
 }
 
+/// Whether `track` is a row [`snapshot_tracks`] made up for an off-screen URI.
+/// Its `duration_ms` is 0 because the duration is unknown, not because the
+/// track is a livestream.
+#[cfg(feature = "queue-download")]
+pub fn is_placeholder(track: &TrackInfo) -> bool {
+  track.artists.is_empty() && track.uri.as_deref() == Some(track.name.as_str())
+}
+
 #[cfg(feature = "queue-download")]
 fn placeholder_track(uri: &str) -> TrackInfo {
   TrackInfo {
@@ -564,6 +572,15 @@ mod tests {
       assert_eq!(snap.len(), 1);
       assert_eq!(snap[0].uri.as_deref(), Some("qobuz:track:51628161"));
       assert_eq!(snap[0].name, "qobuz:track:51628161");
+    }
+
+    #[test]
+    fn a_placeholder_is_told_apart_from_a_known_row_with_no_duration() {
+      let snap = snapshot_tracks(&[], None, &["youtube:off12345".to_string()]);
+      assert!(is_placeholder(&snap[0]));
+      let mut live = track("youtube:live12345", "24/7 Lofi Radio");
+      live.duration_ms = 0;
+      assert!(!is_placeholder(&live));
     }
 
     #[test]
