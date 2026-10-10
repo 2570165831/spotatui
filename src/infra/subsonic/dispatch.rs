@@ -580,7 +580,13 @@ fn spawn_resolve(app: &Arc<Mutex<App>>, session: &SubsonicPlaybackState) {
       }
     };
     let mut guard = app.lock().await;
-    if let Some(s) = guard.subsonic_playback.as_mut() {
+    // A new session (another server, or a fresh start) builds a new source:
+    // the same URI there is a different track, so drop this result.
+    if let Some(s) = guard
+      .subsonic_playback
+      .as_mut()
+      .filter(|s| Arc::ptr_eq(&s.source, &source))
+    {
       let index = s.index;
       apply_resolved(&mut s.tracks, index, &uri, track);
     }
