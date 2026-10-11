@@ -179,7 +179,7 @@ PowerShell.
 ### Step 6 — Confirm the tools are visible
 
 Reload or restart your client so it picks up the new server, then list your tools.
-You should see eight, all prefixed with the server name (`mcp__spotatui__…` in
+You should see eighteen, all prefixed with the server name (`mcp__spotatui__…` in
 Claude Code, or `mcp__plugin_spotatui_spotatui__…` if you installed the plugin —
 a plugin's tools carry its name too):
 
@@ -193,6 +193,19 @@ a plugin's tools carry its name too):
 | `play_now` | Start a track immediately |
 | `skip_track` | Skip to the next track |
 | `set_dj_vibe` | Record a standing direction for the built-in auto-queue DJ (does not start it) |
+| `list_playlists` | Your playlists with their URIs, track counts and whether you own them |
+| `get_album` | An album's artists, release year and tracks |
+| `get_artist` | An artist's top tracks and albums |
+| `list_devices` | Your Spotify Connect devices and which one is active |
+| `transfer_playback` | Move playback to another Connect device |
+| `create_playlist` | Create a playlist, optionally with tracks |
+| `add_to_playlist` | Add tracks to a playlist you own or collaborate on |
+| `remove_from_playlist` | Remove one track from a playlist you own (destructive: the client asks you first) |
+| `like_tracks` | Add tracks to Liked Songs, or remove them |
+| `follow_artist` | Follow or unfollow an artist |
+
+The last ten are Spotify-only and the in-app DJ never calls them. A write takes at
+most 20 tracks per call.
 
 Then confirm it end-to-end by calling `get_now_playing`. A successful call proves
 the whole chain. Report the result to the user and stop — setup is done.
