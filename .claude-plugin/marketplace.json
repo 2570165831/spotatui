@@ -9,7 +9,7 @@
       "name": "spotatui",
       "source": "./agent-plugin",
       "description": "Turn any MCP-capable coding agent into a DJ for spotatui, the terminal Spotify client.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "license": "MIT"
     }
   ]

@@ -435,7 +435,7 @@ You may be asked to re-authenticate with Spotify the first time.
 ## Libraries used
 
 - [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
-- [rspotify](https://github.com/ramsayleung/rspotify) - Spotify Web API client
+- [rspotify](https://github.com/ramsayleung/rspotify) - Spotify model and id types
 - [librespot](https://github.com/librespot-org/librespot) - Spotify Connect streaming (via our maintained fork [spotatui-librespot](https://github.com/LargeModGames/spotatui-librespot), which backports fixes for Spotify's CDN changes)
 - [tokio](https://github.com/tokio-rs/tokio) - Async runtime
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Terminal manipulation
@@ -483,7 +483,7 @@ spotatui --debug
 
 spotatui prints the log path on startup and on exit — it lives in your temp
 directory as `spotatui_logs/spotatuilog<pid>`. With `--debug` it records every
-Spotify Web API request (method, path, status, duration), which is what turns
+Spotify request (method, path, status, duration), which is what turns
 "it doesn't play" into something diagnosable.
 
 If it crashed instead, `spotatui_panic.log` in the state directory already has
