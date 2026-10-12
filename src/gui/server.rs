@@ -603,7 +603,7 @@ mod tests {
     .unwrap();
 
     let mut values = Vec::new();
-    for _ in 0..20 {
+    for _ in 0..25 {
       values.push(next_json(&mut socket).await);
     }
     let kinds: Vec<_> = values.iter().map(|value| value["kind"].clone()).collect();
@@ -621,6 +621,7 @@ mod tests {
         "devices",
         "search",
         "lyrics",
+        "artist",
         "library",
         "liked",
         "queue",
@@ -629,7 +630,11 @@ mod tests {
         "session",
         "discover",
         "playlist_sync",
-        "track_table"
+        "track_table",
+        "recently_played",
+        "liked_marks",
+        "settings",
+        "update"
       ]
     );
     assert!(values[0]["payload"]["token"].is_string());
@@ -769,7 +774,7 @@ mod tests {
     boot.send_replace(Some(Arc::new(tokio::sync::Mutex::new(app))));
 
     let mut kinds = Vec::new();
-    for _ in 0..18 {
+    for _ in 0..23 {
       kinds.push(next_json(&mut page).await["kind"].clone());
     }
     assert_eq!(
@@ -784,6 +789,7 @@ mod tests {
         "devices",
         "search",
         "lyrics",
+        "artist",
         "library",
         "liked",
         "queue",
@@ -792,7 +798,11 @@ mod tests {
         "session",
         "discover",
         "playlist_sync",
-        "track_table"
+        "track_table",
+        "recently_played",
+        "liked_marks",
+        "settings",
+        "update"
       ]
     );
     assert!(

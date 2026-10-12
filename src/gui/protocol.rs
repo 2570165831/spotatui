@@ -7,11 +7,12 @@ use crate::core::app::{App, DiscoverTimeRange, DisplayDomain, DisplayRevisions, 
 use crate::core::first_run::compiled_in_sources;
 use crate::core::playlist_sync::Unmatched;
 use crate::core::plugin_api::{
-  device_list, route_name, AlbumInfo, ArtistInfo, DeviceInfo, PlaybackState, PlaylistInfo,
-  QueueItemSnapshot, QueueSnapshot, TrackInfo,
+  device_list, recently_played_snapshot, route_name, AlbumInfo, ArtistInfo, DeviceInfo,
+  PlaybackState, PlaylistInfo, QueueItemSnapshot, QueueSnapshot, TrackInfo,
 };
 use crate::core::source::Source;
 use crate::core::theme::{resolve, Color, Palette, Theme, ThemeField};
+use crate::core::update::{UpdateAsk, UpdateStatus};
 use crate::gui::onboarding::{OnboardingReply, OnboardingView};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -116,7 +117,91 @@ pub(crate) enum ServerMessage {
     rev: u64,
     payload: Box<TrackTablePayload>,
   },
+  /// The artist the app last fetched for its artist page.
+  Artist {
+    rev: u64,
+    payload: Box<ArtistPayload>,
+  },
+  /// Spotify's recently played tracks, most recent first.
+  RecentlyPlayed {
+    rev: u64,
+    payload: Vec<TrackInfo>,
+  },
+  /// The liked Spotify track ids among the rows the page can show: the track
+  /// table, the album, the artist's top tracks, recently played and Liked Songs.
+  LikedMarks {
+    rev: u64,
+    payload: Vec<String>,
+  },
+  /// The settings rows the page offers, in display order.
+  Settings {
+    rev: u64,
+    payload: Vec<SettingRow>,
+  },
+  /// The desktop shell's updater; `null` without one.
+  Update {
+    rev: u64,
+    payload: Option<UpdateStatus>,
+  },
 }
+
+#[derive(Serialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+pub(crate) struct SettingRow {
+  id: String,
+  /// `playback`, `streaming`, `integrations` or `updates`.
+  group: &'static str,
+  name: String,
+  description: String,
+  value: SettingRowValue,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum SettingRowValue {
+  Bool {
+    value: bool,
+  },
+  Number {
+    value: i64,
+  },
+  Text {
+    value: String,
+  },
+  /// Set with a `Text` input that names one of `options`.
+  Choice {
+    value: String,
+    options: Vec<String>,
+  },
+}
+
+/// The Behavior rows the page offers: (id, group, a description for the desktop app).
+/// The other rows only mean something in a terminal.
+const GUI_SETTINGS: &[(&str, &str, Option<&str>)] = &[
+  ("behavior.seek_milliseconds", "playback", None),
+  ("behavior.volume_increment", "playback", None),
+  ("behavior.stop_after_current_track", "playback", None),
+  ("behavior.keepawake_enabled", "playback", None),
+  ("behavior.enable_media_keys", "playback", None),
+  ("behavior.enable_streaming", "streaming", None),
+  ("behavior.streaming_device_name", "streaming", None),
+  ("behavior.streaming_bitrate", "streaming", None),
+  ("behavior.streaming_audio_cache", "streaming", None),
+  ("behavior.streaming_autoplay", "streaming", None),
+  ("behavior.enable_discord_rpc", "integrations", None),
+  ("behavior.enable_global_song_count", "integrations", None),
+  (
+    "behavior.disable_auto_update",
+    "updates",
+    Some("Only look for updates; download and install them from this page yourself"),
+  ),
+  (
+    "behavior.auto_update_delay",
+    "updates",
+    Some("How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'"),
+  ),
+];
 
 #[derive(Serialize)]
 #[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
@@ -212,6 +297,12 @@ pub(crate) struct SourcePlaylists {
   youtube: Vec<PlaylistInfo>,
   /// Stations are playable rows (`radio:<url>`), not playlists.
   radio: Vec<TrackInfo>,
+  /// Spotify's saved albums cached so far; `OpenLibrary(Albums)` fetches them.
+  saved_albums: Vec<AlbumInfo>,
+  /// Spotify's followed artists cached so far; `OpenLibrary(Artists)` fetches them.
+  followed_artists: Vec<ArtistInfo>,
+  /// The URIs of the Spotify playlists the user can add tracks to.
+  editable: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -304,6 +395,26 @@ pub(crate) struct AlbumPayload {
 
 #[derive(Serialize)]
 #[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+pub(crate) struct ArtistPayload {
+  /// `null` before the first artist fetch.
+  page: Option<ArtistPage>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+pub(crate) struct ArtistPage {
+  id: String,
+  name: String,
+  image_url: Option<String>,
+  /// The user follows this artist, as the last follow check found.
+  following: bool,
+  top_tracks: Vec<TrackInfo>,
+  albums: Vec<AlbumInfo>,
+  related_artists: Vec<ArtistInfo>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub(crate) struct PartyPayload {
   phase: PartyPhase,
   /// Present while hosting or joined.
@@ -390,8 +501,16 @@ pub(crate) struct StatsMovement {
 #[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ClientMessage {
-  Action { action: Box<Action> },
-  Onboarding { reply: OnboardingReply },
+  Action {
+    action: Box<Action>,
+  },
+  Onboarding {
+    reply: OnboardingReply,
+  },
+  /// Only a desktop shell has an updater to ask.
+  Update {
+    ask: UpdateAsk,
+  },
   Quit,
 }
 
@@ -559,8 +678,74 @@ fn channel_message(app: &App, domain: DisplayDomain, rev: u64) -> Option<ServerM
         }),
       }
     }
-    DisplayDomain::Artist => return None,
+    DisplayDomain::Artist => ServerMessage::Artist {
+      rev,
+      payload: Box::new(artist(app)),
+    },
+    DisplayDomain::RecentlyPlayed => ServerMessage::RecentlyPlayed {
+      rev,
+      payload: recently_played_snapshot(app),
+    },
+    DisplayDomain::LikedMarks => ServerMessage::LikedMarks {
+      rev,
+      payload: app.liked_marks_view().to_vec(),
+    },
+    DisplayDomain::Settings => ServerMessage::Settings {
+      rev,
+      payload: settings(app),
+    },
+    DisplayDomain::Update => ServerMessage::Update {
+      rev,
+      payload: app.update_status().cloned(),
+    },
   })
+}
+
+fn settings(app: &App) -> Vec<SettingRow> {
+  use crate::core::app::SettingValue;
+  let items = app.behavior_setting_items();
+  GUI_SETTINGS
+    .iter()
+    .filter(|(_, group, _)| *group != "updates" || app.update_status().is_some())
+    .filter_map(|(id, group, description)| {
+      let item = items
+        .iter()
+        .find(|item| item.id == *id && app.setting_offered(item))?;
+      let value = match &item.value {
+        SettingValue::Bool(value) => SettingRowValue::Bool { value: *value },
+        SettingValue::Number(value) => SettingRowValue::Number { value: *value },
+        SettingValue::String(value) => SettingRowValue::Text {
+          value: value.clone(),
+        },
+        SettingValue::Cycle(value, options) => SettingRowValue::Choice {
+          value: value.clone(),
+          options: options.iter().map(|option| option.to_string()).collect(),
+        },
+        SettingValue::Color(_) | SettingValue::Key(_) | SettingValue::Preset(_) => return None,
+      };
+      Some(SettingRow {
+        id: item.id.clone(),
+        group,
+        name: item.name.clone(),
+        description: description.map_or_else(|| item.description.clone(), str::to_string),
+        value,
+      })
+    })
+    .collect()
+}
+
+fn artist(app: &App) -> ArtistPayload {
+  ArtistPayload {
+    page: app.artist.as_ref().map(|artist| ArtistPage {
+      id: artist.artist_id.clone(),
+      name: artist.artist_name.clone(),
+      image_url: artist.image_url.clone(),
+      following: app.followed_artist_ids_set().contains(&artist.artist_id),
+      top_tracks: artist.top_tracks.clone(),
+      albums: artist.albums.items.clone(),
+      related_artists: artist.related_artists.clone(),
+    }),
+  }
 }
 
 fn playlist_sync(app: &App) -> PlaylistSyncPayload {
@@ -768,7 +953,29 @@ fn playlists(app: &App) -> SourcePlaylists {
     qobuz: app.qobuz_playlists().clone(),
     youtube: app.youtube_playlists().clone(),
     radio: app.radio_stations().clone(),
+    saved_albums: saved_albums(app),
+    followed_artists: app
+      .library()
+      .saved_artists
+      .pages
+      .iter()
+      .flat_map(|page| page.items.iter().cloned())
+      .collect(),
+    editable: app
+      .editable_playlists()
+      .into_iter()
+      .map(|playlist| playlist.uri.clone())
+      .collect(),
   }
+}
+
+fn saved_albums(app: &App) -> Vec<AlbumInfo> {
+  let mut pages: Vec<_> = app.library().saved_albums.pages.iter().collect();
+  pages.sort_by_key(|page| page.offset);
+  pages
+    .into_iter()
+    .flat_map(|page| page.items.iter().map(|saved| saved.album.clone()))
+    .collect()
 }
 
 fn playback(app: &App) -> PlaybackPayload {
@@ -875,6 +1082,7 @@ mod tests {
         "devices",
         "search",
         "lyrics",
+        "artist",
         "library",
         "liked",
         "queue",
@@ -883,7 +1091,11 @@ mod tests {
         "session",
         "discover",
         "playlist_sync",
-        "track_table"
+        "track_table",
+        "recently_played",
+        "liked_marks",
+        "settings",
+        "update"
       ]
     );
     let revisions = serde_json::to_value(app.display_revisions()).unwrap();
@@ -1315,6 +1527,194 @@ mod tests {
   }
 
   #[test]
+  fn fetched_followed_artists_ride_the_library_channel() {
+    let (mut app, _rx) = app();
+    let before = app.display_revisions();
+
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(crate::core::pagination::CursorPaged {
+        items: vec![ArtistInfo {
+          name: "Avicii".to_string(),
+          ..ArtistInfo::default()
+        }],
+        ..Default::default()
+      });
+
+    let library = &pushed(&diff(&before, &app), "library")["payload"];
+    assert_eq!(library["followed_artists"][0]["name"], "Avicii");
+  }
+
+  #[test]
+  fn a_fetched_artist_rides_the_artist_channel_with_its_follow_state() {
+    use crate::core::app::{Artist, ArtistBlock};
+    let (mut app, _rx) = app();
+    assert!(pushed(&resync(&app), "artist")["payload"]["page"].is_null());
+    let before = app.display_revisions();
+
+    app.artist = Some(Artist {
+      artist_id: "kygo".to_string(),
+      artist_name: "Kygo".to_string(),
+      image_url: Some("https://i.scdn.co/image/kygo".to_string()),
+      albums: Paged {
+        items: vec![AlbumInfo {
+          name: "Cloud Nine".to_string(),
+          ..AlbumInfo::default()
+        }],
+        ..Paged::default()
+      },
+      related_artists: vec![],
+      top_tracks: liked_page(0, 2, 2, false).items,
+      selected_album_index: 0,
+      selected_related_artist_index: 0,
+      selected_top_track_index: 0,
+      artist_hovered_block: ArtistBlock::TopTracks,
+      artist_selected_block: ArtistBlock::TopTracks,
+    });
+    app.bump_display(DisplayDomain::Artist);
+
+    let payload = &pushed(&diff(&before, &app), "artist")["payload"];
+    assert_eq!(payload["page"]["name"], "Kygo");
+    assert_eq!(payload["page"]["image_url"], "https://i.scdn.co/image/kygo");
+    assert_eq!(payload["page"]["top_tracks"][1]["name"], "Track 1");
+    assert_eq!(payload["page"]["albums"][0]["name"], "Cloud Nine");
+    assert_eq!(payload["page"]["following"], false);
+
+    let before = app.display_revisions();
+    app.followed_artist_ids_set_mut().insert("kygo".to_string());
+    let page = &pushed(&diff(&before, &app), "artist")["payload"]["page"];
+    assert_eq!(page["following"], true);
+  }
+
+  #[test]
+  fn saved_albums_ride_the_library_channel_in_offset_order() {
+    use crate::core::plugin_api::SavedAlbumInfo;
+    let (mut app, _rx) = app();
+    let before = app.display_revisions();
+    let page = |offset: u32, name: &str| Paged {
+      items: vec![SavedAlbumInfo {
+        album: AlbumInfo {
+          name: name.to_string(),
+          ..AlbumInfo::default()
+        },
+        added_at: String::new(),
+      }],
+      offset,
+      ..Paged::default()
+    };
+
+    app.store_saved_albums_page(page(1, "Second"));
+    app.store_saved_albums_page(page(0, "First"));
+
+    let albums = &pushed(&diff(&before, &app), "library")["payload"]["saved_albums"];
+    assert_eq!(albums[0]["name"], "First");
+    assert_eq!(albums[1]["name"], "Second");
+  }
+
+  #[test]
+  fn a_visible_row_turning_liked_pushes_the_liked_marks_channel() {
+    let (mut app, _rx) = app();
+    let mut rows = liked_page(0, 2, 2, false).items;
+    rows[0].id = Some("seen".to_string());
+    rows[1].id = Some("other".to_string());
+    app.recently_played = Some(crate::core::pagination::CursorPaged {
+      items: rows,
+      ..Default::default()
+    });
+    app.liked_song_ids_set_mut().insert("unseen".to_string());
+    app.note_display_changes();
+    let before = app.display_revisions();
+
+    app.liked_song_ids_set_mut().insert("seen".to_string());
+    app.note_display_changes();
+
+    let marks = &pushed(&diff(&before, &app), "liked_marks")["payload"];
+    assert_eq!(marks, &serde_json::json!(["seen"]));
+  }
+
+  #[test]
+  fn the_library_channel_names_the_playlists_the_user_can_edit() {
+    use crate::core::app::UserInfo;
+    let (mut app, _rx) = app();
+    *app.user_mut() = Some(UserInfo {
+      id: "me".to_string(),
+      ..UserInfo::default()
+    });
+    let before = app.display_revisions();
+
+    *app.all_playlists_mut() = vec![
+      playlist_info("mine", "Mine", "me", false),
+      playlist_info("shared", "Shared", "friend", true),
+      playlist_info("theirs", "Theirs", "friend", false),
+    ];
+
+    let editable = &pushed(&diff(&before, &app), "library")["payload"]["editable"];
+    assert_eq!(
+      editable,
+      &serde_json::json!(["spotify:playlist:mine", "spotify:playlist:shared"])
+    );
+  }
+
+  #[test]
+  fn the_settings_channel_offers_the_gui_rows_and_the_update_rows_only_with_an_updater() {
+    let (mut app, _rx) = app();
+    let ids = |app: &App| -> Vec<String> {
+      settings(app)
+        .iter()
+        .map(|row| row.id.clone())
+        .collect::<Vec<_>>()
+    };
+
+    let without = ids(&app);
+    let before = app.display_revisions();
+    app.set_update_status(UpdateStatus::Idle);
+
+    assert_eq!(without[0], "behavior.seek_milliseconds");
+    assert!(!without
+      .iter()
+      .any(|id| id.starts_with("behavior.tick_rate")));
+    assert!(!without.contains(&"behavior.disable_auto_update".to_string()));
+    let rows = &pushed(&diff(&before, &app), "settings")["payload"];
+    assert!(rows
+      .as_array()
+      .unwrap()
+      .iter()
+      .any(|row| row["id"] == "behavior.disable_auto_update"
+        && row["group"] == "updates"
+        && row["value"]["kind"] == "bool"));
+  }
+
+  #[test]
+  fn an_update_status_rides_the_update_channel() {
+    let (mut app, _rx) = app();
+    let before = app.display_revisions();
+
+    app.set_update_status(UpdateStatus::Ready {
+      version: "0.45.0".to_string(),
+    });
+
+    let update = &pushed(&diff(&before, &app), "update")["payload"];
+    assert_eq!(update["state"], "ready");
+    assert_eq!(update["version"], "0.45.0");
+  }
+
+  #[test]
+  fn recently_played_rides_its_own_channel() {
+    let (mut app, _rx) = app();
+    let before = app.display_revisions();
+
+    app.recently_played = Some(crate::core::pagination::CursorPaged {
+      items: liked_page(0, 1, 1, false).items,
+      ..Default::default()
+    });
+    app.bump_display(DisplayDomain::RecentlyPlayed);
+
+    let recent = &pushed(&diff(&before, &app), "recently_played")["payload"];
+    assert_eq!(recent[0]["name"], "Track 0");
+  }
+
+  #[test]
   fn opening_the_playing_tracks_album_from_the_page_fetches_it_by_track_id() {
     let (mut app, rx) = app();
 
@@ -1548,6 +1948,8 @@ mod tests {
     written::<DiscoverPayload>(&dir, &cfg);
     written::<PlaylistSyncPayload>(&dir, &cfg);
     written::<TrackTablePayload>(&dir, &cfg);
+    written::<ArtistPayload>(&dir, &cfg);
+    written::<ArtistPage>(&dir, &cfg);
     written::<ArtistInfo>(&dir, &cfg);
     written::<AlbumInfo>(&dir, &cfg);
     written::<PlaylistInfo>(&dir, &cfg);

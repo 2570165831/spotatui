@@ -89,6 +89,7 @@ pub(crate) fn setting_requirement(id: &str) -> Requirement {
     | "behavior.streaming_device_name"
     | "behavior.streaming_bitrate"
     | "behavior.streaming_audio_cache"
+    | "behavior.streaming_autoplay"
     | "keys.jump_to_album"
     | "keys.jump_to_artist_album"
     | "keys.jump_to_context"
@@ -172,10 +173,9 @@ pub struct SettingItem {
 }
 
 impl App {
-  /// Load settings for the current category into settings_items
-  pub fn load_settings_for_category(&mut self) {
-    self.settings_items = match self.view.settings_category {
-      SettingsCategory::Behavior => vec![
+  /// The Behavior rows, apart from the state of the Settings screen.
+  pub(crate) fn behavior_setting_items(&self) -> Vec<SettingItem> {
+    vec![
         SettingItem {
           id: "behavior.seek_milliseconds".to_string(),
           name: "Seek Duration (ms)".to_string(),
@@ -330,6 +330,13 @@ impl App {
           name: "Streaming Audio Cache".to_string(),
           description: "Keep played audio in the cache directory (applies on restart)".to_string(),
           value: SettingValue::Bool(self.user_config.behavior.streaming_audio_cache),
+        },
+        #[cfg(feature = "streaming")]
+        SettingItem {
+          id: "behavior.streaming_autoplay".to_string(),
+          name: "Autoplay".to_string(),
+          description: "Play related songs when a list ends (applies on restart)".to_string(),
+          value: SettingValue::Bool(self.user_config.behavior.streaming_autoplay),
         },
         SettingItem {
           id: "behavior.startup_behavior".to_string(),
@@ -533,7 +540,13 @@ impl App {
           description: "Visual pixel size (1-3)".to_string(),
           value: SettingValue::Number(self.user_config.behavior.cover_art_dither_pixel_scale as i64),
         },
-      ],
+    ]
+  }
+
+  /// Load settings for the current category into settings_items
+  pub fn load_settings_for_category(&mut self) {
+    self.settings_items = match self.view.settings_category {
+      SettingsCategory::Behavior => self.behavior_setting_items(),
       SettingsCategory::Icons => vec![
         SettingItem {
           id: "behavior.liked_icon".to_string(),

@@ -21,6 +21,9 @@ impl Default for App {
       discover_top_tracks_range: None,
       discover_view: DiscoverView::default(),
       search_liked_view: Vec::new(),
+      liked_marks_view: Vec::new(),
+      #[cfg(feature = "gui")]
+      update_status: None,
       source_table_uri: None,
       track_table_view: TrackTableView::default(),
       stats_period: RecapPeriod::ThirtyDays,

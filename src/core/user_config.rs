@@ -606,6 +606,7 @@ pub struct BehaviorConfigString {
   pub streaming_device_name: Option<String>,
   pub streaming_bitrate: Option<u16>,
   pub streaming_audio_cache: Option<bool>,
+  pub streaming_autoplay: Option<bool>,
   pub sync_token: Option<String>,
   pub local_music_path: Option<String>,
   pub subsonic_url: Option<String>,
@@ -792,6 +793,9 @@ pub struct BehaviorConfig {
   pub streaming_bitrate: u16,
   /// Keep played audio in the cache directory.
   pub streaming_audio_cache: bool,
+  /// Play related songs when a list ends. Spotify keeps this per device,
+  /// so librespot cannot read it from the account.
+  pub streaming_autoplay: bool,
   pub sync_token: Option<String>,
   /// Filesystem path to the local music library root (browsed by the Local
   /// Files screen). Defaults to the OS music directory; `None` if unavailable.
@@ -973,6 +977,66 @@ pub struct UserConfigString {
   plugin_commands: Option<HashMap<String, String>>,
   format: Option<FormatConfigString>,
   tables: Option<TablesConfigString>,
+}
+
+/// Puts back the `behavior`, `keybindings` and `theme` keys this build does not compile,
+/// so a save from a build without a feature keeps that feature's settings.
+fn keep_keys_this_build_lacks(content: &mut serde_yaml::Value, on_disk: &serde_yaml::Value) {
+  for (section, known) in [
+    ("behavior", field_names::<BehaviorConfigString>()),
+    ("keybindings", field_names::<KeyBindingsString>()),
+    ("theme", field_names::<UserTheme>()),
+  ] {
+    let (Some(saved), Some(target)) = (
+      on_disk.get(section).and_then(serde_yaml::Value::as_mapping),
+      content
+        .get_mut(section)
+        .and_then(serde_yaml::Value::as_mapping_mut),
+    ) else {
+      continue;
+    };
+    for (key, value) in saved {
+      if key.as_str().is_some_and(|key| !known.contains(&key)) && !target.contains_key(key) {
+        target.insert(key.clone(), value.clone());
+      }
+    }
+  }
+}
+
+/// The field names serde derive lists for a struct in this build.
+fn field_names<T: serde::de::DeserializeOwned>() -> &'static [&'static str] {
+  use serde::de::{Error, Visitor};
+  use serde::forward_to_deserialize_any;
+  use std::cell::Cell;
+
+  struct Recorder<'a>(&'a Cell<&'static [&'static str]>);
+
+  impl<'de> serde::Deserializer<'de> for Recorder<'_> {
+    type Error = serde::de::value::Error;
+
+    fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
+      Err(Error::custom("only the field names are read"))
+    }
+
+    fn deserialize_struct<V: Visitor<'de>>(
+      self,
+      _: &'static str,
+      fields: &'static [&'static str],
+      _: V,
+    ) -> Result<V::Value, Self::Error> {
+      self.0.set(fields);
+      Err(Error::custom("only the field names are read"))
+    }
+
+    forward_to_deserialize_any! {
+      bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+      option unit unit_struct newtype_struct seq tuple tuple_struct map enum identifier ignored_any
+    }
+  }
+
+  let fields = Cell::new(&[][..]);
+  let _ = T::deserialize(Recorder(&fields));
+  fields.get()
 }
 
 // ===== Phase 5: table columns =====
@@ -1204,6 +1268,7 @@ impl UserConfig {
         streaming_device_name: "spotatui".to_string(),
         streaming_bitrate: STREAMING_BITRATE_DEFAULT,
         streaming_audio_cache: false,
+        streaming_autoplay: true,
         sync_token: None,
         local_music_path: dirs::audio_dir().map(|p| p.to_string_lossy().to_string()),
         subsonic_url: None,
@@ -1775,6 +1840,9 @@ impl UserConfig {
     if let Some(audio_cache) = behavior_config.streaming_audio_cache {
       self.behavior.streaming_audio_cache = audio_cache;
     }
+    if let Some(autoplay) = behavior_config.streaming_autoplay {
+      self.behavior.streaming_autoplay = autoplay;
+    }
     if let Some(local_music_path) = behavior_config.local_music_path {
       let trimmed = local_music_path.trim();
       self.behavior.local_music_path = if trimmed.is_empty() {
@@ -2304,6 +2372,7 @@ impl UserConfig {
       streaming_device_name: Some(self.behavior.streaming_device_name.clone()),
       streaming_bitrate: Some(self.behavior.streaming_bitrate),
       streaming_audio_cache: Some(self.behavior.streaming_audio_cache),
+      streaming_autoplay: Some(self.behavior.streaming_autoplay),
       // --- Phase 2/3/6 new fields (persist whatever the user set) ---
       gauge_filled_icon: Some(self.behavior.gauge_filled_icon.clone()),
       gauge_unfilled_icon: Some(self.behavior.gauge_unfilled_icon.clone()),
@@ -2487,7 +2556,14 @@ impl UserConfig {
     // cache) using a temp-file + atomic rename, so a crash mid-write can't
     // corrupt the config. Do not log `content_yml`: it may contain plaintext
     // credentials.
-    let content_yml = serde_yaml::to_string(&final_config)?;
+    let mut content = serde_yaml::to_value(&final_config)?;
+    if let Some(on_disk) = fs::read_to_string(&paths.config_file_path)
+      .ok()
+      .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+    {
+      keep_keys_this_build_lacks(&mut content, &on_disk);
+    }
+    let content_yml = serde_yaml::to_string(&content)?;
     crate::core::auth::write_private_file_atomic(&paths.config_file_path, content_yml.as_bytes())?;
 
     Ok(())
@@ -3432,6 +3508,35 @@ dj_api_key: null
     config.behavior.dj_configured = Some(true);
     config.save_config().unwrap();
     assert_eq!(on_disk(&config_path).dj_configured, Some(true));
+  }
+
+  #[test]
+  fn a_save_keeps_the_settings_of_features_this_build_lacks() {
+    use super::{UserConfig, UserConfigPaths};
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.yml");
+    std::fs::write(
+      &config_path,
+      "behavior:\n  future_setting: 7\n  volume_percent: 40\nkeybindings:\n  future_key: ctrl-q\n",
+    )
+    .unwrap();
+    let mut config = UserConfig::new();
+    config.path_to_config = Some(UserConfigPaths {
+      config_file_path: config_path.clone(),
+    });
+
+    config.save_config().unwrap();
+
+    let saved: serde_yaml::Value =
+      serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(saved["behavior"]["future_setting"], 7);
+    assert_eq!(saved["keybindings"]["future_key"], "ctrl-q");
+    assert!(
+      saved["behavior"].get("volume_percent").is_none(),
+      "a field this build has and left unset is not brought back"
+    );
+    assert!(super::field_names::<super::BehaviorConfigString>().contains(&"seek_milliseconds"));
   }
 
   #[cfg(feature = "ai-dj")]

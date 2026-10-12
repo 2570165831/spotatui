@@ -1,6 +1,7 @@
 import type { NowPlaying } from "../src/bindings/NowPlaying";
 import type { PlaylistInfo } from "../src/bindings/PlaylistInfo";
 import type { ServerMessage } from "../src/bindings/ServerMessage";
+import type { SettingRow } from "../src/bindings/SettingRow";
 import type { Source } from "../src/bindings/Source";
 import type { TrackInfo } from "../src/bindings/TrackInfo";
 
@@ -24,6 +25,10 @@ const revisions = {
   discover: 1,
   playlist_sync: 1,
   track_table: 1,
+  recently_played: 1,
+  liked_marks: 1,
+  settings: 1,
+  update: 1,
 };
 
 export const hello: ServerMessage = {
@@ -211,6 +216,13 @@ export const library: ServerMessage[] = [
       qobuz: [],
       youtube: [],
       radio: [],
+      saved_albums: [],
+      followed_artists: [],
+      editable: [
+        "spotify:playlist:1",
+        "spotify:playlist:2",
+        "spotify:playlist:4",
+      ],
     },
   },
   {
@@ -247,6 +259,9 @@ export const libraryUnavailable: ServerMessage[] = [
       qobuz: [],
       youtube: [],
       radio: [],
+      saved_albums: [],
+      followed_artists: [],
+      editable: [],
     },
   },
   {
@@ -700,15 +715,164 @@ export const filmScores: ServerMessage[] = [
         ["Cornfield Chase", "Hans Zimmer", 126],
         ["Now We Are Free", "Hans Zimmer", 254],
         ["Concerning Hobbits", "Howard Shore", 175],
-      ].map(([name, artist, seconds], index) =>
-        track(
+      ].map(([name, artist, seconds], index) => ({
+        ...track(
           name as string,
           seconds as number,
           `spotify:track:f${index}`,
           artist as string,
         ),
-      ),
+        id: `f${index}`,
+        album_id: "interstellar",
+        artist_refs: [{ id: "zimmer", name: artist as string }],
+        is_local: false,
+      })),
       has_more: false,
     },
   },
+  { kind: "liked_marks", rev: 1, payload: ["f1"] },
+];
+
+/** Two songs of Adele's 21 played lately, so Home shows the album. */
+export const recentlyPlayed: ServerMessage[] = [
+  {
+    kind: "recently_played",
+    rev: 1,
+    payload: adele21.slice(0, 2).map(([name, seconds], index) => ({
+      ...track(name, seconds, `spotify:track:a${index}`),
+      album: "21",
+      album_id: "21",
+      artist_refs: [{ id: "adele", name: "Adele" }],
+      is_local: false,
+    })),
+  },
+];
+
+/** Adele's artist page: her top songs from 21 and the album. */
+export const artist: ServerMessage[] = [
+  {
+    kind: "artist",
+    rev: 1,
+    payload: {
+      page: {
+        id: "adele",
+        name: "Adele",
+        image_url: null,
+        following: false,
+        top_tracks: adele21.slice(0, 6).map(([name, seconds], index) => ({
+          ...track(name, seconds, `spotify:track:a${index}`),
+          album: "21",
+          album_id: "21",
+          is_local: false,
+        })),
+        albums: [
+          {
+            id: "21",
+            uri: "spotify:album:21",
+            name: "21",
+            artists: [{ id: "adele", name: "Adele" }],
+            album_type: "album",
+            release_date: "2011-01-24",
+            total_tracks: 11,
+            image_url: null,
+            tracks: [],
+          },
+        ],
+        related_artists: [
+          { id: "sam", uri: null, name: "Sam Smith", image_url: null },
+        ],
+      },
+    },
+  },
+];
+
+function setting(
+  id: string,
+  group: string,
+  name: string,
+  description: string,
+  value: SettingRow["value"],
+): SettingRow {
+  return { id: `behavior.${id}`, group, name, description, value };
+}
+
+/** The desktop app's settings rows, with a downloaded update waiting to install. */
+export const settings: ServerMessage[] = [
+  {
+    kind: "settings",
+    rev: 1,
+    payload: [
+      setting(
+        "seek_milliseconds",
+        "playback",
+        "Seek Duration (ms)",
+        "Milliseconds to skip when seeking",
+        { kind: "number", value: 5000 },
+      ),
+      setting(
+        "volume_increment",
+        "playback",
+        "Volume Increment",
+        "Volume change per keypress (0-100)",
+        { kind: "number", value: 10 },
+      ),
+      setting(
+        "stop_after_current_track",
+        "playback",
+        "Stop After Current Track",
+        "Pause playback when the current track finishes",
+        { kind: "bool", value: false },
+      ),
+      setting(
+        "enable_media_keys",
+        "playback",
+        "Media Key Controls",
+        "Let OS media keys, headphone buttons, and remote controls (playerctl, Now Playing) control playback",
+        { kind: "bool", value: true },
+      ),
+      setting(
+        "enable_streaming",
+        "streaming",
+        "Native Streaming",
+        "Play Spotify in spotatui as a Connect device (applies on restart)",
+        { kind: "bool", value: true },
+      ),
+      setting(
+        "streaming_device_name",
+        "streaming",
+        "Streaming Device Name",
+        "The Connect device name other Spotify apps show (applies on restart)",
+        { kind: "text", value: "spotatui" },
+      ),
+      setting(
+        "streaming_bitrate",
+        "streaming",
+        "Streaming Bitrate",
+        "Native streaming quality in kbps (applies on restart)",
+        { kind: "choice", value: "320", options: ["96", "160", "320"] },
+      ),
+      setting(
+        "enable_discord_rpc",
+        "integrations",
+        "Discord Rich Presence",
+        "Show your current track in Discord",
+        { kind: "bool", value: true },
+      ),
+      setting(
+        "disable_auto_update",
+        "updates",
+        "Disable Auto-Update",
+        "Only look for updates; download and install them from this page yourself",
+        { kind: "bool", value: false },
+      ),
+      setting(
+        "auto_update_delay",
+        "updates",
+        "Auto-Update Delay",
+        "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'",
+        { kind: "text", value: "0" },
+      ),
+    ],
+  },
+  { kind: "update", rev: 1, payload: { state: "ready", version: "0.44.0" } },
 ];

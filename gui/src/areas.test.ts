@@ -4,6 +4,7 @@ import { shellKey, type ShellKey } from "./areas";
 const press = (key: string, patch: Partial<ShellKey> = {}): ShellKey => ({
   key,
   modified: false,
+  command: false,
   composing: false,
   handled: false,
   typing: false,
@@ -14,7 +15,7 @@ const press = (key: string, patch: Partial<ShellKey> = {}): ShellKey => ({
 
 describe("shellKey", () => {
   it("a digit switches to its area", () => {
-    expect(shellKey(press("1"))).toEqual({ area: "library" });
+    expect(shellKey(press("1"))).toEqual({ area: "home" });
     expect(shellKey(press("5"))).toEqual({ area: "stats" });
     expect(shellKey(press("7"))).toBeNull();
   });
@@ -25,6 +26,15 @@ describe("shellKey", () => {
 
   it("a key held with ctrl, meta or alt passes through to the browser", () => {
     expect(shellKey(press("1", { modified: true }))).toBeNull();
+  });
+
+  it("the command key with a comma opens Settings, even from a text field", () => {
+    const comma = { modified: true, command: true };
+    expect(shellKey(press(",", comma))).toBe("settings");
+    expect(shellKey(press(",", { ...comma, typing: true }))).toBe("settings");
+    expect(shellKey(press(",", { ...comma, overlay: true }))).toBeNull();
+    expect(shellKey(press(",", { modified: true }))).toBeNull();
+    expect(shellKey(press(","))).toBeNull();
   });
 
   it("a key a screen already handled does nothing more", () => {
