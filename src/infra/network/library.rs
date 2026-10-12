@@ -1864,8 +1864,17 @@ impl LibraryNetwork for Network {
             .find(|playlist| playlist.id.as_deref() == Some(playlist_id.id()))
             .map(|playlist| playlist.name.clone());
 
+          // The added track lands at the end of the playlist, past every page
+          // the opened playlist already cached, so those pages are stale.
+          // `is_complete` reads false here, making the next search or sort walk
+          // Spotify again. This runs on any screen: an add from search results
+          // or an agent leaves the cached pages behind too.
+          app.mark_playlist_track_pages_stale(&playlist_id);
+
           if app.is_current_route_playlist_track_table_for(&playlist_id) {
             let playlist_offset = app.playlist_offset;
+            // Refresh the page the user is looking at. It doesn't make the
+            // rest of the cache current, which is why the mark above stays.
             app.dispatch(IoEvent::GetPlaylistItems(
               playlist_id.id().to_string(),
               playlist_offset,
@@ -1904,6 +1913,13 @@ impl LibraryNetwork for Network {
     .await
     {
       Ok(_) => {
+        {
+          let mut app = self.app.lock().await;
+          // A remove never refetches: the cached pages now show a track that
+          // is no longer there. Mark them stale so the next search or sort
+          // walks Spotify again instead of bringing the removed track back.
+          app.mark_playlist_track_pages_stale(&playlist_id);
+        }
         self
           .show_status_message("Removed from playlist".to_string(), 3)
           .await;

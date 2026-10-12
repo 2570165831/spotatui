@@ -12,6 +12,8 @@
 
 - **A Qobuz, Subsonic or YouTube track started by URI shows its title**: when the AI DJ or an MCP client's `play_now` started a track that was not in the track table or the search results, the playbar, the window title and the OS media controls showed its URI (`qobuz:track:51628161`) for the whole track, with no artist and no duration. spotatui now looks the track up once it starts: Qobuz in its catalogue, Subsonic with the server's `getSong`, and YouTube from the video page yt-dlp already reads for the download, so YouTube costs no extra request. The URI stays on screen until the answer arrives, and a lookup that fails leaves it there without stopping playback ([#716](https://github.com/LargeModGames/spotatui/issues/716)).
 
+- **Search and sort in a playlist see your own edits**: search and sort read the playlist pages that opening it had already loaded, and those pages were not refreshed after you removed or added a track in spotatui (also from another screen, MCP, the DJ or a Lua plugin), so a removed track came back and an added one was missing on a playlist longer than one page. An add or a remove now marks the loaded pages out of date, so the next search or sort fetches the playlist from Spotify again ([#750](https://github.com/LargeModGames/spotatui/issues/750)).
+
 ## [v0.44.0] 2026-10-12
 
 ### Added
