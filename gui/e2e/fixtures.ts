@@ -862,7 +862,7 @@ export const settings: ServerMessage[] = [
         "disable_auto_update",
         "updates",
         "Disable Auto-Update",
-        "Only look for updates; download and install them from this page yourself",
+        "Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself",
         { kind: "bool", value: false },
       ),
       setting(
