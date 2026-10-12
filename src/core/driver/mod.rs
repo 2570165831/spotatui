@@ -63,6 +63,12 @@ fn track_identity(snapshot: &crate::infra::media_metadata::PlaybackSnapshot) -> 
   )
 }
 
+/// The base62 id that gets Spotify's own lyrics; `None` keeps the LRCLIB lookup.
+fn spotify_lyrics_id(item_uri: Option<&str>) -> Option<String> {
+  let id = item_uri?.strip_prefix("spotify:track:")?;
+  (id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| id.to_string())
+}
+
 /// Resolve what cover art to fetch for the track described by `snapshot`.
 ///
 /// Local files carry embedded artwork read straight from the file (no URL), so
@@ -323,6 +329,7 @@ impl Driver {
                 title,
                 artists,
                 snapshot.metadata.duration_ms as f64 / 1000.0,
+                spotify_lyrics_id(snapshot.item_uri.as_deref()),
               ));
             } else {
               app.desired_lyrics_identity = None;
@@ -929,6 +936,29 @@ mod tests {
     let mut app = App::new(tx, UserConfig::new(), connected.then(SystemTime::now));
     app.push_navigation_stack(route, block);
     (app, rx)
+  }
+
+  #[test]
+  fn a_spotify_track_uri_gives_a_lyrics_id() {
+    assert_eq!(
+      spotify_lyrics_id(Some("spotify:track:0DiWol3AO6WpXZgp0goxAV")).as_deref(),
+      Some("0DiWol3AO6WpXZgp0goxAV")
+    );
+  }
+
+  #[test]
+  fn local_files_episodes_and_other_sources_give_no_lyrics_id() {
+    for uri in [
+      Some("spotify:local:Daft+Punk:Discovery:One+More+Time:320"),
+      // What a native Spotify local file reports: the local URI behind the track prefix.
+      Some("spotify:track:spotify:local:Daft+Punk:Discovery:One+More+Time:320"),
+      Some("spotify:episode:4rOoJ6Egrf8K2IrywzwOMk"),
+      Some("file:///music/one-more-time.flac"),
+      Some("youtube:FGBhQbmPwH8"),
+      None,
+    ] {
+      assert_eq!(spotify_lyrics_id(uri), None, "{uri:?}");
+    }
   }
 
   #[test]
