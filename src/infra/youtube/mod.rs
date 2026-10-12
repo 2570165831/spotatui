@@ -436,12 +436,17 @@ fn video_to_track_info(v: &YtVideo) -> TrackInfo {
 /// mapped like a search row. The last line that parses for this video wins;
 /// anything else on stdout (a notice, an older yt-dlp printing nothing) gives
 /// `None`, never an error.
+///
+/// A line with no duration gives `None` as well: a row with a 0 duration reads
+/// as a livestream, so a revisit would refuse to play a video that just
+/// downloaded in full. The placeholder stays replayable instead.
 fn track_from_download_output(stdout: &str, video_id: &str) -> Option<TrackInfo> {
   stdout
     .lines()
     .rev()
     .filter_map(|line| serde_json::from_str::<YtVideo>(line.trim()).ok())
     .find(|v| v.id == video_id && !v.title.trim().is_empty())
+    .filter(|v| v.duration.is_some_and(|secs| secs > 0.0))
     .map(|v| video_to_track_info(&v))
 }
 
@@ -624,6 +629,19 @@ mod tests {
     assert!(track_from_download_output(DOWNLOAD_STDOUT, "dQw4w9WgXcQ").is_none());
     // A line with no title would only replace the URI with an empty name.
     assert!(track_from_download_output(r#"{"id": "5NV6Rdv1a3I"}"#, "5NV6Rdv1a3I").is_none());
+  }
+
+  #[test]
+  fn a_download_with_no_duration_keeps_the_row_out_of_the_livestream_check() {
+    for duration in ["null", "0"] {
+      let stdout = format!(
+        r#"{{"id": "5NV6Rdv1a3I", "title": "Daft Punk - Get Lucky", "duration": {duration}}}"#
+      );
+      assert!(
+        track_from_download_output(&stdout, "5NV6Rdv1a3I").is_none(),
+        "duration {duration} would turn the row into Plan::Live on a revisit"
+      );
+    }
   }
 
   #[tokio::test]
