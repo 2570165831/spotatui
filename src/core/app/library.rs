@@ -96,6 +96,8 @@ impl App {
 
   pub(crate) fn saved_album_ids_set_mut(&mut self) -> &mut HashSet<String> {
     self.display_revisions.bump(DisplayDomain::Library);
+    // The album page shows whether its album is saved.
+    self.display_revisions.bump(DisplayDomain::Album);
     &mut self.saved_album_ids_set
   }
 
@@ -105,6 +107,8 @@ impl App {
 
   pub(crate) fn saved_show_ids_set_mut(&mut self) -> &mut HashSet<String> {
     self.display_revisions.bump(DisplayDomain::Library);
+    // The show page shows whether its show is saved.
+    self.display_revisions.bump(DisplayDomain::Show);
     &mut self.saved_show_ids_set
   }
 
@@ -443,6 +447,7 @@ impl App {
 
   pub fn reset_saved_tracks_view(&mut self) {
     self.active_saved_track_filter = None;
+    self.track_table_epoch = self.track_table_epoch.wrapping_add(1);
     self.saved_tracks_prefetch_generation = self.saved_tracks_prefetch_generation.wrapping_add(1);
     self.saved_tracks_prefetch_in_flight.clear();
     self.saved_tracks_mut().clear();
@@ -703,6 +708,63 @@ impl App {
     }
   }
 
+  /// Show a fetched saved-shows page and mark its shows as saved.
+  pub(crate) fn store_saved_shows_page(&mut self, page: Paged<ShowInfo>) {
+    let ids: Vec<String> = page
+      .items
+      .iter()
+      .filter_map(|show| show.id.clone())
+      .collect();
+    self.saved_show_ids_set.extend(ids);
+    let shows = &mut self.library_mut().saved_shows;
+    match shows
+      .pages
+      .iter()
+      .position(|cached| cached.offset == page.offset)
+    {
+      Some(slot) => {
+        shows.pages[slot] = page;
+        shows.index = slot;
+      }
+      None => shows.add_pages(page),
+    }
+  }
+
+  /// Drop the cached episodes: they belong to the show opened before.
+  pub(crate) fn clear_show_episodes(&mut self) {
+    self.display_revisions.bump(DisplayDomain::Show);
+    self.library.show_episodes = ScrollableResultPages::new();
+  }
+
+  /// The id of the show the episode table shows.
+  pub(crate) fn selected_show_id(&self) -> Option<&str> {
+    match self.episode_table_context {
+      EpisodeTableContext::Full => self.selected_show_full.as_ref()?.show.id.as_deref(),
+      EpisodeTableContext::Simplified => self.selected_show_simplified.as_ref()?.show.id.as_deref(),
+    }
+  }
+
+  /// Show a fetched episode page of the open show; `first` starts the list over.
+  pub(crate) fn store_show_episodes_page(&mut self, page: Paged<EpisodeInfo>, first: bool) {
+    // Only the show page draws episodes, so a page never resends the library.
+    self.display_revisions.bump(DisplayDomain::Show);
+    let episodes = &mut self.library.show_episodes;
+    if first {
+      *episodes = ScrollableResultPages::new();
+    }
+    match episodes
+      .pages
+      .iter()
+      .position(|cached| cached.offset == page.offset)
+    {
+      Some(slot) => {
+        episodes.pages[slot] = page;
+        episodes.index = slot;
+      }
+      None => episodes.add_pages(page),
+    }
+  }
+
   pub fn get_current_user_saved_albums_previous(&mut self) {
     if self.library.saved_albums.index > 0 {
       self.library_mut().saved_albums.index -= 1;
@@ -884,6 +946,18 @@ mod tests {
       .map(|t| t.name.as_str())
       .collect();
     assert_eq!(names, vec!["Charlie", "Bravo", "Alpha"]);
+  }
+
+  #[test]
+  fn a_radio_result_is_dropped_once_liked_songs_opened_after_the_request() {
+    let (tx, _rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app.get_recommendations_for_track_id("0000000000000000000001".to_string());
+    assert!(app.radio_result_is_current());
+
+    app.reset_saved_tracks_view();
+
+    assert!(!app.radio_result_is_current());
   }
 
   #[test]

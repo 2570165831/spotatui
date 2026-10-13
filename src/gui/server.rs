@@ -20,7 +20,7 @@ const CODE_PROTOCOL: &str = "spotatui.code.";
 const TOKEN_PROTOCOL: &str = "spotatui.token.";
 const PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
 const TEXT: &str = "text/plain; charset=utf-8";
-const MISSING_FRONTEND: &[u8] = b"This spotatui-gui was built without its frontend. Run `npm ci` and `npm run build` in gui/, then rebuild spotatui-gui (touch build.rs if cargo reuses the old build).\n";
+const MISSING_FRONTEND: &[u8] = b"This spotatui-gui was built without its frontend. Run `npm ci` and `npm run build` in gui/, then rebuild spotatui-gui.\n";
 
 type Assets = &'static [(&'static str, &'static [u8])];
 
@@ -603,7 +603,7 @@ mod tests {
     .unwrap();
 
     let mut values = Vec::new();
-    for _ in 0..25 {
+    for _ in 0..26 {
       values.push(next_json(&mut socket).await);
     }
     let kinds: Vec<_> = values.iter().map(|value| value["kind"].clone()).collect();
@@ -634,7 +634,8 @@ mod tests {
         "recently_played",
         "liked_marks",
         "settings",
-        "update"
+        "update",
+        "show"
       ]
     );
     assert!(values[0]["payload"]["token"].is_string());
@@ -707,7 +708,7 @@ mod tests {
   ) {
     let onboarding = Arc::new(crate::gui::onboarding::BrowserOnboarding::new());
     let (boot, apps) = tokio::sync::watch::channel(None);
-    let (link, _publisher, _inbox) = bridge::channel(apps, Arc::clone(&onboarding));
+    let (link, _publisher, _inbox) = bridge::channel(apps, Arc::clone(&onboarding), false);
     let (port, access) = spawn_listener(PAGE, link).await.unwrap();
     let mut page = open_page(port, &access).await;
     let first = next_json(&mut page).await;
@@ -774,7 +775,7 @@ mod tests {
     boot.send_replace(Some(Arc::new(tokio::sync::Mutex::new(app))));
 
     let mut kinds = Vec::new();
-    for _ in 0..23 {
+    for _ in 0..24 {
       kinds.push(next_json(&mut page).await["kind"].clone());
     }
     assert_eq!(
@@ -802,7 +803,8 @@ mod tests {
         "recently_played",
         "liked_marks",
         "settings",
-        "update"
+        "update",
+        "show"
       ]
     );
     assert!(
