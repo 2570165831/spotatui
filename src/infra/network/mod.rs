@@ -180,10 +180,8 @@ pub enum IoEvent {
   FetchAnnouncements,
   /// Title, artists, duration in seconds, and the base62 id of a Spotify track.
   GetLyrics(String, Vec<String>, f64, Option<String>),
-  /// Get user's top tracks for Discover feature (with time range)
-  GetUserTopTracks(crate::core::app::DiscoverTimeRange),
-  /// Get Top Artists Mix - fetches top artists and their top tracks
-  GetTopArtistsMix,
+  /// Fetch Spotify's Made For You page for Discover.
+  GetMadeForYou,
   /// Fetch all playlist tracks and apply sorting
   FetchAllPlaylistTracksAndSort(String),
   /// Start hosting a listening party
@@ -667,6 +665,9 @@ impl Network {
         if is_playback_poll {
           app.is_fetching_current_playback = false;
         }
+        if matches!(io_event, IoEvent::GetMadeForYou) {
+          app.end_discover_fetch(None);
+        }
         if pending_playlist_id
           .as_deref()
           .is_some_and(|id| app.pending_playlist_open.as_deref() == Some(id))
@@ -992,11 +993,8 @@ impl Network {
       IoEvent::DjIndexLibrary => {
         self.dj_index_library().await;
       }
-      IoEvent::GetUserTopTracks(time_range) => {
-        self.get_user_top_tracks(time_range).await;
-      }
-      IoEvent::GetTopArtistsMix => {
-        self.get_top_artists_mix().await;
+      IoEvent::GetMadeForYou => {
+        self.get_made_for_you().await;
       }
       IoEvent::FetchAllPlaylistTracksAndSort(playlist_id) => {
         if let Some(id) = ids::playlist_id(&playlist_id) {
@@ -1379,6 +1377,10 @@ impl Network {
       app.dispatch(IoEvent::GetUser);
       app.dispatch(IoEvent::GetPlaylists);
       app.dispatch(IoEvent::GetCurrentPlayback);
+      // An open Discover skipped its fetch without a session.
+      if app.get_current_route().id == crate::core::app::RouteId::Discover {
+        app.fetch_discover();
+      }
     }
     self
       .show_status_message(
@@ -1989,6 +1991,33 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn a_made_for_you_fetch_dropped_at_the_auth_gate_can_be_asked_again() {
+    let (io_tx, io_rx) = std::sync::mpsc::channel();
+    let app = Arc::new(Mutex::new(App::new(
+      io_tx,
+      UserConfig::new(),
+      Some(SystemTime::now()),
+    )));
+    app.lock().await.fetch_discover();
+    assert!(app.lock().await.discover_loading());
+
+    Network::new(None, &app)
+      .handle_network_event(IoEvent::GetMadeForYou)
+      .await;
+
+    let mut app = app.lock().await;
+    assert!(!app.discover_loading());
+    app.fetch_discover();
+    assert_eq!(
+      io_rx
+        .try_iter()
+        .filter(|event| matches!(event, IoEvent::GetMadeForYou))
+        .count(),
+      2
+    );
+  }
+
+  #[tokio::test]
   async fn a_finished_login_connects_and_loads_spotify() {
     let (app, io_rx) = app_with_a_session_and_channel();
     app.lock().await.spotify_connected = false;
@@ -2007,6 +2036,30 @@ mod tests {
     assert!(loaded
       .iter()
       .any(|event| matches!(event, IoEvent::GetPlaylists)));
+    assert!(!loaded
+      .iter()
+      .any(|event| matches!(event, IoEvent::GetMadeForYou)));
+  }
+
+  #[tokio::test]
+  async fn a_finished_login_loads_the_open_discover_page() {
+    let (app, io_rx) = app_with_a_session_and_channel();
+    {
+      let mut app = app.lock().await;
+      app.spotify_connected = false;
+      app.push_navigation_stack(
+        crate::core::app::RouteId::Discover,
+        crate::core::app::ActiveBlock::Discover,
+      );
+    }
+    Network::new(None, &app)
+      .handle_network_event(IoEvent::CompleteSpotifyLogin)
+      .await;
+
+    assert!(io_rx
+      .try_iter()
+      .any(|event| matches!(event, IoEvent::GetMadeForYou)));
+    assert!(app.lock().await.discover_loading());
   }
 
   #[tokio::test]
