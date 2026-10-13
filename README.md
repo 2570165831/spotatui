@@ -209,6 +209,14 @@ Once you're in:
 - Press `z` on a track to queue it; open the queue with `Shift+Q`.
 - Run `spotatui --help` for the CLI. See the [Keybindings Wiki](https://github.com/LargeModGames/spotatui/wiki/Keybindings) for every shortcut.
 
+To search and play a result with the default keys:
+
+1. Press `/`, type a search phrase, and press `Enter` to submit it. `Ctrl+L` clears an existing query.
+2. Use the arrow keys to choose the **Songs** result panel and press `Enter` to focus its list.
+3. Use `Up`/`Down` to select a track, then press `Enter` again to play it. `Space` toggles play/pause.
+
+Selecting a result panel does not start playback.
+
 A few CLI examples to get you started:
 
 ```bash
@@ -221,7 +229,7 @@ spotatui history recap --period 30d --output ./recap.html # Generate a shareable
 
 ### Adding Spotify later
 
-Started with a free source and want Spotify too? Press `d`, select **Spotify**, and spotatui shows a pairing code in the status line and opens your browser to log in without a restart. Browsing, playlists, and the control of other devices work at once. **Native (librespot) streaming still requires a restart**, because it starts with the app.
+Started with a free source and want Spotify too? Press `d` to open the **Source & Device** picker. If the **Devices** panel has focus (including when it says "No devices found"), press `Tab` to focus **Source**, select **Spotify**, and press `Enter`. Spotatui shows a pairing code in the status line and opens your browser to log in without a restart. Browsing, playlists, and the control of other devices work at once. **Native (librespot) streaming still requires a restart**, because it starts with the app.
 ## Music Sources
 
 spotatui is a general music player, not just a Spotify client. Press `d` to open the **Source & Device** picker; the sidebar and search re-scope to the active source. Playback for these sources runs through spotatui's own audio engine, so volume control and the visualizer work exactly as they do for Spotify — and none of them need Spotify Premium.
