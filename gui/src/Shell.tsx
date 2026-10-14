@@ -79,6 +79,7 @@ export function Shell({
 }) {
   const { channels } = state;
   const [history, setHistory] = useState<History>(HOME);
+  const navigationFocus = useRef<Element | null>(null);
   const view = history.now;
   const page = view.page;
   // A page mounts on its first visit and then stays mounted, so its cursor survives a switch.
@@ -95,6 +96,8 @@ export function Shell({
   const radioId = channels.track_table?.payload.radio ?? null;
   const show = useCallback(
     (next: History, fresh: boolean) => {
+      // A late target can take focus from the control that opened it.
+      navigationFocus.current = document.activeElement;
       const action = fetchFor(next.now, fresh, {
         spotify,
         liked: likedLoaded,
@@ -417,6 +420,19 @@ export function Shell({
     if (page === "search") focusScreen("search");
     else open({ page: "search" });
   }, [page, open]);
+
+  // Leaving the queue hands the keyboard back to the page when the panel held it.
+  const setPanelFocus = useCallback(
+    (next: Panel) => {
+      const held =
+        document
+          .querySelector(".queue-panel")
+          ?.contains(document.activeElement) ?? false;
+      setPanel(next);
+      if (held && next !== "queue") focusScreen(page);
+    },
+    [page],
+  );
   const toggleLyrics = useCallback(() => {
     if (page === "lyrics") show(goBack(history), false);
     else open({ page: "lyrics" });
@@ -430,10 +446,16 @@ export function Shell({
       if (!command) return;
       if (command === "toggle") send("TogglePlayback");
       else if (command === "queue")
-        setPanel((shown) => (shown === "queue" ? "now" : "queue"));
+        setPanelFocus(panel === "queue" ? "now" : "queue");
       else if (command === "command") setOverlay("command");
-      else if (command === "search") openSearch();
-      else if (command === "room") {
+      else if (command === "search") {
+        // An open Room owns the keyboard; / stays with it.
+        if (room) {
+          event.preventDefault();
+          return;
+        }
+        openSearch();
+      } else if (command === "room") {
         setRoomLyrics(false);
         setRoom((open) => !open);
       } else if (command === "lyrics") {
@@ -448,13 +470,28 @@ export function Shell({
       } else if (command === "settings") {
         setRoom(false);
         open({ page: "settings" });
+      } else if (room) {
+        // Area digits do not change the page under an open Room.
+        event.preventDefault();
+        return;
       } else if (command.area === "search") openSearch();
       else open({ page: command.area } as View);
       event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [send, overlay, openSearch, room, mini, showMini, toggleLyrics, open]);
+  }, [
+    send,
+    overlay,
+    openSearch,
+    room,
+    mini,
+    showMini,
+    toggleLyrics,
+    open,
+    panel,
+    setPanelFocus,
+  ]);
 
   // A switch or a closed overlay hands the keyboard to the page; the first render leaves focus alone.
   const shown = useRef({ page, overlay });
@@ -464,6 +501,40 @@ export function Shell({
     if (overlay || (before.page === page && !before.overlay)) return;
     focusScreen(page);
   }, [page, overlay]);
+
+  // A closed Room also hands the keyboard back to the page.
+  const roomShown = useRef(room);
+  useEffect(() => {
+    const was = roomShown.current;
+    roomShown.current = room;
+    if (was && !room && !overlay) focusScreen(page);
+  }, [room, overlay, page]);
+
+  // A page whose list lands after navigation still gets the keyboard once it mounts.
+  useEffect(() => {
+    if (overlay || room || page === "search") return;
+    const screen = document.querySelector(`[data-area="${page}"]`);
+    if (!screen || screen.querySelector("[data-focus]")) return;
+    const before = navigationFocus.current;
+    const seen = new MutationObserver(() => {
+      const target = screen.querySelector<HTMLElement>("[data-focus]");
+      if (!target) return;
+      seen.disconnect();
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === before
+      ) {
+        target.focus({ preventScroll: true });
+        if (target.getAttribute("role") === "listbox")
+          target
+            .querySelector('[aria-selected="true"]')
+            ?.scrollIntoView({ block: "nearest" });
+      }
+    });
+    seen.observe(screen, { childList: true, subtree: true });
+    return () => seen.disconnect();
+    // Keyed to the full view, so another playlist/album re-arms the watch.
+  }, [view, page, overlay, room]);
 
   const trackActions = useMemo<TrackActions>(() => {
     const editable = new Set(playlists?.editable ?? []);
@@ -541,7 +612,7 @@ export function Shell({
                 queue={queue ?? null}
                 item={playback?.item ?? null}
                 send={send}
-                onClose={() => setPanel("now")}
+                onClose={() => setPanelFocus("now")}
               />
             ) : (
               <NowPlayingPanel
@@ -560,7 +631,7 @@ export function Shell({
           connected={state.connected}
           devices={channels.devices?.payload ?? NO_DEVICES}
           panel={panel}
-          onPanel={setPanel}
+          onPanel={setPanelFocus}
           lyricsOpen={page === "lyrics"}
           onLyrics={toggleLyrics}
           onRoom={() => setRoom(true)}
