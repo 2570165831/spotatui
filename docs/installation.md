@@ -19,9 +19,11 @@ winget install spotatui
 ### macOS (Homebrew)
 
 ```bash
-brew tap LargeModGames/spotatui
+brew tap LargeModGames/spotatui && brew trust --formula LargeModGames/spotatui/spotatui
 brew install spotatui
 ```
+
+> Homebrew 6+ requires trusting non-official formulae (`brew trust`) before install.
 
 ### Pre-built Binaries
 
