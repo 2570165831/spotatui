@@ -162,6 +162,8 @@ impl Default for App {
       playlist_track_positions: None,
       pending_playlist_track_add: None,
       pending_playlist_track_removal: None,
+      pending_artist_selection: None,
+      saved_artists_prefetch_in_flight: None,
       all_playlists: Vec::new(),
       _playlist_folder_nodes: None,
       playlist_folder_items: Vec::new(),
@@ -248,6 +250,7 @@ impl Default for App {
       plugin_popup: None,
       log_path: crate::core::paths::app_log_path().display().to_string(),
       active_saved_track_filter: None,
+      saved_artists_prefetch_generation: 0,
     }
   }
 }

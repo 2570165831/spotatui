@@ -598,12 +598,7 @@ fn content_table_item_count(active_block: ActiveBlock, app: &App) -> usize {
       .as_ref()
       .map(|recently_played| recently_played.items.len())
       .unwrap_or(0),
-    ActiveBlock::Artists => app
-      .library()
-      .saved_artists
-      .get_results(None)
-      .map(|artists| artists.items.len())
-      .unwrap_or(0),
+    ActiveBlock::Artists => app.artists.len(),
     ActiveBlock::Podcasts => app
       .library()
       .saved_shows
@@ -656,7 +651,10 @@ fn set_content_table_selected_index(active_block: ActiveBlock, index: usize, app
       }
     },
     ActiveBlock::RecentlyPlayed => app.view.recently_played_index = index,
-    ActiveBlock::Artists => app.view.artists_list_index = index,
+    ActiveBlock::Artists => {
+      app.forget_pending_artist_selection();
+      app.view.artists_list_index = index;
+    }
     ActiveBlock::Podcasts => app.view.shows_list_index = index,
     ActiveBlock::EpisodeTable => app.view.episode_list_index = index,
     _ => {}

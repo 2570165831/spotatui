@@ -515,6 +515,11 @@ impl MetadataNetwork for Network {
   }
 
   async fn get_followed_artists(&mut self, after: Option<ArtistId<'static>>) {
+    let generation = {
+      let app = self.app.lock().await;
+      app.saved_artists_prefetch_generation()
+    };
+
     let limit = self.large_search_limit;
     let mut query = vec![("type", "artist".to_string()), ("limit", limit.to_string())];
     if let Some(after) = after.as_ref() {
@@ -526,20 +531,38 @@ impl MetadataNetwork for Network {
       .await
     {
       Ok(res) => {
+        let mut app = self.app.lock().await;
+        // If user reloaded while in flight, discard
+        if app.saved_artists_prefetch_generation() != generation {
+          return;
+        }
+
+        if let Some(after) = after.as_ref() {
+          // The list was reloaded after this request was queued.
+          if app.next_saved_artists_cursor().as_deref() != Some(after.id()) {
+            return;
+          }
+        }
+
         let domain_page =
           crate::infra::network::mapping::map_cursor_page(&res.artists, |a| ArtistInfo::from(a));
-        let mut app = self.app.lock().await;
         let artists = &mut app.library_mut().saved_artists;
-        // The first page starts the list again, so a refetch does not repeat it.
         if after.is_none() {
           artists.clear();
         }
         artists.add_pages(domain_page);
+        app.set_saved_artists_to_table_continuous();
       }
-      Err(e) => self.handle_error(anyhow!(e)).await,
+      Err(e) => {
+        let mut app = self.app.lock().await;
+        if app.saved_artists_prefetch_generation() == generation {
+          app.clear_saved_artists_in_flight();
+        }
+        drop(app);
+        self.handle_error(anyhow!(e)).await;
+      }
     }
   }
-
   async fn user_unfollow_artists(&mut self, artist_ids: Vec<ArtistId<'static>>) {
     let uris: Vec<String> = artist_ids.iter().map(|id| id.uri()).collect();
     if let Err(e) = self.library_remove_uris(&uris).await {

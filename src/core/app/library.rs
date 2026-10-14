@@ -419,6 +419,14 @@ impl App {
     (tracks, active_index, has_more)
   }
 
+  pub fn saved_artists_prefetch_generation(&self) -> usize {
+    self.saved_artists_prefetch_generation
+  }
+
+  pub fn forget_pending_artist_selection(&mut self) {
+    self.pending_artist_selection = None;
+  }
+
   /// The Liked Songs page cache; a write bumps `LikedSongs`, not `Library`.
   pub(crate) fn saved_tracks_mut(&mut self) -> &mut ScrollableResultPages<Paged<TrackInfo>> {
     self.display_revisions.bump(DisplayDomain::LikedSongs);
@@ -502,6 +510,12 @@ impl App {
         self.push_navigation_stack(RouteId::AlbumList, ActiveBlock::AlbumList);
       }
       LibraryTarget::Artists => {
+        // Bump generation to invalidate any in-flight requests from previous visits
+        self.saved_artists_prefetch_generation =
+          self.saved_artists_prefetch_generation.wrapping_add(1);
+        self.saved_artists_prefetch_in_flight = None;
+        self.forget_pending_artist_selection();
+
         self.dispatch(IoEvent::GetFollowedArtists(None));
         self.push_navigation_stack(RouteId::Artists, ActiveBlock::Artists);
       }
@@ -613,42 +627,101 @@ impl App {
       .is_some_and(|saved_tracks| saved_tracks.next.is_some())
   }
 
-  pub fn set_saved_artists_to_table(&mut self, saved_artists_page: &CursorPaged<ArtistInfo>) {
-    self.artists = saved_artists_page.items.clone();
+  /// Flatten all cached pages in order, deduplicating by artist ID.
+  pub(crate) fn saved_artists_flattened(&self) -> Vec<ArtistInfo> {
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut artists = Vec::new();
+
+    for page in &self.library.saved_artists.pages {
+      for artist in &page.items {
+        if let Some(ref id) = artist.id {
+          if !seen_ids.insert(id.clone()) {
+            continue; // Skip duplicate if already seen
+          }
+        }
+        artists.push(artist.clone());
+      }
+    }
+
+    artists
+  }
+
+  /// Check whether the last cached page has a next page available.
+  pub fn current_saved_artists_has_more(&self) -> bool {
+    self
+      .library
+      .saved_artists
+      .pages
+      .last()
+      .is_some_and(|page| page.has_next())
+  }
+
+  /// Get the `after` cursor for fetching the next page (ID of the last loaded artist).
+  pub fn next_saved_artists_cursor(&self) -> Option<String> {
+    if !self.current_saved_artists_has_more() {
+      return None;
+    }
+    self
+      .library
+      .saved_artists
+      .pages
+      .last()
+      .and_then(|page| page.cursor_after.clone())
+  }
+
+  /// Replace `self.artists` with all cached pages and apply any pending landing selection.
+  pub fn set_saved_artists_to_table_continuous(&mut self) {
+    self.saved_artists_prefetch_in_flight = None;
+
+    let unsorted_artists = self.saved_artists_flattened();
+
+    // Grab the ID of the target artist before sorting
+    let target_artist_id = self.pending_artist_selection.take().and_then(|target| {
+      let clamped = target.min(unsorted_artists.len().saturating_sub(1));
+      unsorted_artists.get(clamped).and_then(|a| a.id.clone())
+    });
+
+    self.artists = unsorted_artists;
+    self.sort_saved_artists();
+
     self.display_revisions.bump(DisplayDomain::Artist);
+
+    let max_idx = self.artists.len().saturating_sub(1);
+
+    // Resolve landing by artist ID after sorting
+    if let Some(target_id) = target_artist_id {
+      if let Some(pos) = self
+        .artists
+        .iter()
+        .position(|a| a.id.as_deref() == Some(&target_id))
+      {
+        self.view.artists_list_index = pos;
+        return;
+      }
+    }
+
+    self.view.artists_list_index = self.view.artists_list_index.min(max_idx);
   }
 
   pub fn get_current_user_saved_artists_next(&mut self) {
-    match self
-      .library
-      .saved_artists
-      .get_results(Some(self.library.saved_artists.index + 1))
-      .cloned()
-    {
-      Some(saved_artists) => {
-        self.set_saved_artists_to_table(&saved_artists);
-        self.library_mut().saved_artists.index += 1
+    if !self.current_saved_artists_has_more() {
+      return;
+    }
+
+    if let Some(cursor) = self.next_saved_artists_cursor() {
+      // If this cursor is already fetching, ignore
+      if self.saved_artists_prefetch_in_flight.as_deref() == Some(&cursor) {
+        return;
       }
-      None => {
-        if let Some(saved_artists) = &self.library.saved_artists.clone().get_results(None) {
-          if let Some(last_artist) = saved_artists.items.last() {
-            if let Some(after) = last_artist.id.as_deref() {
-              self.dispatch(IoEvent::GetFollowedArtists(Some(after.to_string())));
-            }
-          }
-        }
-      }
+
+      self.saved_artists_prefetch_in_flight = Some(cursor.clone());
+      self.dispatch(IoEvent::GetFollowedArtists(Some(cursor)));
     }
   }
 
-  pub fn get_current_user_saved_artists_previous(&mut self) {
-    if self.library.saved_artists.index > 0 {
-      self.library_mut().saved_artists.index -= 1;
-    }
-
-    if let Some(saved_artists) = &self.library.saved_artists.get_results(None).cloned() {
-      self.set_saved_artists_to_table(saved_artists);
-    }
+  pub fn clear_saved_artists_in_flight(&mut self) {
+    self.saved_artists_prefetch_in_flight = None;
+    self.forget_pending_artist_selection();
   }
 
   pub fn get_current_user_saved_tracks_next(&mut self) {
@@ -1507,5 +1580,131 @@ mod tests {
       rx.try_recv(),
       Ok(IoEvent::GetCurrentSavedTracks(None))
     ));
+  }
+
+  fn saved_artist_page(ids: &[&str], has_next: bool) -> CursorPaged<ArtistInfo> {
+    CursorPaged {
+      items: ids
+        .iter()
+        .map(|id| ArtistInfo {
+          id: Some(id.to_string()),
+          name: format!("Artist {id}"),
+          ..Default::default()
+        })
+        .collect(),
+      limit: ids.len() as u32,
+      total: None,
+      next: has_next.then(|| {
+        format!(
+          "https://example.com/me/following?after={}",
+          ids.last().unwrap_or(&"")
+        )
+      }),
+      cursor_after: has_next.then(|| ids.last().unwrap_or(&"").to_string()),
+    }
+  }
+
+  #[test]
+  fn current_saved_artists_has_more_and_cursor_reflect_cached_pages() {
+    let mut app = App::default();
+
+    // Empty pages: no more, no cursor
+    assert!(!app.current_saved_artists_has_more());
+    assert_eq!(app.next_saved_artists_cursor(), None);
+
+    // Final page (has_next = false): no more, no cursor
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a1", "a2"], false));
+    assert!(!app.current_saved_artists_has_more());
+    assert_eq!(app.next_saved_artists_cursor(), None);
+
+    // Page with more following: reports true and returns cursor_after
+    let mut app_with_more = App::default();
+    app_with_more
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a1", "a2"], true));
+    assert!(app_with_more.current_saved_artists_has_more());
+    assert_eq!(
+      app_with_more.next_saved_artists_cursor(),
+      Some("a2".to_string())
+    );
+  }
+
+  #[test]
+  fn saved_artists_next_dispatches_with_cursor_and_guards_in_flight() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a1", "a2"], true));
+
+    // First fetch: dispatches event and sets in-flight marker
+    app.get_current_user_saved_artists_next();
+
+    assert_eq!(app.saved_artists_prefetch_in_flight.as_deref(), Some("a2"));
+    assert!(matches!(
+      rx.try_recv(),
+      Ok(IoEvent::GetFollowedArtists(Some(cursor))) if cursor == "a2"
+    ));
+
+    // Second immediate fetch with same cursor: ignored by in-flight guard!
+    app.get_current_user_saved_artists_next();
+    assert!(
+      rx.try_recv().is_err(),
+      "duplicate in-flight fetch must be ignored"
+    );
+  }
+
+  #[test]
+  fn saved_artists_next_on_final_page_does_nothing() {
+    let (tx, rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a1", "a2"], false));
+
+    app.get_current_user_saved_artists_next();
+
+    assert!(rx.try_recv().is_err());
+    assert!(app.saved_artists_prefetch_in_flight.is_none());
+  }
+
+  #[test]
+  fn clear_saved_artists_in_flight_resets_guard_and_pending_selection() {
+    let mut app = App::default();
+    app.saved_artists_prefetch_in_flight = Some("cursor_token".to_string());
+    app.pending_artist_selection = Some(15);
+
+    app.clear_saved_artists_in_flight();
+
+    assert!(app.saved_artists_prefetch_in_flight.is_none());
+    assert!(app.pending_artist_selection.is_none());
+  }
+
+  #[test]
+  fn saved_artists_flattened_deduplicates_by_artist_id() {
+    let mut app = App::default();
+    // Page 1 has ["a1", "a2"]
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a1", "a2"], true));
+    // Page 2 has ["a2", "a3"] (duplicate "a2"!)
+    app
+      .library_mut()
+      .saved_artists
+      .add_pages(saved_artist_page(&["a2", "a3"], false));
+
+    app.set_saved_artists_to_table_continuous();
+
+    // Verifies the `continue; // Skip duplicate` line was executed
+    assert_eq!(app.artists.len(), 3);
+    let ids: Vec<&str> = app.artists.iter().filter_map(|a| a.id.as_deref()).collect();
+    assert_eq!(ids, vec!["a1", "a2", "a3"]);
   }
 }
