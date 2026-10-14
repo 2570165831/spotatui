@@ -2226,7 +2226,11 @@ pub fn aggregate_top_tracks(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
       .into_values()
       .map(|(title, artists, listened_ms, plays, uri)| RankedEntry {
         display: format!("{title} - {artists}"),
-        detail: format!("{} plays · {}", plays, format_duration(listened_ms)),
+        detail: format!(
+          "{} · {}",
+          count_label(plays, "play", "plays"),
+          format_duration(listened_ms)
+        ),
         value: listened_ms,
         uri,
         parts: Some((title, artists)),
@@ -2278,7 +2282,11 @@ pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<Rank
       .into_iter()
       .map(|(artist, (listened_ms, plays))| RankedEntry {
         display: artist,
-        detail: format!("{} track hits · {}", plays, format_duration(listened_ms)),
+        detail: format!(
+          "{} · {}",
+          count_label(plays, "track hit", "track hits"),
+          format_duration(listened_ms)
+        ),
         value: listened_ms,
         uri: None,
         parts: None,
@@ -2304,7 +2312,11 @@ pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
       .into_iter()
       .map(|(album, (listened_ms, plays))| RankedEntry {
         display: album,
-        detail: format!("{} plays · {}", plays, format_duration(listened_ms)),
+        detail: format!(
+          "{} · {}",
+          count_label(plays, "play", "plays"),
+          format_duration(listened_ms)
+        ),
         value: listened_ms,
         uri: None,
         parts: None,
@@ -2472,6 +2484,15 @@ pub fn period_label(period: RecapPeriod) -> &'static str {
     RecapPeriod::Month => "This Month",
     RecapPeriod::Year => "This Year",
     RecapPeriod::All => "All Time",
+  }
+}
+
+/// "1 play", "2 plays", "0 plays": the singular only for a count of one.
+pub(crate) fn count_label(n: u64, one: &str, many: &str) -> String {
+  if n == 1 {
+    format!("1 {one}")
+  } else {
+    format!("{n} {many}")
   }
 }
 
@@ -2736,6 +2757,65 @@ mod tests {
       source: HistoryPlaybackSource::NativeContext,
       image_url: None,
     }
+  }
+
+  #[test]
+  fn count_label_uses_the_singular_only_for_one() {
+    assert_eq!(count_label(0, "play", "plays"), "0 plays");
+    assert_eq!(count_label(1, "play", "plays"), "1 play");
+    assert_eq!(count_label(2, "play", "plays"), "2 plays");
+  }
+
+  #[test]
+  fn top_tracks_detail_says_play_for_a_single_play() {
+    let once = aggregate_top_tracks(&[record_at(20, 60_000, true)], 10);
+    assert!(once[0].detail.starts_with("1 play ·"), "{}", once[0].detail);
+
+    let twice = aggregate_top_tracks(
+      &[record_at(20, 60_000, true), record_at(20, 60_000, true)],
+      10,
+    );
+    assert!(
+      twice[0].detail.starts_with("2 plays ·"),
+      "{}",
+      twice[0].detail
+    );
+  }
+
+  #[test]
+  fn top_artists_detail_says_track_hit_for_a_single_play() {
+    let once = aggregate_top_artists(&[record_at(20, 60_000, true)], 10);
+    assert!(
+      once[0].detail.starts_with("1 track hit ·"),
+      "{}",
+      once[0].detail
+    );
+
+    let twice = aggregate_top_artists(
+      &[record_at(20, 60_000, true), record_at(21, 60_000, true)],
+      10,
+    );
+    assert!(
+      twice[0].detail.starts_with("2 track hits ·"),
+      "{}",
+      twice[0].detail
+    );
+  }
+
+  #[test]
+  fn top_albums_detail_says_play_for_a_single_play() {
+    let once = aggregate_top_albums(&[record_at(20, 60_000, true)], 10);
+    assert!(once[0].detail.starts_with("1 play ·"), "{}", once[0].detail);
+
+    let twice = aggregate_top_albums(
+      &[record_at(20, 60_000, true), record_at(21, 60_000, true)],
+      10,
+    );
+    assert!(
+      twice[0].detail.starts_with("2 plays ·"),
+      "{}",
+      twice[0].detail
+    );
   }
 
   fn top_artist_names(record: ListenRecord) -> Vec<String> {

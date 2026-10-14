@@ -2,6 +2,7 @@ use crate::core::app::{
   ActiveBlock, AlbumTableContext, App, EpisodeTableContext, RecommendationsContext,
 };
 use crate::core::plugin_api::{EpisodeInfo, SavedAlbumInfo, ShowInfo, TrackInfo};
+use crate::infra::history::count_label;
 use ratatui::{
   layout::{Constraint, Rect},
   style::{Modifier, Style},
@@ -277,7 +278,11 @@ pub fn draw_local_browser(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .iter()
     .map(|folder| {
       if folder.track_count > 0 {
-        format!("{} ({} tracks)", folder.name, folder.track_count)
+        format!(
+          "{} ({})",
+          folder.name,
+          count_label(folder.track_count as u64, "track", "tracks")
+        )
       } else {
         folder.name.clone()
       }
@@ -1041,6 +1046,17 @@ mod tests {
     assert!(
       content.contains("MyAlbum (3 tracks)"),
       "folder name and track count should render: {content}"
+    );
+  }
+
+  #[test]
+  fn local_browser_says_track_for_a_one_track_folder() {
+    let mut app = App::default();
+    *app.local_playlists_mut() = vec![folder("Single", 1)];
+    let content = rendered(&app, Rect::new(0, 0, 60, 6));
+    assert!(
+      content.contains("Single (1 track)"),
+      "a one-track folder should use the singular: {content}"
     );
   }
 

@@ -34,6 +34,8 @@
 
 - **Clearing a playlist search keeps your edits**: a remove marked the playlist's loaded pages out of date but never refreshed the visible table, so clearing a search rebuilt it from those pages and the removed track came back with the rows from before the search. When the loaded pages are out of date, clearing the filter now reloads the playlist from its first page instead ([#785](https://github.com/LargeModGames/spotatui/issues/785)).
 
+- **Counts of one read in the singular**: the Stats screen and the Local Files browser said "1 plays", "1 track hits" and "1 tracks" for a count of one. They now say "1 play", "1 track hit" and "1 track"; other counts keep the plural. The recap and share card pick up the same wording ([#821](https://github.com/LargeModGames/spotatui/issues/821)).
+
 ## [v0.45.0] 2026-10-12
 
 ### Added

@@ -1,5 +1,5 @@
 use crate::core::app::{ActiveBlock, App};
-use crate::infra::history::{format_duration, period_label, RankedEntry, RecapPeriod};
+use crate::infra::history::{count_label, format_duration, period_label, RankedEntry, RecapPeriod};
 use ratatui::{
   layout::{Constraint, Layout, Rect},
   style::{Modifier, Style},
@@ -79,8 +79,8 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   } else if let Some(stats) = &app.stats_data {
     summary_spans.push(Span::styled(
       format!(
-        "  {} plays · {} listened",
-        stats.total_plays,
+        "  {} · {} listened",
+        count_label(stats.total_plays as u64, "play", "plays"),
         format_duration(stats.total_time_ms)
       ),
       Style::default().fg(theme.text.into()),
