@@ -136,6 +136,8 @@ const PLAYLIST_TRACK_SORT_SETTING_OPTIONS: &[&str] = &[
   "album:desc",
   "duration",
   "duration:desc",
+  "release_date",
+  "release_date:desc",
 ];
 
 const SAVED_ALBUM_SORT_SETTING_OPTIONS: &[&str] = &[

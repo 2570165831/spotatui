@@ -164,6 +164,7 @@ impl SortContext {
         SortField::Artist,
         SortField::Album,
         SortField::Duration,
+        SortField::ReleaseDate,
       ],
       SortContext::SavedAlbums => &[
         SortField::Default,
@@ -306,6 +307,9 @@ impl Sorter {
         sort_by_key_with_order(tracks, self.state.order, |t| t.album.to_lowercase())
       }
       SortField::Duration => sort_by_key_with_order(tracks, self.state.order, |t| t.duration_ms),
+      SortField::ReleaseDate => {
+        sort_by_key_with_order(tracks, self.state.order, |t| t.release_date.clone())
+      }
       _ => {}
     }
   }
@@ -369,11 +373,14 @@ mod tests {
   }
 
   #[test]
-  fn release_date_sort_is_offered_for_saved_albums_only() {
-    let parsed = SortState::parse("release_date:desc", SortContext::SavedAlbums).unwrap();
-    assert_eq!(parsed.field, SortField::ReleaseDate);
-    assert_eq!(parsed.to_config_str(), "release_date:desc");
-    assert!(SortState::parse("release_date", SortContext::PlaylistTracks).is_err());
+  fn release_date_sort_is_offered_for_saved_albums_and_playlists_only() {
+    for context in [SortContext::SavedAlbums, SortContext::PlaylistTracks] {
+      let parsed = SortState::parse("release_date:desc", context).unwrap();
+      assert_eq!(parsed.field, SortField::ReleaseDate);
+      assert_eq!(parsed.to_config_str(), "release_date:desc");
+    }
+    assert!(SortState::parse("release_date", SortContext::SavedArtists).is_err());
+    assert!(SortState::parse("release_date", SortContext::RecentlyPlayed).is_err());
   }
 
   #[test]
@@ -408,6 +415,46 @@ mod tests {
 
   fn sorted_names(tracks: &[TrackInfo]) -> Vec<&str> {
     tracks.iter().map(|t| t.name.as_str()).collect()
+  }
+
+  fn dated(name: &str, release_date: Option<&str>) -> TrackInfo {
+    TrackInfo {
+      release_date: release_date.map(str::to_string),
+      ..track(name, None, "", 0)
+    }
+  }
+
+  #[test]
+  fn release_date_sort_orders_tracks_by_date_with_undated_tracks_first() {
+    let tracks = vec![
+      dated("2019-06-21", Some("2019-06-21")),
+      dated("undated", None),
+      dated("1997", Some("1997")),
+      dated("2019", Some("2019")),
+      dated("2005-03", Some("2005-03")),
+    ];
+
+    let mut ascending = tracks.clone();
+    Sorter::new(SortState {
+      field: SortField::ReleaseDate,
+      order: SortOrder::Ascending,
+    })
+    .sort_tracks(&mut ascending);
+    assert_eq!(
+      sorted_names(&ascending),
+      ["undated", "1997", "2005-03", "2019", "2019-06-21"]
+    );
+
+    let mut descending = tracks;
+    Sorter::new(SortState {
+      field: SortField::ReleaseDate,
+      order: SortOrder::Descending,
+    })
+    .sort_tracks(&mut descending);
+    assert_eq!(
+      sorted_names(&descending),
+      ["2019-06-21", "2019", "2005-03", "1997", "undated"]
+    );
   }
 
   #[test]
