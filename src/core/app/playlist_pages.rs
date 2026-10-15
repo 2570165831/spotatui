@@ -22,8 +22,12 @@ fn sort_playlist_track_matches(matches: &mut [(TrackInfo, usize)], sort_state: S
     SortField::DateAdded => {
       sort_by_key_with_order(matches, sort_state.order, |(_, position)| *position)
     }
-    // Not offered for playlist tracks: a track carries no release date.
-    SortField::Default | SortField::ReleaseDate => {}
+    // Dates are `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, so the strings order
+    // chronologically; a track without one sorts first, like Saved Albums.
+    SortField::ReleaseDate => {
+      sort_by_key_with_order(matches, sort_state.order, |(t, _)| t.release_date.clone())
+    }
+    SortField::Default => {}
   }
 }
 
@@ -913,6 +917,46 @@ mod tests {
       .map(|track| track.name.clone())
       .collect();
     (names, app.playlist_track_positions.clone())
+  }
+
+  #[test]
+  fn playlist_search_results_sort_by_release_date() {
+    let (tx, _rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    let playlist_id = playlist_id("37i9dQZF1DX4WYpdgoIcn6");
+    app.track_table.context = Some(TrackTableContext::MyPlaylists);
+    app.playlist_track_table_id = Some(playlist_id.clone());
+    app.playlist_sort = SortState {
+      field: SortField::ReleaseDate,
+      order: SortOrder::Descending,
+    };
+    app.pending_playlist_track_search = Some("song".to_string());
+    let dated = |id: &str, name: &str, date: Option<&str>| TrackInfo {
+      release_date: date.map(str::to_string),
+      ..track_info(id, name)
+    };
+
+    assert!(app.apply_playlist_track_search_results(
+      &playlist_id,
+      "song".to_string(),
+      vec![
+        (dated("0000000000000000000001", "old song", Some("1997")), 1),
+        (dated("0000000000000000000002", "undated song", None), 2),
+        (
+          dated("0000000000000000000003", "new song", Some("2019-06-21")),
+          3
+        ),
+      ],
+    ));
+
+    let names: Vec<&str> = app
+      .track_table
+      .tracks
+      .iter()
+      .map(|track| track.name.as_str())
+      .collect();
+    assert_eq!(names, ["new song", "old song", "undated song"]);
+    assert_eq!(app.playlist_track_positions, Some(vec![3, 1, 2]));
   }
 
   #[test]
