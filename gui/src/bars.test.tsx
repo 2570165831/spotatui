@@ -7,6 +7,7 @@ import type { Page } from "./nav";
 import { PlayerBar, type Panel } from "./PlayerBar";
 import { byName } from "./testTree";
 import { TopBar } from "./TopBar";
+import { Meter } from "./Transport";
 
 const song: NowPlaying = {
   title: "Set Fire to the Rain",
@@ -169,6 +170,90 @@ describe("PlayerBar", () => {
     expect(tag(html, "Full screen")).not.toContain("disabled");
     expect(tag(html, "Open mini player")).not.toContain("disabled");
     expect(tag(html, "Connect to a device")).toContain('aria-expanded="false"');
+  });
+});
+
+describe("Meter", () => {
+  type Handler = (event: object) => void;
+
+  /** One meter element; each event renders the meter again, so `disabled` can change during a drag. */
+  const meter = (picks: number[]) => {
+    const dataset: Record<string, string> = {};
+    const style = new Map<string, string>();
+    const fire = (
+      name: string,
+      clientX: number,
+      { button = 0, pointerId = 1, disabled = false } = {},
+    ) =>
+      (
+        byName(
+          <Meter
+            label="Volume"
+            ratio={0.5}
+            text="50%"
+            disabled={disabled}
+            onPick={(ratio) => picks.push(ratio)}
+            onStep={() => {}}
+          />,
+          "Volume",
+        ).props[name] as Handler
+      )({
+        button,
+        clientX,
+        pointerId,
+        currentTarget: {
+          dataset,
+          style: {
+            setProperty: (key: string, value: string) => style.set(key, value),
+          },
+          getBoundingClientRect: () => ({ left: 100, width: 200 }),
+          setPointerCapture: () => {},
+        },
+      });
+    return { dataset, style, fire };
+  };
+
+  it("draws a drag at the pointer and picks once, on release", () => {
+    const picks: number[] = [];
+    const { dataset, style, fire } = meter(picks);
+    fire("onPointerDown", 150);
+    fire("onPointerMove", 250);
+    expect(dataset.drag).toBe("1");
+    expect(style.get("--drag")).toBe("75%");
+    expect(picks).toEqual([]);
+    fire("onPointerMove", 400);
+    fire("onPointerUp", 400);
+    fire("onLostPointerCapture", 400);
+    expect(picks).toEqual([1]);
+    expect(dataset.drag).toBeUndefined();
+  });
+
+  it("ignores a move without a press, a right button and a touch on a disabled meter", () => {
+    const picks: number[] = [];
+    const { dataset, fire } = meter(picks);
+    fire("onPointerMove", 200);
+    fire("onPointerUp", 200);
+    fire("onPointerDown", 200, { button: 2 });
+    fire("onPointerUp", 200, { button: 2 });
+    fire("onPointerDown", 200, { disabled: true });
+    fire("onPointerUp", 200, { disabled: true });
+    expect(picks).toEqual([]);
+    expect(dataset.drag).toBeUndefined();
+  });
+
+  it("picks nothing for another pointer or after the meter turns disabled", () => {
+    const picks: number[] = [];
+    const { dataset, style, fire } = meter(picks);
+    fire("onPointerDown", 150);
+    fire("onPointerMove", 300, { pointerId: 2 });
+    fire("onPointerUp", 300, { pointerId: 2 });
+    fire("onLostPointerCapture", 300, { pointerId: 2 });
+    expect(style.get("--drag")).toBe("25%");
+    expect(dataset.drag).toBe("1");
+    fire("onPointerUp", 250, { disabled: true });
+    fire("onLostPointerCapture", 250, { disabled: true });
+    expect(picks).toEqual([]);
+    expect(dataset.drag).toBeUndefined();
   });
 });
 
