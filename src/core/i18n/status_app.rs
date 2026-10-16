@@ -4,6 +4,7 @@
 pub struct AppStatusStrings {
   pub music_error: &'static str,
   pub audio_backend_failed: &'static str,
+  pub audio_backend_no_alsa_default: &'static str,
   pub audio_device_paused: &'static str,
   pub audio_device_moved: &'static str,
   pub audio_device_waiting: &'static str,
@@ -127,6 +128,8 @@ pub struct AppStatusStrings {
 pub const EN: AppStatusStrings = AppStatusStrings {
   music_error: "Apple Music: {error}",
   audio_backend_failed: "Audio backend failed: {error}",
+  audio_backend_no_alsa_default:
+    "No audio output: ALSA has no default device (on PipeWire, install pipewire-alsa)",
   audio_device_paused: "Audio device changed - playback paused here.",
   audio_device_moved: "Audio device changed - playback moved to it.",
   audio_device_waiting: "Audio output device lost - waiting for a new one.",

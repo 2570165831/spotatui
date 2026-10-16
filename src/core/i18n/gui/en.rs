@@ -324,6 +324,7 @@ pub const EN: GuiStrings = GuiStrings {
   update_checks_description: "Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself",
   update_delay_description: "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'",
   play_named: "Play {name}",
+  shuffle_named: "Shuffle {name}",
   by_owner: "By {owner}",
   album_by: "Album · {artists}",
   playlist_count: "Playlist · {count}",

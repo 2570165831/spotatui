@@ -4,6 +4,8 @@
 
 ### Added
 
+- **The Shuffle button on Liked Songs and playlist pages works**: in the desktop app and the browser GUI, it plays the songs the page shows in a random order, only the matching ones when you filter.
+
 - **Sort a playlist by release date**: the sort menu on a playlist now offers Release Date (`y`), like Saved Albums, ordered by each track's album release date; tracks without a date come first in ascending order. `default_sort_playlist_tracks` accepts `release_date` and `release_date:desc` ([#854](https://github.com/LargeModGames/spotatui/issues/854)).
 
 - **Click a synced lyric line to jump there** in the desktop app, on the Lyrics page and in full screen. Lines that are only estimates stay plain text, and Tab reaches the line being sung.
@@ -15,6 +17,8 @@
 ### Fixed
 
 - **Saving or unsaving an album, or saving a show, no longer leaves the saved list wrong**: saving or unsaving an album, and saving a show, refetched the first page of saved albums (or shows) but kept the cached later pages, so an album pushed off or pulled into the first page went missing or showed twice, and unsaving the last one left it in the list. The first-page refetch now drops the stale later pages and stores an empty first page too ([#791](https://github.com/LargeModGames/spotatui/issues/791)).
+
+- **A clear hint when ALSA has no default device**: with PipeWire but no ALSA bridge, pressing play used to show a cut-off "Connection Refused" error. The status line now says ALSA has no default device and suggests installing `pipewire-alsa`, and the native streaming docs have a No sound section ([#848](https://github.com/LargeModGames/spotatui/issues/848)).
 
 - **Subsonic usernames with special characters can log in**: a username with `+`, `&`, `#`, `%`, `=` or a space is now percent-encoded in every request, so the server no longer answers with error 40 ([#814](https://github.com/LargeModGames/spotatui/issues/814)).
 

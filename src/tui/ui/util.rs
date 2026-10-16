@@ -9,6 +9,7 @@ use ratatui::{
   Frame,
 };
 use rspotify::model::artist::SimplifiedArtist;
+use std::cell::Cell;
 use std::time::Duration;
 
 pub fn get_search_results_highlight_state(
@@ -59,6 +60,9 @@ pub fn get_color((is_active, is_hovered): (bool, bool), theme: Theme) -> Style {
   }
 }
 
+/// Eight call-site arguments: the panel pairs are (highlight state, cursor,
+/// scroll cell) so each list owns its own offset; cf. `draw_table`.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_selectable_list<S>(
   f: &mut Frame<'_>,
   app: &App,
@@ -67,10 +71,17 @@ pub fn draw_selectable_list<S>(
   items: &[S],
   highlight_state: (bool, bool),
   selected_index: Option<usize>,
+  scroll_offset: &Cell<usize>,
 ) where
   S: std::convert::AsRef<str>,
 {
   let mut state = ListState::default();
+
+  let visible_rows = layout_chunk.height.saturating_sub(2) as usize; // inner area without borders
+  let max_offset = items.len().saturating_sub(visible_rows);
+  let offset = scroll_offset.get().min(max_offset);
+
+  *state.offset_mut() = offset;
   state.select(selected_index);
 
   let lst_items: Vec<ListItem> = items
@@ -98,7 +109,10 @@ pub fn draw_selectable_list<S>(
       Line::from(format!("{} ", app.user_config.behavior.list_highlight_icon))
         .style(get_color(highlight_state, app.user_config.theme)),
     );
+
   f.render_stateful_widget(list, layout_chunk, &mut state);
+
+  scroll_offset.set(state.offset());
 }
 
 #[cfg(feature = "cover-art")]

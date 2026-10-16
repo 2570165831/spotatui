@@ -1,5 +1,4 @@
 use super::*;
-
 /// Presentation state of the terminal frontend, grouped on [`App::view`].
 ///
 /// Everything in here is a cursor, a scroll offset, an edit buffer, a focus
@@ -199,6 +198,19 @@ pub struct ViewState {
   pub plugin_screen_scroll: u16,
   /// Scroll offset for the plugin popup.
   pub plugin_popup_scroll: u16,
+
+  pub search_tracks_scroll_offset: Cell<usize>,
+  pub search_artists_scroll_offset: Cell<usize>,
+  pub search_albums_scroll_offset: Cell<usize>,
+  pub search_playlists_scroll_offset: Cell<usize>,
+  pub search_shows_scroll_offset: Cell<usize>,
+  pub library_scroll_offset: Cell<usize>,
+  pub playlist_scroll_offset: Cell<usize>,
+  pub local_files_scroll_offset: Cell<usize>,
+  pub artist_top_tracks_scroll_offset: Cell<usize>,
+  pub artist_albums_scroll_offset: Cell<usize>,
+  pub artist_related_artists_scroll_offset: Cell<usize>,
+  pub playlist_sync_scroll_offset: Cell<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

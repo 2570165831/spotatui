@@ -277,16 +277,9 @@ impl Driver {
   pub fn tick(&mut self, app: &mut App, elapsed: Duration, env: TickEnv) {
     #[cfg(feature = "streaming")]
     if let Some(player) = app.streaming_player.clone() {
-      if let Some(error) = player.take_audio_backend_error() {
+      if let Some(error) = player.take_audio_backend_error(app.strings()) {
         app.pause_native_playback();
-        app.set_status_message(
-          app
-            .strings()
-            .status
-            .app
-            .audio_backend_failed(&error.to_string()),
-          15,
-        );
+        app.set_status_message(error, 15);
       }
     }
 

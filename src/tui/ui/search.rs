@@ -167,6 +167,7 @@ fn draw_radio_station_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) 
     &stations,
     get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
     app.view.search_selected_tracks_index,
+    &app.view.search_tracks_scroll_offset,
   );
 }
 
@@ -231,6 +232,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       &songs,
       get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
       app.view.search_selected_tracks_index,
+      &app.view.search_tracks_scroll_offset,
     );
 
     let artists = match &app.search_results().artists {
@@ -259,6 +261,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       &artists,
       get_search_results_highlight_state(app, SearchResultBlock::ArtistSearch),
       app.view.search_selected_artists_index,
+      &app.view.search_artists_scroll_offset,
     );
   }
 
@@ -299,6 +302,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       &albums,
       get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
       app.view.search_selected_album_index,
+      &app.view.search_albums_scroll_offset,
     );
 
     let playlists = match &app.search_results().playlists {
@@ -340,6 +344,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         &playlists,
         get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
         app.view.search_selected_playlists_index,
+        &app.view.search_playlists_scroll_offset,
       );
     }
   }
@@ -369,6 +374,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       },
       get_search_results_highlight_state(app, SearchResultBlock::ShowSearch),
       app.view.search_selected_shows_index,
+      &app.view.search_shows_scroll_offset,
     );
   }
 }

@@ -2,6 +2,7 @@
 //!
 //! Handles authentication, session management, and audio playback with Spotify Connect.
 
+use crate::core::i18n::Strings;
 use crate::infra::spotify::credentials::{
   clear_cached_streaming_credentials, get_default_cache_path, streaming_proxy_from_env,
   SPOTIFY_PLAYER_CLIENT_ID,
@@ -489,6 +490,20 @@ impl RecoveringSink {
   }
 }
 
+/// Status line text for a stored backend error. librespot reports a missing
+/// ALSA `default` device as "Connection Refused", which sends people the wrong
+/// way, so that case gets a short hint instead.
+fn backend_error_status(raw: &str, strings: &Strings) -> String {
+  if raw.contains("Device default ")
+    && raw.contains("snd_pcm_open")
+    && raw.contains("No such file or directory")
+  {
+    strings.status.app.audio_backend_no_alsa_default.to_string()
+  } else {
+    strings.status.app.audio_backend_failed(raw)
+  }
+}
+
 impl audio_backend::Sink for RecoveringSink {
   fn start(&mut self) -> audio_backend::SinkResult<()> {
     self.failed = false;
@@ -880,12 +895,13 @@ impl StreamingPlayer {
     *self.connection_state_rx.borrow()
   }
 
-  pub fn take_audio_backend_error(&self) -> Option<String> {
+  pub fn take_audio_backend_error(&self, strings: &Strings) -> Option<String> {
     self
       .audio_backend_error
       .lock()
       .unwrap_or_else(|e| e.into_inner())
       .take()
+      .map(|raw| backend_error_status(&raw, strings))
   }
 
   /// Play a track by its Spotify URI (e.g., "spotify:track:xxxx")
@@ -1226,15 +1242,41 @@ fn new_device_id_string() -> String {
 #[cfg(test)]
 mod tests {
   use super::{
-    get_or_create_device_id, new_device_id_string, PlayAfterTransfer, RecoveringSink,
-    StreamingConnectionState, PLAY_AFTER_TRANSFER_WINDOW,
+    backend_error_status, get_or_create_device_id, new_device_id_string, PlayAfterTransfer,
+    RecoveringSink, StreamingConnectionState, PLAY_AFTER_TRANSFER_WINDOW,
   };
+  use crate::core::i18n::EN;
   use crate::infra::spotify::credentials::{
     migrate_legacy_streaming_cache_if_unclaimed, proxy_url_from_candidates, redact_raw_proxy,
   };
   use librespot_playback::{audio_backend, convert::Converter, decoder::AudioPacket};
   use std::sync::Arc;
   use std::time::Duration;
+
+  const ALSA_NO_DEFAULT: &str = "Audio Sink Error Connection Refused: <AlsaSink> Device default May be Invalid, Busy, or Already in Use, ALSA function 'snd_pcm_open' failed with error 'No such file or directory (2)'";
+
+  #[test]
+  fn backend_error_status_explains_a_missing_alsa_default_device() {
+    let status = backend_error_status(ALSA_NO_DEFAULT, &EN);
+    assert!(status.contains("pipewire-alsa"));
+    assert!(!status.contains("Connection Refused"));
+  }
+
+  #[test]
+  fn backend_error_status_keeps_other_errors_unchanged() {
+    let wrong_device = ALSA_NO_DEFAULT.replace("Device default", "Device plughw:9");
+    assert_eq!(
+      backend_error_status(&wrong_device, &EN),
+      format!("Audio backend failed: {wrong_device}")
+    );
+    assert_eq!(
+      backend_error_status(
+        "Audio Sink Error Not Connected: Audio sink unavailable",
+        &EN
+      ),
+      "Audio backend failed: Audio Sink Error Not Connected: Audio sink unavailable"
+    );
+  }
 
   struct StubSink {
     start_result: fn() -> audio_backend::SinkResult<()>,
