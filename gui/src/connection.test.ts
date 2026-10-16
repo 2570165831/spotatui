@@ -2,6 +2,8 @@ import strings from "./bindings/strings.json";
 import { describe, expect, it, vi } from "vitest";
 import {
   Connection,
+  positionAfterChannel,
+  positionAfterTick,
   showsOnboarding,
   takeLaunchCode,
   type Handlers,
@@ -190,6 +192,30 @@ describe("Connection", () => {
     expect(connection.getState().position).toEqual({ ms: 1234, at: 42 });
   });
 
+  it("a new item after a blank playback update starts at zero", () => {
+    const { connection, sockets } = harness("abc");
+    const playback = (rev: number, uri: string | null) =>
+      JSON.stringify({
+        kind: "playback",
+        rev,
+        payload: {
+          item: uri === null ? null : { uri, is_playing: false },
+          volume: 50,
+          device: null,
+          liked: false,
+        },
+      });
+    sockets[0].handlers.message(hello("t1"));
+    sockets[0].handlers.message(playback(1, "spotify:track:a"));
+    sockets[0].handlers.message(
+      JSON.stringify({ kind: "tick", payload: 103_000 }),
+    );
+    sockets[0].handlers.message(playback(2, null));
+    expect(connection.getState().position).toEqual({ ms: 103_000, at: 42 });
+    sockets[0].handlers.message(playback(3, "spotify:track:b"));
+    expect(connection.getState().position).toEqual({ ms: 0, at: 42 });
+  });
+
   it("an action goes out as a typed client message", () => {
     const { connection, sockets } = harness("abc");
     sockets[0].handlers.message(hello("t1"));
@@ -197,6 +223,86 @@ describe("Connection", () => {
     expect(sockets[0].sent).toEqual([
       '{"type":"action","action":"TogglePlayback"}',
     ]);
+  });
+});
+
+describe("positionAfterTick", () => {
+  const anchor = { ms: 10_000, at: 0 };
+
+  it("holds the shown position when a tick lands a little behind it", () => {
+    expect(positionAfterTick(anchor, 10_800, true, 1_000)).toEqual({
+      ms: 11_000,
+      at: 1_200,
+    });
+  });
+
+  it("takes a tick ahead of the shown position or a jump back as it is", () => {
+    expect(positionAfterTick(anchor, 11_300, true, 1_000)).toEqual({
+      ms: 11_300,
+      at: 1_000,
+    });
+    expect(positionAfterTick(anchor, 5_000, true, 1_000)).toEqual({
+      ms: 5_000,
+      at: 1_000,
+    });
+  });
+
+  it("takes a paused tick as it is, so a small seek while paused shows", () => {
+    expect(positionAfterTick(anchor, 9_900, false, 1_000)).toEqual({
+      ms: 9_900,
+      at: 1_000,
+    });
+  });
+});
+
+describe("positionAfterChannel", () => {
+  const song = (playing: boolean) => ({ uri: "spotify:track:a", playing });
+
+  it("a pause freezes the position where it shows", () => {
+    expect(
+      positionAfterChannel({ ms: 10_000, at: 0 }, song(true), song(false), 200),
+    ).toEqual({ ms: 10_200, at: 200 });
+  });
+
+  it("a resume counts on from the paused position from now", () => {
+    expect(
+      positionAfterChannel(
+        { ms: 10_200, at: 200 },
+        song(false),
+        song(true),
+        5_000,
+      ),
+    ).toEqual({ ms: 10_200, at: 5_000 });
+  });
+
+  it("a new item starts at zero instead of the last item's position", () => {
+    expect(
+      positionAfterChannel(
+        { ms: 103_000, at: 0 },
+        song(true),
+        { uri: "spotify:track:b", playing: true },
+        200,
+      ),
+    ).toEqual({ ms: 0, at: 200 });
+  });
+
+  it("an item that comes back after a blank update keeps its position", () => {
+    const anchor = { ms: 10_000, at: 0 };
+    expect(
+      positionAfterChannel(
+        anchor,
+        { uri: null, playing: true },
+        song(true),
+        200,
+      ),
+    ).toBe(anchor);
+  });
+
+  it("an update that changes neither keeps the anchor", () => {
+    const anchor = { ms: 10_000, at: 0 };
+    expect(positionAfterChannel(anchor, song(true), song(true), 200)).toBe(
+      anchor,
+    );
   });
 });
 
