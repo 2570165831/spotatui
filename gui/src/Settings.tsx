@@ -1,4 +1,4 @@
-import { EN, type GuiStrings } from "./i18n";
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { memo, useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { SettingRow } from "./bindings/SettingRow";
@@ -23,11 +23,21 @@ export const Settings = memo(function Settings({
   send: (action: Action) => void;
   onUpdate: (ask: UpdateAsk) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const shown = sections(rows ?? [], update !== null, query, s);
   return (
     <div className="settings" tabIndex={-1} data-focus>
       <h1>{s.settings}</h1>
       {rows === null && <p className="settings-empty">{s.loading}</p>}
-      {sections(rows ?? [], update !== null, s).map((section) => (
+      {rows !== null && (
+        <SettingsSearch s={s} query={query} onQuery={setQuery} />
+      )}
+      {rows !== null && query.trim() !== "" && shown.length === 0 && (
+        <p className="settings-empty" role="status">
+          {fmt(s.no_settings_match, { query: query.trim() })}
+        </p>
+      )}
+      {shown.map((section) => (
         <section
           key={section.group}
           aria-labelledby={`settings-${section.group}`}
@@ -59,6 +69,37 @@ export const Settings = memo(function Settings({
     </div>
   );
 });
+
+/** The filter above the sections; Escape empties it, a second Escape leaves it. */
+export function SettingsSearch({
+  s = EN,
+  query,
+  onQuery,
+}: {
+  s?: GuiStrings;
+  query: string;
+  onQuery: (query: string) => void;
+}) {
+  return (
+    <input
+      type="search"
+      className="settings-search"
+      aria-label={s.search_settings}
+      placeholder={s.search_settings}
+      autoComplete="off"
+      spellCheck={false}
+      value={query}
+      onChange={(event) => onQuery(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Escape" && query !== "") {
+          event.preventDefault();
+          onQuery("");
+        }
+      }}
+    />
+  );
+}
 
 /** The updater's status line and its one action. */
 export function UpdateRow({

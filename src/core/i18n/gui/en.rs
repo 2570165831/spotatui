@@ -325,6 +325,8 @@ pub const EN: GuiStrings = GuiStrings {
   update_delay_description: "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'",
   play_named: "Play {name}",
   shuffle_named: "Shuffle {name}",
+  search_settings: "Search settings",
+  no_settings_match: "No settings match “{query}”.",
   by_owner: "By {owner}",
   album_by: "Album · {artists}",
   playlist_count: "Playlist · {count}",

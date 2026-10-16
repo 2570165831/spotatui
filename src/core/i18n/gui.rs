@@ -334,6 +334,8 @@ pub struct GuiStrings {
   pub update_delay_description: &'static str,
   pub play_named: &'static str,
   pub shuffle_named: &'static str,
+  pub search_settings: &'static str,
+  pub no_settings_match: &'static str,
   pub by_owner: &'static str,
   pub album_by: &'static str,
   pub playlist_count: &'static str,
