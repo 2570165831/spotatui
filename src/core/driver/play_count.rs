@@ -205,7 +205,7 @@ mod tests {
   use super::*;
   use crate::core::app::{NativeTrackInfo, NativeTrackKind};
   use crate::core::user_config::UserConfig;
-  use crate::infra::media_metadata::current_playback_snapshot;
+  use crate::infra::media_metadata::tracking_playback_snapshot;
   use std::sync::mpsc::{channel, Receiver};
   use std::time::{Duration, SystemTime};
 
@@ -479,7 +479,7 @@ mod tests {
 
   fn tick_for(counter: &mut PlayCounter, app: &mut App, time: Duration) {
     for _ in 0..time.as_millis() / TICK_MS {
-      let snapshot = current_playback_snapshot(app);
+      let snapshot = tracking_playback_snapshot(app);
       counter.tick(app, snapshot.as_ref());
       app.song_progress_ms += TICK_MS;
     }

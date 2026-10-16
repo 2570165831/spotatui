@@ -869,11 +869,11 @@ pub fn search_results_snapshot(app: &App) -> SearchResults {
 /// lyrics; the one-shot callback is then spent by the time the real ones land.
 ///
 /// `desired_lyrics_identity` is the detector's record of which item it last
-/// published lyrics state for, so comparing it against the live snapshot
-/// detects exactly that window.
+/// published lyrics state for, keyed on the tracking snapshot, so comparing it
+/// against the same snapshot detects exactly that window.
 pub fn lyrics_state_is_current(app: &App) -> bool {
-  use crate::infra::media_metadata::PlaybackItemKind;
-  match current_playback_snapshot(app) {
+  use crate::infra::media_metadata::{tracking_playback_snapshot, PlaybackItemKind};
+  match tracking_playback_snapshot(app) {
     // Nothing playing: the detector clears the identity.
     None => app.desired_lyrics_identity.is_none(),
     Some(snapshot) => match snapshot.item_kind {
