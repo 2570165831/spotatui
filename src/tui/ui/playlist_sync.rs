@@ -53,6 +53,7 @@ pub fn draw_playlist_sync(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       &rows,
       highlight_state,
       Some(app.view.playlist_sync_selected_link.min(rows.len() - 1)),
+      &app.view.playlist_sync_scroll_offset,
     );
   }
 

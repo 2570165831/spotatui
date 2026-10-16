@@ -303,6 +303,7 @@ pub fn draw_local_browser(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     &items,
     highlight_state,
     Some(app.view.local_playlists_index),
+    &app.view.local_files_scroll_offset,
   );
 }
 

@@ -78,6 +78,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         &top_tracks,
         get_artist_highlight_state(app, ArtistBlock::TopTracks),
         Some(artist.selected_top_track_index),
+        &app.view.artist_top_tracks_scroll_offset,
       );
     };
 
@@ -105,6 +106,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       albums,
       get_artist_highlight_state(app, ArtistBlock::Albums),
       Some(artist.selected_album_index),
+      &app.view.artist_albums_scroll_offset,
     );
 
     if let Some(related_artists_area) = related_artists_area {
@@ -131,6 +133,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         &related_artists,
         get_artist_highlight_state(app, ArtistBlock::RelatedArtists),
         Some(artist.selected_related_artist_index),
+        &app.view.artist_related_artists_scroll_offset,
       );
     }
   };

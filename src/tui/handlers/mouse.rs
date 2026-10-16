@@ -366,7 +366,7 @@ fn select_clicked_setting(mouse_row: u16, list_area: Rect, app: &mut App) {
   let visible = filtered_setting_indices(app);
   let selected_position = selected_setting_position(app).unwrap_or(0);
   let Some(clicked_row) =
-    list_item_index_from_click(list_area, mouse_row, selected_position, visible.len())
+    list_item_index_from_click(list_area, mouse_row, selected_position, None, visible.len())
   else {
     return;
   };
@@ -494,9 +494,13 @@ fn select_clicked_library_item(mouse_row: u16, list_area: Rect, app: &mut App) {
   let item_count = app.library_rows().len();
   let selected_index = app.library_cursor();
 
-  let Some(clicked_index) =
-    list_item_index_from_click(list_area, mouse_row, selected_index, item_count)
-  else {
+  let Some(clicked_index) = list_item_index_from_click(
+    list_area,
+    mouse_row,
+    selected_index,
+    Some(app.view.library_scroll_offset.get()),
+    item_count,
+  ) else {
     return;
   };
 
@@ -522,9 +526,13 @@ fn select_clicked_playlist(mouse_row: u16, list_area: Rect, app: &mut App) {
     .unwrap_or(0)
     .min(item_count.saturating_sub(1));
 
-  let Some(clicked_index) =
-    list_item_index_from_click(list_area, mouse_row, selected_index, item_count)
-  else {
+  let Some(clicked_index) = list_item_index_from_click(
+    list_area,
+    mouse_row,
+    selected_index,
+    Some(app.view.playlist_scroll_offset.get()),
+    item_count,
+  ) else {
     return;
   };
 
@@ -665,6 +673,7 @@ fn list_item_index_from_click(
   list_area: Rect,
   mouse_row: u16,
   selected_index: usize,
+  anchored_offset: Option<usize>,
   item_count: usize,
 ) -> Option<usize> {
   if item_count == 0 || list_area.height <= 2 {
@@ -686,11 +695,11 @@ fn list_item_index_from_click(
     return None;
   }
 
-  // `draw_selectable_list` recreates list state each frame with offset 0, so ratatui scrolls
-  // just enough to keep the selected row visible.
-  let offset = selected_index
-    .saturating_add(1)
-    .saturating_sub(viewport_height);
+  let offset = anchored_offset.unwrap_or_else(|| {
+    selected_index
+      .saturating_add(1)
+      .saturating_sub(viewport_height)
+  });
   let row_index = (mouse_row - inner_top) as usize;
   let clicked_index = offset + row_index;
 
@@ -2178,11 +2187,15 @@ mod tests {
     let selected_index = 8;
     let total_items = 20;
 
-    let first_visible = list_item_index_from_click(area, 1, selected_index, total_items);
-    let second_visible = list_item_index_from_click(area, 2, selected_index, total_items);
-
+    // Derived fallback
+    let first_visible = list_item_index_from_click(area, 1, selected_index, None, total_items);
+    let second_visible = list_item_index_from_click(area, 2, selected_index, None, total_items);
     assert_eq!(first_visible, Some(3));
     assert_eq!(second_visible, Some(4));
+
+    // Anchored offset
+    let anchored_first = list_item_index_from_click(area, 1, selected_index, Some(5), total_items);
+    assert_eq!(anchored_first, Some(5));
   }
 
   #[test]
@@ -2351,5 +2364,76 @@ mod tests {
 
     assert_eq!(first, Some(9));
     assert_eq!(second, Some(10));
+  }
+
+  #[test]
+  fn click_after_scrolling_back_up_resolves_correct_row() {
+    use crate::core::source::Source;
+    use crate::tui::ui::draw_user_block;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let mut app = App::default_connected();
+    app.set_active_source(Source::Local);
+    app.view.size = Viewport {
+      width: 80,
+      height: 20,
+    };
+    app.push_navigation_stack(RouteId::Home, ActiveBlock::Home);
+
+    // Populate with 50 folders
+    *app.local_playlists_mut() = (0..50)
+      .map(|i| crate::core::plugin_api::PlaylistInfo {
+        uri: format!("file:///music/folder_{i}"),
+        name: format!("Folder {i}"),
+        owner: "local".to_string(),
+        track_count: 0,
+        id: None,
+        owner_id: None,
+        collaborative: false,
+        public: None,
+        image_url: None,
+      })
+      .collect();
+
+    let areas = main_layout_areas(&app).expect("layout areas");
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+
+    // Move selection down deep so the list scrolls down
+    app.view.selected_playlist_index = Some(35);
+    terminal
+      .draw(|f| draw_user_block(f, &app, areas.sidebar))
+      .unwrap();
+    let scrolled_offset = app.view.playlist_scroll_offset.get();
+    assert!(
+      scrolled_offset > 0,
+      "list must have scrolled down (got offset {scrolled_offset})"
+    );
+
+    // Move selection back UP (sticky scrolling retains the offset)
+    app.view.selected_playlist_index = Some(scrolled_offset + 1);
+    terminal
+      .draw(|f| draw_user_block(f, &app, areas.sidebar))
+      .unwrap();
+    assert_eq!(
+      app.view.playlist_scroll_offset.get(),
+      scrolled_offset,
+      "viewport offset must remain sticky when moving selection up"
+    );
+
+    // Click the first visible inner row in the playlists panel
+    let click_x = areas.playlists.x + 1;
+    let click_y = areas.playlists.y + 1;
+    handler(
+      mouse_event(MouseEventKind::Down(MouseButton::Left), click_x, click_y),
+      &mut app,
+    );
+
+    // The clicked row must resolve to the visible item at `scrolled_offset`,
+    // NOT an offset re-derived from the selection!
+    assert_eq!(
+      app.view.selected_playlist_index,
+      Some(scrolled_offset),
+      "click must resolve to the visible row anchored by scroll offset"
+    );
   }
 }
