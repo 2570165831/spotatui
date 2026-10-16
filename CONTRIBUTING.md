@@ -131,9 +131,12 @@ Run the `reports_entries_still_in_english` test with `--nocapture` for coverage.
 The report is informational; the no-empty-entry and placeholder-parity tests
 are gates. Add a sentinel call for each typed formatter in `template_tests.rs`;
 its inventory check catches missing coverage. The large settings and GUI groups
-keep `en`, `zh_hans`, and `zh_hant` data in sibling files. GUI tests regenerate
-the TypeScript bindings and `gui/src/bindings/strings.json`, which must be
-committed together. The JSON is the browser bootstrap and fixture source.
+keep `en`, `zh_hans`, and `zh_hant` data in sibling files.
+
+Any edit to interface text, in any group, changes `gui/src/bindings/strings.json`:
+run `cargo test --features gui` to regenerate it (together with the TypeScript
+bindings) and commit the result, or the `gui` CI leg fails. The JSON is the
+browser bootstrap and fixture source.
 The GUI reads the same table and formats its named placeholders; do not add a
 second handwritten translation catalog in TypeScript.
 

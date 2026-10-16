@@ -425,7 +425,7 @@ pub const EN: ScreenStrings = ScreenStrings {
   party_following: " | Party: following {host}",
   status_title: "Status: {message}",
   live_elapsed: "LIVE • {elapsed}",
-  device_navigation: "Use `{up}`/`{down}` or arrow keys to move, `Tab` to switch panels, <Enter> to select.",
+  device_navigation: "Use `{down}`/`{up}` or arrow keys to move, `Tab` to switch panels, <Enter> to select.",
   reopen_devices: "Reopen this screen any time by pressing `{key}`.",
   playbar_status: "{state} ({device} | Shuffle: {shuffle} | Repeat: {repeat} | Volume: {volume}%){party}",
   playbar_source_status: "{state} ({source}{queue}{shuffle}{repeat} | Volume: {volume}%)",

@@ -17,7 +17,7 @@ use crate::gui::protocol::ClientMessage;
 pub use crate::gui::protocol::WindowMode;
 use crate::gui::server;
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -110,35 +110,6 @@ fn launch_url(port: u16, code: &str) -> String {
   format!("http://127.0.0.1:{port}/#code={code}")
 }
 
-/// Read the same explicit config path for the first page and for the shared boot.
-/// Other GUI arguments keep their existing meaning (notably --debug).
-fn gui_config_path(args: impl IntoIterator<Item = String>) -> Result<Option<PathBuf>> {
-  let mut args = args.into_iter();
-  let mut path = None;
-  while let Some(arg) = args.next() {
-    if arg == "--" {
-      break;
-    }
-    let value = if arg == "--config" || arg == "-c" {
-      Some(
-        args
-          .next()
-          .ok_or_else(|| anyhow::anyhow!("{arg} requires a file path"))?,
-      )
-    } else {
-      arg
-        .strip_prefix("--config=")
-        .or_else(|| arg.strip_prefix("-c").filter(|value| !value.is_empty()))
-        .map(str::to_string)
-    };
-    if let Some(value) = value {
-      anyhow::ensure!(!value.is_empty(), "--config requires a file path");
-      path = Some(PathBuf::from(value));
-    }
-  }
-  Ok(path)
-}
-
 /// Only the language is deserialized here; boot remains the owner of full config
 /// validation and reports errors. This never creates paths or logs config data.
 fn preload_language(path: Option<&Path>, system: Language) -> Language {
@@ -189,13 +160,9 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
     log::warn!("[state] failed to migrate legacy app data files: {e}");
   }
   // The page answers the first-launch questions, so it must be up before boot asks them.
-  let config_path = gui_config_path(std::env::args().skip(1))?;
   let default_config = crate::core::paths::app_config_dir().map(|dir| dir.join("config.yml"));
   let system_language = system_language();
-  let language = preload_language(
-    config_path.as_deref().or(default_config.as_deref()),
-    system_language,
-  );
+  let language = preload_language(default_config.as_deref(), system_language);
   let onboarding = Arc::new(BrowserOnboarding::with_language(language));
   let (boot_done, apps) = tokio::sync::watch::channel(None);
   let (link, publisher, inbox) = bridge::channel(apps, Arc::clone(&onboarding), window.is_some());
@@ -213,7 +180,7 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
   // No auto-update: it installs the console `spotatui` binary over this one and re-execs it.
   let options = BootOptions {
     system_language: Some(system_language),
-    config_path,
+    config_path: None,
     tick_rate: None,
     subcommand: None,
     reconfigure_auth: false,
@@ -568,23 +535,6 @@ fn changed_check(last: Option<UpdateRequest>, behavior: &BehaviorConfig) -> Opti
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn an_explicit_gui_config_path_is_shared_with_the_language_preload() {
-    for args in [
-      vec!["--config", "custom.yml"],
-      vec!["-c", "custom.yml"],
-      vec!["--config=custom.yml"],
-      vec!["-ccustom.yml"],
-    ] {
-      assert_eq!(
-        gui_config_path(args.into_iter().map(str::to_string)).unwrap(),
-        Some(PathBuf::from("custom.yml"))
-      );
-    }
-    assert!(gui_config_path(["--config".to_string()]).is_err());
-    assert_eq!(gui_config_path(["--debug".to_string()]).unwrap(), None);
-  }
 
   #[test]
   fn the_first_page_uses_the_saved_language_before_app_boot() {

@@ -1741,8 +1741,8 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
   );
 
   let move_instructions = app.strings().screens.device_navigation(
-    &app.user_config.keys.move_down.to_string(),
     &app.user_config.keys.move_up.to_string(),
+    &app.user_config.keys.move_down.to_string(),
   );
   let instructions_text: Vec<Line> = vec![
     Line::from(Span::raw(app.strings().screens.choose_source_device)),
@@ -1927,6 +1927,7 @@ fn playbar_control_hitboxes_in_area(
 
 #[cfg(test)]
 mod tests {
+
   use super::*;
   use crate::tui::event::Key;
   use chrono::Utc;
@@ -2622,5 +2623,28 @@ mod tests {
     let party = render_playbar_template(&app, false, &party_values);
     assert!(party.ends_with(" | HostNameXY"));
     assert!(!party.contains(['\n', '\r', '\t']));
+  }
+
+  #[test]
+  fn the_device_list_hint_puts_each_key_in_its_slot_and_keeps_the_english_order() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut app = crate::core::app::App::default();
+    app.user_config.keys.move_up = crate::tui::event::Key::Char('u');
+    app.user_config.keys.move_down = crate::tui::event::Key::Char('d');
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    terminal
+      .draw(|frame| draw_device_list(frame, &app))
+      .unwrap();
+    let buffer = terminal.backend().buffer();
+    let text: String = (0..buffer.area.height)
+      .map(|y| {
+        (0..buffer.area.width)
+          .map(|x| buffer[(x, y)].symbol())
+          .collect::<String>()
+      })
+      .collect::<Vec<_>>()
+      .join("\n");
+    // The pre-localization text listed the down key first.
+    assert!(text.contains("Use `d`/`u` or arrow keys to move"), "{text}");
   }
 }

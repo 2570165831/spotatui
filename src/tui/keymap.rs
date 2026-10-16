@@ -858,7 +858,16 @@ mod tests {
     // Keep all source/session views as well as rows hidden by availability.
     let baseline: serde_json::Value =
       serde_json::from_str(include_str!("help_english_5d66123b.json")).unwrap();
-    let entries: Vec<Vec<String>> = serde_json::from_value(baseline["entries"].clone()).unwrap();
+    let mut entries: Vec<Vec<String>> =
+      serde_json::from_value(baseline["entries"].clone()).unwrap();
+    // The fixture was captured on macOS; Open settings defaults to Alt+, elsewhere.
+    let open_settings = crate::core::user_config::UserConfig::new()
+      .keys
+      .open_settings
+      .to_string();
+    for row in entries.iter_mut().filter(|row| row[0] == "Open settings") {
+      row[1] = open_settings.clone();
+    }
     let enabled = |row: &Vec<String>| {
       (cfg!(feature = "cover-art") || row[0] != "Go to cover art view")
         && (cfg!(feature = "ai-dj") || row[2] != "AI DJ")

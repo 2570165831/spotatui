@@ -160,7 +160,7 @@ impl BrowserOnboarding {
         Err(_) if self.pages.load(Ordering::Relaxed) > 0 => alone_since = None,
         Err(_) => {
           if alone_since.get_or_insert_with(Instant::now).elapsed() >= self.no_page_grace {
-            break Err(anyhow!(self.language.strings().gui.no_browser_page));
+            break Err(anyhow!("no browser page is connected"));
           }
         }
       }
@@ -179,7 +179,7 @@ impl BrowserOnboarding {
         let line = text.split(['\r', '\n']).next().unwrap_or_default();
         Ok(format!("{line}\n"))
       }
-      _ => Err(anyhow!(self.language.strings().gui.wrong_line_reply)),
+      _ => Err(anyhow!("the page answered a line prompt with another kind")),
     }
   }
 }
@@ -225,7 +225,9 @@ impl Onboarding for BrowserOnboarding {
     })? {
       OnboardingReplyAnswer::Confirm { yes: true } => Ok(OnboardingAnswer::Yes),
       OnboardingReplyAnswer::Confirm { yes: false } => Ok(OnboardingAnswer::No),
-      _ => Err(anyhow!(self.language.strings().gui.wrong_confirm_reply)),
+      _ => Err(anyhow!(
+        "the page answered a yes/no question with another kind"
+      )),
     }
   }
 
@@ -253,7 +255,9 @@ impl Onboarding for BrowserOnboarding {
           .collect();
         Ok((!picked.is_empty()).then_some(picked))
       }
-      _ => Err(anyhow!(self.language.strings().gui.wrong_source_reply)),
+      _ => Err(anyhow!(
+        "the page answered the source picker with another kind"
+      )),
     }
   }
 }
