@@ -273,6 +273,7 @@ fn station_to_track_info(s: &RbStation) -> TrackInfo {
     .collect();
 
   TrackInfo {
+    generated_name: None,
     uri: Some(uri_for_stream_url(stream_url)),
     name: s.name.trim().to_string(),
     artists: tags,
@@ -297,6 +298,7 @@ fn station_to_track_info(s: &RbStation) -> TrackInfo {
 /// Map a config-file station (name + URL, nothing else known) onto a row.
 pub fn config_station_to_track_info(name: &str, url: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri_for_stream_url(url.trim())),
     name: name.trim().to_string(),
     artists: vec![],

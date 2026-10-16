@@ -299,6 +299,7 @@ describe("playlistRemoval", () => {
 
   it("deletes an owned Spotify playlist and removes any other one", () => {
     expect(removal("Spotify", "spotify:playlist:mine", "Mine")).toEqual({
+      kind: "owned",
       uri: "spotify:playlist:mine",
       name: "Mine",
       label: "Delete",

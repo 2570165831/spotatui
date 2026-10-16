@@ -5887,9 +5887,11 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "ts-rs",
  "tui-bar-graph",
+ "unicode-segmentation",
  "unicode-width",
  "url",
  "vergen",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -31,7 +31,7 @@ fn draw_name_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let block = Block::default()
     .title(Span::styled(
-      "Create Playlist (Esc to cancel)",
+      app.strings().popups.create_playlist_title,
       Style::default()
         .fg(theme.header.into())
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
@@ -51,7 +51,7 @@ fn draw_name_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     ])
     .split(area);
 
-  let label = Paragraph::new("Playlist name:").style(theme.base_style());
+  let label = Paragraph::new(app.strings().popups.playlist_name_label).style(theme.base_style());
   f.render_widget(label, inner[0]);
 
   let name_text: String = app.view.create_playlist_name.iter().collect();
@@ -66,7 +66,7 @@ fn draw_name_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     inner[1].y + 1,
   ));
 
-  let hint = Paragraph::new("Press Enter to continue, Esc to cancel")
+  let hint = Paragraph::new(app.strings().popups.create_continue_hint)
     .style(Style::default().fg(theme.inactive.into()));
   f.render_widget(hint, inner[2]);
 }
@@ -74,10 +74,7 @@ fn draw_name_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
 fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
   let theme = &app.user_config.theme;
   let name: String = app.view.create_playlist_name.iter().collect();
-  let title = format!(
-    "Add Tracks to \"{}\" (Enter=create, Tab=switch panel, Esc=cancel)",
-    name
-  );
+  let title = app.strings().popups.add_tracks_title(&name);
 
   let block = Block::default()
     .title(Span::styled(
@@ -107,7 +104,7 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
   let search_input = Paragraph::new(search_text).style(theme.base_style()).block(
     Block::default()
       .title(Span::styled(
-        "Search (Enter to search)",
+        app.strings().popups.create_search_title,
         Style::default().fg(theme.header.into()),
       ))
       .borders(Borders::ALL)
@@ -138,7 +135,11 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     .create_playlist_search_results
     .iter()
     .map(|t| {
-      let artist = t.artists.first().map(|a| a.as_str()).unwrap_or("Unknown");
+      let artist = t
+        .artists
+        .first()
+        .map(|a| a.as_str())
+        .unwrap_or(app.strings().popups.unknown_artist);
       ListItem::new(format!("{} — {}", t.name, artist)).style(theme.base_style())
     })
     .collect();
@@ -154,7 +155,7 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     .block(
       Block::default()
         .title(Span::styled(
-          "Results (Enter to add)",
+          app.strings().popups.create_results_title,
           Style::default().fg(theme.header.into()),
         ))
         .borders(Borders::ALL)
@@ -179,7 +180,11 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     .create_playlist_tracks
     .iter()
     .map(|t| {
-      let artist = t.artists.first().map(|a| a.as_str()).unwrap_or("Unknown");
+      let artist = t
+        .artists
+        .first()
+        .map(|a| a.as_str())
+        .unwrap_or(app.strings().popups.unknown_artist);
       ListItem::new(format!("{} — {}", t.name, artist)).style(theme.base_style())
     })
     .collect();
@@ -191,10 +196,10 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     added_state.select(Some(app.view.create_playlist_selected_result));
   }
 
-  let added_tracks_title = format!(
-    "Added ({}) — d=remove, Enter=create",
-    app.create_playlist_tracks.len()
-  );
+  let added_tracks_title = app
+    .strings()
+    .popups
+    .added_tracks_title(app.create_playlist_tracks.len());
   let added_list = List::new(added_items)
     .block(
       Block::default()

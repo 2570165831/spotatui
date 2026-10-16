@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import {
   useCallback,
   useDeferredValue,
@@ -12,7 +13,13 @@ import type { SourcePlaylists } from "./bindings/SourcePlaylists";
 import type { TrackInfo } from "./bindings/TrackInfo";
 import type { TrackTablePayload } from "./bindings/TrackTablePayload";
 import { Glyph } from "./Icon";
-import { clampCursor, playlistImage, songCount, step } from "./libraryModel";
+import {
+  clampCursor,
+  playlistImage,
+  playlistsFor,
+  songCount,
+  step,
+} from "./libraryModel";
 import "./ListPage.css";
 import type { OpenView, View } from "./nav";
 import {
@@ -22,7 +29,7 @@ import {
   removeAction,
   shufflePlayRequest,
   shownPlayRequest,
-  SORT_OPTIONS,
+  sortOptions,
   sortTracks,
   sortValue,
 } from "./sortModel";
@@ -36,6 +43,7 @@ const NO_URIS: string[] = [];
 
 /** Liked Songs or an opened playlist: the header, the play row and the track table. */
 export function ListPage({
+  s = EN,
   view,
   liked,
   table,
@@ -47,6 +55,7 @@ export function ListPage({
   send,
   defaultSort,
 }: {
+  s?: GuiStrings;
   view: Extract<View, { page: "liked" | "playlist" }>;
   liked: LikedSongs | null;
   /** The library lists, for the opened playlist's cover. */
@@ -180,26 +189,34 @@ export function ListPage({
     [cursor, shownTracks, hasMore, playlist, play, send],
   );
 
-  const title = playlist ? playlist.name : "Liked Songs";
+  const title = playlist
+    ? (playlists &&
+        playlistsFor(playlists, playlist.source).find(
+          (row) => row.uri === playlist.uri,
+        )?.name) ||
+      playlist.name
+    : s.liked_songs;
   const available = liked?.available ?? false;
   const loaded = liked?.loaded ?? false;
   const total = Math.max(liked?.total ?? 0, tracks.length);
   const meta = playlist ? (
     <>
       {playlist.source !== "Spotify" && (
-        <SourceBadge source={playlist.source} />
+        <SourceBadge s={s} source={playlist.source} />
       )}
       {landed && (
         <span>
-          {hasMore ? `${tracks.length}+ songs` : songCount(tracks.length)}
+          {hasMore
+            ? fmt(s.songs_count_more, { count: tracks.length })
+            : songCount(tracks.length, s)}
         </span>
       )}
     </>
   ) : (
     loaded && (
       <span>
-        {songCount(total)}
-        {tracks.length < total && `, ${tracks.length} loaded`}
+        {songCount(total, s)}
+        {tracks.length < total && fmt(s.loaded_count, { count: tracks.length })}
       </span>
     )
   );
@@ -208,7 +225,7 @@ export function ListPage({
   return (
     <section className="list-page" aria-label={title}>
       <PageHeader
-        kind="Playlist"
+        kind={s.playlist}
         title={title}
         image={
           playlist &&
@@ -219,7 +236,7 @@ export function ListPage({
       />
       <div className="list-actions">
         <PlayButton
-          label={`Play ${title}`}
+          label={fmt(s.play_named, { name: title })}
           large
           disabled={first < 0}
           onClick={() => play(first)}
@@ -227,7 +244,7 @@ export function ListPage({
         <button
           type="button"
           className="list-shuffle"
-          aria-label={`Shuffle ${title}`}
+          aria-label={fmt(s.shuffle_named, { name: title })}
           disabled={first < 0}
           onClick={() => {
             const action = shufflePlayRequest(shownTracks);
@@ -240,13 +257,13 @@ export function ListPage({
           <span className="list-count" aria-live="polite">
             {filtering &&
               tracks.length > 0 &&
-              `${rows.length} of ${tracks.length}`}
+              fmt(s.filter_count, { shown: rows.length, total: tracks.length })}
           </span>
           <input
             type="search"
             className="list-filter"
-            aria-label="Filter"
-            placeholder="Filter"
+            aria-label={s.filter}
+            placeholder={s.filter}
             autoComplete="off"
             value={filter}
             onChange={(event) => {
@@ -256,14 +273,14 @@ export function ListPage({
           />
           <select
             className="list-sort"
-            aria-label="Sort by"
+            aria-label={s.sort_by}
             value={sortBy}
             onChange={(event) => {
               setSortBy(event.target.value);
               setWant(0);
             }}
           >
-            {SORT_OPTIONS.map((option) => (
+            {sortOptions(s).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -272,23 +289,26 @@ export function ListPage({
         </div>
       </div>
       {tracks.length > 0 && shownTracks.length === 0 ? (
-        <p className="list-empty">No songs match “{shownFilter.trim()}”.</p>
+        <p className="list-empty">
+          {fmt(s.no_songs_match, { filter: shownFilter.trim() })}
+        </p>
       ) : tracks.length === 0 ? (
         <p className="list-empty">
           {playlist
             ? landed
-              ? "This playlist is empty."
+              ? s.playlist_empty
               : failed
-                ? `Could not load ${playlist.name}. Choose it again to retry.`
-                : `Loading ${playlist.name}…`
+                ? fmt(s.load_playlist_failed, { name: title })
+                : fmt(s.loading_playlist, { name: title })
             : !available
-              ? "Liked Songs needs a Spotify session."
+              ? s.liked_needs_spotify
               : loaded
-                ? "No liked songs yet."
-                : "Loading Liked Songs…"}
+                ? s.no_liked_songs
+                : s.loading_liked_songs}
         </p>
       ) : (
         <TrackTable
+          s={s}
           label={title}
           idPrefix={playlist ? "playlist" : "liked"}
           tracks={shownTracks}

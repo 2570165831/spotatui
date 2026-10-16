@@ -447,6 +447,7 @@ fn song_indices_for(entries: &[types::SubsonicSong], track_ids: &[&str]) -> Vec<
 impl From<&types::SubsonicPlaylist> for PlaylistInfo {
   fn from(p: &types::SubsonicPlaylist) -> Self {
     PlaylistInfo {
+      generated_name: None,
       uri: format!("{}{}", PLAYLIST_PREFIX, p.id),
       name: p.name.clone(),
       owner: p.owner.clone(),
@@ -463,6 +464,7 @@ impl From<&types::SubsonicPlaylist> for PlaylistInfo {
 impl From<&types::PlaylistDetail> for PlaylistInfo {
   fn from(p: &types::PlaylistDetail) -> Self {
     PlaylistInfo {
+      generated_name: None,
       uri: format!("{}{}", PLAYLIST_PREFIX, p.id),
       name: p.name.clone(),
       owner: p.owner.clone(),
@@ -492,6 +494,7 @@ impl SubsonicSource {
     };
 
     TrackInfo {
+      generated_name: None,
       uri: Some(format!("{}{}", TRACK_PREFIX, s.id)),
       name: s.title.clone(),
       artists: if artist_name.is_empty() {

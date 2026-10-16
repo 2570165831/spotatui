@@ -32,7 +32,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     };
 
     if artist.top_tracks.is_empty() {
-      let title = &format!("{} - Top Tracks", artist.artist_name);
+      let title = &app.strings().screens.artist_top_tracks(&artist.artist_name);
       let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -43,7 +43,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         ))
         .border_style(get_color((false, false), app.user_config.theme));
 
-      let notice = Paragraph::new("No top tracks")
+      let notice = Paragraph::new(app.strings().screens.no_top_tracks)
         .block(block)
         .style(app.user_config.theme.base_style())
         .alignment(Alignment::Center);
@@ -74,7 +74,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         f,
         app,
         tracks_area,
-        &format!("{} - Top Tracks", artist.artist_name),
+        &app.strings().screens.artist_top_tracks(&artist.artist_name),
         &top_tracks,
         get_artist_highlight_state(app, ArtistBlock::TopTracks),
         Some(artist.selected_top_track_index),
@@ -93,7 +93,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
             album_artist.push_str(&app.user_config.padded_liked_icon());
           }
         }
-        album_artist.push_str(&album_row_text(item));
+        album_artist.push_str(&album_row_text_with(item, &app.strings().screens));
         album_artist
       })
       .collect::<Vec<String>>();
@@ -102,7 +102,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       albums_area,
-      "Albums",
+      app.strings().screens.albums,
       albums,
       get_artist_highlight_state(app, ArtistBlock::Albums),
       Some(artist.selected_album_index),
@@ -129,7 +129,7 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         f,
         app,
         related_artists_area,
-        "Related artists",
+        app.strings().screens.related_artists,
         &related_artists,
         get_artist_highlight_state(app, ArtistBlock::RelatedArtists),
         Some(artist.selected_related_artist_index),
@@ -141,8 +141,11 @@ pub fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 
 /// One row of the artist page's album list: `Name - Artists (type, year)`,
 /// or `(type)` when the album has no usable release date.
-fn album_row_text(album: &AlbumInfo) -> String {
-  let album_type = album.album_type.as_deref().unwrap_or("unknown");
+fn album_row_text_with(
+  album: &AlbumInfo,
+  strings: &crate::core::i18n::screens::ScreenStrings,
+) -> String {
+  let album_type = strings.album_type(album.album_type.as_deref());
   let detail = match release_year(album.release_date.as_deref()) {
     Some(year) => format!("{album_type}, {year}"),
     None => album_type.to_string(),
@@ -155,6 +158,11 @@ fn album_row_text(album: &AlbumInfo) -> String {
 }
 
 #[cfg(test)]
+fn album_row_text(album: &AlbumInfo) -> String {
+  album_row_text_with(album, &crate::core::i18n::screens::EN)
+}
+
+#[cfg(test)]
 mod tests {
   use super::*;
   use crate::core::app::Artist;
@@ -164,6 +172,7 @@ mod tests {
 
   fn top_track(name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some("spotify:track:0000000000000000000001".to_string()),
       name: name.to_string(),
       artists: vec!["First".to_string()],
@@ -286,5 +295,36 @@ mod tests {
       "albums panel should start at the halfway mark (50/50 split): {}",
       row.join("")
     );
+  }
+}
+
+#[cfg(test)]
+mod album_type_localization_tests {
+  use super::*;
+  #[test]
+  fn album_type_labels_follow_the_table_while_titles_and_unknown_types_stay_literal() {
+    for strings in [
+      &crate::core::i18n::EN,
+      &crate::core::i18n::ZH_HANS,
+      &crate::core::i18n::ZH_HANT,
+    ] {
+      for (raw, label) in [
+        ("album", strings.screens.album_type_album),
+        ("single", strings.screens.album_type_single),
+        ("compilation", strings.screens.album_type_compilation),
+        ("appears_on", strings.screens.album_type_appears_on),
+        ("provider {type}", "provider {type}"),
+      ] {
+        let album = AlbumInfo {
+          name: "album {type} 中文".into(),
+          album_type: Some(raw.into()),
+          ..Default::default()
+        };
+        let row = album_row_text_with(&album, &strings.screens);
+        assert!(row.starts_with("album {type} 中文 - "));
+        assert!(row.ends_with(&format!("({label})")), "{row}");
+        assert_eq!(album.album_type.as_deref(), Some(raw));
+      }
+    }
   }
 }

@@ -1,4 +1,5 @@
-import { AREAS, SETTINGS_KEY } from "./areas";
+import { EN, type GuiStrings, fmt } from "./i18n";
+import { AREAS, areas, SETTINGS_KEY } from "./areas";
 import type { UpdateAsk } from "./bindings/UpdateAsk";
 import type { UpdateStatus } from "./bindings/UpdateStatus";
 import { Glyph, type GlyphName } from "./Icon";
@@ -12,10 +13,10 @@ const PAGE_GLYPHS: Partial<Record<Page, GlyphName>> = {
   party: "party",
 };
 
-const PAGES = AREAS.filter((entry) => PAGE_GLYPHS[entry.area]);
 const HOME_KEY = AREAS.find((entry) => entry.area === "home")?.key;
 
 export function TopBar({
+  s = EN,
   page,
   canBack,
   canForward,
@@ -30,6 +31,7 @@ export function TopBar({
   update,
   onUpdate,
 }: {
+  s?: GuiStrings;
   page: Page;
   canBack: boolean;
   canForward: boolean;
@@ -54,7 +56,7 @@ export function TopBar({
         <button
           type="button"
           className="history-button"
-          aria-label="Go back"
+          aria-label={s.go_back}
           disabled={!canBack}
           onClick={onBack}
         >
@@ -63,7 +65,7 @@ export function TopBar({
         <button
           type="button"
           className="history-button"
-          aria-label="Go forward"
+          aria-label={s.go_forward}
           disabled={!canForward}
           onClick={onForward}
         >
@@ -74,8 +76,8 @@ export function TopBar({
         <button
           type="button"
           className="home-button"
-          aria-label="Home"
-          title={`Home (${HOME_KEY})`}
+          aria-label={s.home}
+          title={fmt(s.label_shortcut, { label: s.home, key: HOME_KEY ?? "" })}
           aria-keyshortcuts={HOME_KEY}
           aria-current={page === "home" ? "page" : undefined}
           onClick={() => onPage("home")}
@@ -89,9 +91,9 @@ export function TopBar({
           <input
             id="top-search"
             type="search"
-            aria-label="Search"
+            aria-label={s.search}
             aria-keyshortcuts="/"
-            placeholder="What do you want to play?"
+            placeholder={s.search_placeholder}
             autoComplete="off"
             value={query}
             onChange={(event) => onQuery(event.target.value)}
@@ -119,37 +121,45 @@ export function TopBar({
         </label>
       </div>
       <div className="topbar-end">
-        <nav aria-label="spotatui pages">
-          {PAGES.map((entry) => (
-            <button
-              key={entry.area}
-              type="button"
-              className="page-button"
-              aria-label={entry.label}
-              title={`${entry.label} (${entry.key})`}
-              aria-keyshortcuts={entry.key}
-              aria-current={entry.area === page ? "page" : undefined}
-              onClick={() => onPage(entry.area)}
-            >
-              <Glyph name={PAGE_GLYPHS[entry.area] ?? "music"} size={20} />
-            </button>
-          ))}
+        <nav aria-label={s.spotatui_pages}>
+          {areas(s)
+            .filter((entry) => PAGE_GLYPHS[entry.area])
+            .map((entry) => (
+              <button
+                key={entry.area}
+                type="button"
+                className="page-button"
+                aria-label={entry.label}
+                title={fmt(s.label_shortcut, {
+                  label: entry.label,
+                  key: entry.key,
+                })}
+                aria-keyshortcuts={entry.key}
+                aria-current={entry.area === page ? "page" : undefined}
+                onClick={() => onPage(entry.area)}
+              >
+                <Glyph name={PAGE_GLYPHS[entry.area] ?? "music"} size={20} />
+              </button>
+            ))}
         </nav>
         {ready && (
           <button
             type="button"
             className="update-pill"
-            title={`Restart to install version ${ready}`}
+            title={fmt(s.install_version, { version: ready })}
             onClick={() => onUpdate("install")}
           >
-            Update ready
+            {s.update_ready}
           </button>
         )}
         <button
           type="button"
           className="page-button"
-          aria-label="Settings"
-          title={`Settings (${SETTINGS_KEY.label})`}
+          aria-label={s.settings}
+          title={fmt(s.label_shortcut, {
+            label: s.settings,
+            key: SETTINGS_KEY.label,
+          })}
           aria-keyshortcuts={SETTINGS_KEY.aria}
           aria-current={page === "settings" ? "page" : undefined}
           onClick={() => onPage("settings")}
@@ -159,7 +169,7 @@ export function TopBar({
         <span className="device">
           <span className={connected && device ? "dot on" : "dot"} />
           <span className="device-name" title={device ?? undefined}>
-            {device ?? "No device"}
+            {device ?? s.no_device}
           </span>
         </span>
       </div>

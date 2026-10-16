@@ -56,9 +56,12 @@ impl AppExecutor {
     }
   }
 
-  async fn announce(&self, message: String) {
+  async fn announce(&self, outcome: &ToolOutcome) {
     let mut app = self.app.lock().await;
-    app.set_status_message(format!("MCP: {message}"), 5);
+    // Picked here, not when the call started: the language may have changed.
+    let message = outcome.display_text(app.language()).to_string();
+    let strings = app.strings();
+    app.set_status_message(strings.status.infra.mcp_status(&message), 5);
   }
 }
 
@@ -80,7 +83,7 @@ impl ToolExecutor for AppExecutor {
         None => Network::answer_dj_tool_call_without_spotify(&self.app, call).await,
       };
       if announce && !outcome.is_error {
-        self.announce(outcome.text.clone()).await;
+        self.announce(&outcome).await;
       }
       return outcome;
     }
@@ -95,18 +98,16 @@ impl ToolExecutor for AppExecutor {
       .send(IoEvent::DjToolCall(Box::new((call, tx))))
       .is_err()
     {
-      return ToolOutcome::error("spotatui is shutting down; the request was not run");
+      return ToolOutcome::error_localized(|strings| strings.status.tools.shutting_down);
     }
 
     let outcome = match tokio::time::timeout(TOOL_TIMEOUT, rx).await {
       Ok(Ok(outcome)) => outcome,
-      Ok(Err(_)) => ToolOutcome::error("spotatui dropped the request before answering"),
-      Err(_) => ToolOutcome::error(
-        "spotatui did not answer in time; it may be busy. Try again in a moment.",
-      ),
+      Ok(Err(_)) => ToolOutcome::error_localized(|strings| strings.status.tools.dropped),
+      Err(_) => ToolOutcome::error_localized(|strings| strings.status.tools.timed_out),
     };
     if announce && !outcome.is_error {
-      self.announce(outcome.text.clone()).await;
+      self.announce(&outcome).await;
     }
     outcome
   }
@@ -115,6 +116,57 @@ impl ToolExecutor for AppExecutor {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[tokio::test]
+  async fn tool_announcements_localize_without_changing_protocol_text_or_user_braces() {
+    use crate::core::i18n::Language;
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let mut config = crate::core::user_config::UserConfig::new();
+      config.behavior.language = language;
+      let (tx, _rx) = std::sync::mpsc::channel();
+      let app = Arc::new(Mutex::new(App::new(tx.clone(), config, None)));
+      let executor = AppExecutor::new(Arc::clone(&app), tx);
+      let result = executor
+        .call(DjToolCall::SetDjVibe {
+          vibe: Some("{count} 夜曲".into()),
+        })
+        .await;
+      assert!(result.text.starts_with("DJ vibe set to: {count} 夜曲."));
+      let guard = app.lock().await;
+      let status = guard.status_message().unwrap();
+      assert!(status.contains("{count} 夜曲"));
+      if language == Language::En {
+        assert_eq!(result.display_text(language), result.text);
+        assert_eq!(status, format!("MCP: {}", result.text));
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn a_closed_pump_keeps_english_protocol_errors_and_chinese_display_errors() {
+    use crate::core::i18n::Language;
+    let mut config = crate::core::user_config::UserConfig::new();
+    config.behavior.language = Language::ZhHant;
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(rx);
+    let app = Arc::new(Mutex::new(App::new(tx.clone(), config, None)));
+    let executor = AppExecutor::new(app, tx);
+    let result = executor
+      .call(DjToolCall::SearchTracks {
+        query: "夜曲".into(),
+        limit: 5,
+      })
+      .await;
+    assert!(result.is_error);
+    assert_eq!(
+      result.text,
+      "spotatui is shutting down; the request was not run"
+    );
+    assert_eq!(
+      result.display_text(Language::ZhHant),
+      crate::core::i18n::ZH_HANT.status.tools.shutting_down
+    );
+  }
 
   #[tokio::test]
   async fn app_executor_reports_a_closed_pump() {

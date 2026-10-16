@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useLayoutEffect, useRef } from "react";
 import type { Action } from "./bindings/Action";
 import type { LyricsPayload } from "./bindings/LyricsPayload";
@@ -10,6 +11,7 @@ import { usePosition } from "./usePosition";
 
 /** The lyrics of the playing track in the main view. */
 export function LyricsPage({
+  s = EN,
   item,
   lyrics,
   position,
@@ -17,6 +19,7 @@ export function LyricsPage({
   connected,
   send,
 }: {
+  s?: GuiStrings;
   item: NowPlaying | null;
   lyrics: LyricsPayload | null;
   position: Position | null;
@@ -42,11 +45,11 @@ export function LyricsPage({
   }, [current, active]);
 
   const note = !item
-    ? "Nothing is playing. Play a song to see its lyrics here."
+    ? s.lyrics_play_song
     : !lyrics || lyrics.status === "loading" || lyrics.status === "not_started"
-      ? "Loading lyrics…"
+      ? s.loading_lyrics
       : lyrics.status === "not_found" || lines.length === 0
-        ? "No lyrics for this song"
+        ? s.no_lyrics
         : null;
   return (
     <div ref={page} className="lyrics-page" data-focus tabIndex={-1}>
@@ -57,7 +60,7 @@ export function LyricsPage({
       ) : (
         <>
           {!synced && (
-            <p className="lyrics-page-unsynced">These lyrics are not synced</p>
+            <p className="lyrics-page-unsynced">{s.lyrics_not_synced}</p>
           )}
           <ol className={synced ? "lyrics-lines synced" : "lyrics-lines"}>
             {lines.map((line, row) => (

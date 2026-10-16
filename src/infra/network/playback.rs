@@ -559,7 +559,8 @@ async fn suppressed_no_device_error_while_pending(network: &Network, e: &anyhow:
   if !app.native_backend_pending {
     return false;
   }
-  app.set_status_message("Reconnecting native streaming…", 5);
+  let strings = app.strings();
+  app.set_status_message(strings.status.infra.native_reconnecting, 5);
   true
 }
 
@@ -586,7 +587,16 @@ async fn suppressed_restriction_violation_while_pending(
     }
   }
   network
-    .show_status_message("Native streaming is still settling…".to_string(), 5)
+    .show_status_message(
+      network
+        .strings()
+        .await
+        .status
+        .infra
+        .native_settling
+        .to_string(),
+      5,
+    )
     .await;
   true
 }
@@ -939,7 +949,16 @@ async fn start_native_context_via_api(
         Err(e) => {
           warn!("native start succeeded but shuffle toggle was rejected: {e}");
           network
-            .show_status_message("Playback started; couldn't apply shuffle.".to_string(), 6)
+            .show_status_message(
+              network
+                .strings()
+                .await
+                .status
+                .infra
+                .shuffle_not_applied
+                .to_string(),
+              6,
+            )
             .await;
           false
         }
@@ -979,7 +998,13 @@ async fn start_native_context_via_api(
       // Both routes failed for this request; drop the parked copy so an
       // unrelated later recovery can't replay it.
       app.pending_start_playback = None;
-      app.handle_error(anyhow!("Failed to start native playback: {}", e));
+      {
+        let strings = app.strings();
+        app.handle_error_with_message(
+          anyhow!("Failed to start native playback: {}", e),
+          strings.status.infra.native_start_failed(&e.to_string()),
+        )
+      };
     }
   }
 }
@@ -1335,19 +1360,15 @@ impl PlaybackNetwork for Network {
           || err.to_string().contains("Too Many Requests")
           || err.to_string().contains("Too many requests")
         {
-          app.set_status_message(
-            "Spotify rate limit hit. Retrying automatically; please wait a few seconds.",
-            6,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.spotify_rate_retry, 6);
           app.instant_since_last_current_playback_poll = Instant::now();
           return;
         }
 
         if current_playback_poll_is_transient(&err) {
-          app.set_status_message(
-            "Temporary Spotify network error while polling playback; retrying automatically.",
-            5,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.spotify_poll_retry, 5);
           app.instant_since_last_current_playback_poll = Instant::now();
           return;
         }
@@ -1359,10 +1380,8 @@ impl PlaybackNetwork for Network {
           || err.to_string().contains("Service Unavailable")
           || err.to_string().contains("Bad Gateway")
         {
-          app.set_status_message(
-            "Spotify server temporarily unavailable (5xx); retrying automatically.",
-            10,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.spotify_server_retry, 10);
           app.instant_since_last_current_playback_poll = Instant::now();
           return;
         }
@@ -1390,10 +1409,8 @@ impl PlaybackNetwork for Network {
             // Stay quiet on the first one (the self-healing case); only say
             // something once it starts looking persistent.
             if self.consecutive_playback_auth_failures > 1 {
-              app.set_status_message(
-                "Spotify keeps rejecting the playback poll; retrying automatically.".to_string(),
-                5,
-              );
+              let strings = app.strings();
+              app.set_status_message(strings.status.infra.spotify_poll_rejected.to_string(), 5);
             }
             app.instant_since_last_current_playback_poll = Instant::now();
             return;
@@ -1422,7 +1439,7 @@ impl PlaybackNetwork for Network {
           return;
         }
 
-        app.handle_error(err);
+        super::report_request_error(&mut app, err);
         return;
       }
     }
@@ -1535,7 +1552,8 @@ impl PlaybackNetwork for Network {
           let mut app = self.app.lock().await;
           app.mark_native_handoff_resume_sent();
           app.native_device_id = Some(player.device_id());
-          app.set_status_message("Resuming the last playback here\u{2026}", 4);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.native_resuming, 4);
           app.dispatch(IoEvent::GetCurrentPlayback);
           return;
         }
@@ -1718,8 +1736,12 @@ impl PlaybackNetwork for Network {
             }
             Err(e) => {
               let mut app = self.app.lock().await;
+              let strings = app.strings();
               app.set_status_message(
-                format!("No playback to resume on {}.", player.device_name()),
+                strings
+                  .status
+                  .infra
+                  .native_nothing_to_resume(player.device_name()),
                 4,
               );
               info!("native resume via Spotify API failed: {}", e);
@@ -1808,7 +1830,16 @@ impl PlaybackNetwork for Network {
         Err(load_err) => {
           let Some((device_id, context)) = api_fallback else {
             let mut app = self.app.lock().await;
-            app.handle_error(anyhow!("Failed to start native playback: {}", load_err));
+            {
+              let strings = app.strings();
+              app.handle_error_with_message(
+                anyhow!("Failed to start native playback: {}", load_err),
+                strings
+                  .status
+                  .infra
+                  .native_start_failed(&load_err.to_string()),
+              )
+            };
             return;
           };
           info!(
@@ -1847,7 +1878,16 @@ impl PlaybackNetwork for Network {
           Err(e) => {
             log::warn!("start succeeded but shuffle toggle was rejected: {e}");
             self
-              .show_status_message("Playback started; couldn't apply shuffle.".to_string(), 6)
+              .show_status_message(
+                self
+                  .strings()
+                  .await
+                  .status
+                  .infra
+                  .shuffle_not_applied
+                  .to_string(),
+                6,
+              )
               .await;
             false
           }
@@ -1915,7 +1955,16 @@ impl PlaybackNetwork for Network {
                 info!("default Spotify playback had no active device; falling back to native load");
                 if let Err(load_err) = player.load(request) {
                   let mut app = self.app.lock().await;
-                  app.handle_error(anyhow!("Failed to start native playback: {}", load_err));
+                  {
+                    let strings = app.strings();
+                    app.handle_error_with_message(
+                      anyhow!("Failed to start native playback: {}", load_err),
+                      strings
+                        .status
+                        .infra
+                        .native_start_failed(&load_err.to_string()),
+                    )
+                  };
                 } else {
                   let _ = player.set_shuffle(desired_shuffle_state);
                   let mut app = self.app.lock().await;
@@ -1970,8 +2019,12 @@ impl PlaybackNetwork for Network {
                 }
                 Err(resume_err) => {
                   let mut app = self.app.lock().await;
+                  let strings = app.strings();
                   app.set_status_message(
-                    format!("No playback to resume on {}.", player.device_name()),
+                    strings
+                      .status
+                      .infra
+                      .native_nothing_to_resume(player.device_name()),
                     4,
                   );
                   info!("native resume fallback failed: {}", resume_err);
@@ -1995,7 +2048,8 @@ impl PlaybackNetwork for Network {
                 .map(|list| list.iter().map(|u| u.uri()).collect()),
               offset,
             );
-            app.set_status_message("Reconnecting native streaming; playback will resume.", 6);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.native_reconnect_resume, 6);
             return;
           }
           drop(app);
@@ -2009,7 +2063,7 @@ impl PlaybackNetwork for Network {
         }
 
         let mut app = self.app.lock().await;
-        app.handle_error(e);
+        super::report_request_error(&mut app, e);
       }
     }
   }
@@ -2050,7 +2104,8 @@ impl PlaybackNetwork for Network {
         return;
       };
       app.native_load_watchdog = Some(Instant::now());
-      app.set_status_message("Native connection restored; restoring playback.", 6);
+      let strings = app.strings();
+      app.set_status_message(strings.status.infra.native_connection_restored, 6);
       (player, snapshot)
     };
 
@@ -2062,10 +2117,8 @@ impl PlaybackNetwork for Network {
       if app.native_playback_restore_generation() == Some(generation) {
         app.native_restore_pending = None;
         app.native_load_watchdog = None;
-        app.set_status_message(
-          "Native connection recovered, but there was no playback state to restore.",
-          8,
-        );
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.native_no_state, 8);
       }
       return;
     };
@@ -2087,7 +2140,8 @@ impl PlaybackNetwork for Network {
       if app.native_playback_restore_generation() == Some(generation) {
         app.native_restore_pending = None;
         app.native_load_watchdog = None;
-        app.set_status_message("Native playback restore failed; reconnecting again.", 8);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.native_restore_retry, 8);
         app.force_native_streaming_recovery(true);
       }
       return;
@@ -2155,7 +2209,7 @@ impl PlaybackNetwork for Network {
           return;
         }
         let mut app = self.app.lock().await;
-        app.handle_error(anyhow!(e));
+        super::report_request_error(&mut app, anyhow!(e));
       }
     }
   }
@@ -2184,7 +2238,7 @@ impl PlaybackNetwork for Network {
         return;
       }
       let mut app = self.app.lock().await;
-      app.handle_error(anyhow!(e));
+      super::report_request_error(&mut app, anyhow!(e));
     }
   }
 
@@ -2213,7 +2267,7 @@ impl PlaybackNetwork for Network {
         return;
       }
       let mut app = self.app.lock().await;
-      app.handle_error(anyhow!(e));
+      super::report_request_error(&mut app, anyhow!(e));
     }
   }
 
@@ -2258,7 +2312,7 @@ impl PlaybackNetwork for Network {
         return;
       }
       let mut app = self.app.lock().await;
-      app.handle_error(anyhow!(e));
+      super::report_request_error(&mut app, anyhow!(e));
       return;
     }
 
@@ -2309,7 +2363,7 @@ impl PlaybackNetwork for Network {
         return;
       }
       let mut app = self.app.lock().await;
-      app.handle_error(anyhow!(e));
+      super::report_request_error(&mut app, anyhow!(e));
     }
   }
 
@@ -2357,7 +2411,7 @@ impl PlaybackNetwork for Network {
           return;
         }
         let mut app = self.app.lock().await;
-        app.handle_error(anyhow!(e));
+        super::report_request_error(&mut app, anyhow!(e));
       }
     }
   }
@@ -2399,7 +2453,7 @@ impl PlaybackNetwork for Network {
           return;
         }
         let mut app = self.app.lock().await;
-        app.handle_error(anyhow!(e));
+        super::report_request_error(&mut app, anyhow!(e));
       }
     }
   }
@@ -2463,7 +2517,7 @@ impl PlaybackNetwork for Network {
           return;
         }
         let mut app = self.app.lock().await;
-        app.handle_error(anyhow!(e));
+        super::report_request_error(&mut app, anyhow!(e));
       }
     }
   }
@@ -2473,7 +2527,16 @@ impl PlaybackNetwork for Network {
     // is paused or parked underneath, and the Web API transfer starts a second player.
     if decoded_source_owns_playback(self).await {
       self
-        .show_status_message("Another source owns playback".to_string(), 4)
+        .show_status_message(
+          self
+            .strings()
+            .await
+            .status
+            .infra
+            .other_source_playing
+            .to_string(),
+          4,
+        )
         .await;
       return;
     }
@@ -2550,7 +2613,7 @@ impl PlaybackNetwork for Network {
       .await
     {
       let mut app = self.app.lock().await;
-      app.handle_error(anyhow!(e));
+      super::report_request_error(&mut app, anyhow!(e));
     } else {
       let mut app = self.app.lock().await;
       if persist_device_id {
@@ -2619,7 +2682,8 @@ impl PlaybackNetwork for Network {
         let mut app = self.app.lock().await;
         if external_playback_active {
           clear_native_recovery_intent_for_external_playback(&mut app);
-          app.set_status_message("Playback remains on another Spotify device.", 8);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.spotify_playing_elsewhere, 8);
         } else {
           app.is_streaming_active = true;
           app.native_activation_pending = true;
@@ -2827,7 +2891,8 @@ impl PlaybackNetwork for Network {
       }
       (None, None) => {
         let mut app = self.app.lock().await;
-        app.set_status_message("Queue finished", 3);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.queue_finished, 3);
       }
     }
   }
@@ -2844,7 +2909,8 @@ impl PlaybackNetwork for Network {
     {
       Ok(_) => {
         let mut app = self.app.lock().await;
-        app.set_status_message("Added to queue".to_string(), 3);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.queue_added.to_string(), 3);
       }
       Err(e) => {
         #[cfg(feature = "streaming")]
@@ -2852,7 +2918,7 @@ impl PlaybackNetwork for Network {
           return;
         }
         let mut app = self.app.lock().await;
-        app.handle_error(anyhow!(e));
+        super::report_request_error(&mut app, anyhow!(e));
       }
     }
   }
@@ -2886,7 +2952,8 @@ impl PlaybackNetwork for Network {
         app
           .plugin_data_generations
           .bump(crate::core::app::PluginDataKind::Queue);
-        app.set_status_message("Could not load queue (no active device?)".to_string(), 3);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.queue_load_failed.to_string(), 3);
         log::warn!("get_queue failed: {}", e);
       }
     }
@@ -2951,6 +3018,7 @@ mod tests {
   #[test]
   fn the_real_error_text_still_reads_as_no_active_device() {
     let error: anyhow::Error = crate::infra::network::requests::SpotifyApiError {
+      localized_body: None,
       status: reqwest::StatusCode::NOT_FOUND,
       body: r#"{"error":{"status":404,"message":"Player command failed: No active device found","reason":"NO_ACTIVE_DEVICE"}}"#
         .to_string(),
@@ -2984,6 +3052,7 @@ mod tests {
       (504, "504"),
     ] {
       let error: anyhow::Error = crate::infra::network::requests::SpotifyApiError {
+        localized_body: None,
         status: reqwest::StatusCode::from_u16(status).unwrap(),
         body: "upstream said no".to_string(),
         detail: None,
@@ -3435,6 +3504,7 @@ mod tests {
   #[test]
   fn the_real_error_text_still_reads_as_a_restriction_violation() {
     let error: anyhow::Error = crate::infra::network::requests::SpotifyApiError {
+      localized_body: None,
       status: reqwest::StatusCode::FORBIDDEN,
       body: r#"{"error":{"status":403,"message":"Player command failed: Restriction violated","reason":"UNKNOWN"}}"#
         .to_string(),

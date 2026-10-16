@@ -21,7 +21,8 @@ impl App {
       self.keybinding_runtime.fallback_reason = None;
     }
     if let Err(e) = self.user_config.save_config() {
-      self.handle_error(anyhow::anyhow!("Failed to save settings: {}", e));
+      let message = self.strings().settings.save_failed(&e.to_string());
+      self.handle_error_with_message(anyhow::anyhow!("Failed to save settings: {}", e), message);
       return false;
     }
 
@@ -61,6 +62,7 @@ impl App {
     let saved = self.save_settings_from_items();
     self.settings_items = staged;
     self.settings_saved_items = staged_saved;
+    self.refresh_settings_labels();
     // Also after a failed write: the live value changed all the same.
     self.display_revisions.bump(DisplayDomain::Settings);
     saved
@@ -123,6 +125,13 @@ impl App {
     for setting in &self.settings_items {
       match setting.id.as_str() {
         // Behavior settings
+        "behavior.language" => {
+          if let SettingValue::Cycle(value, _) = &setting.value {
+            if let Some(language) = crate::core::i18n::Language::parse(value) {
+              self.user_config.behavior.language = language;
+            }
+          }
+        }
         "behavior.seek_milliseconds" => {
           if let SettingValue::Number(v) = &setting.value {
             self.user_config.behavior.seek_milliseconds = (*v).clamp(0, i64::from(u32::MAX)) as u32;
@@ -451,10 +460,7 @@ impl App {
                 _ => {}
               }
             } else {
-              settings_error = Some(format!(
-                "{} must be exactly one terminal cell wide",
-                setting.name
-              ));
+              settings_error = Some(self.strings().settings.icon_width(&setting.name));
             }
           }
         }
@@ -922,6 +928,8 @@ impl App {
         _ => {}
       }
     }
+    self.refresh_language();
+    self.refresh_settings_labels();
     #[cfg(feature = "art-decode")]
     self.reconcile_cover_theme_after_settings(theme_before, cover_art_theme_before);
     if self.user_config.theme != theme_before {

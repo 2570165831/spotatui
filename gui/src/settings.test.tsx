@@ -26,7 +26,12 @@ const rows: SettingRow[] = [
     group: "streaming",
     name: "Streaming Bitrate",
     description: "Audio quality for native streaming",
-    value: { kind: "choice", value: "320", options: ["96", "160", "320"] },
+    value: {
+      kind: "choice",
+      value: "320",
+      options: ["96", "160", "320"],
+      labels: ["96", "160", "320"],
+    },
   },
   {
     id: "behavior.enable_discord_rpc",
@@ -109,6 +114,7 @@ describe("Settings", () => {
         kind: "choice",
         value: "name:desc",
         options: ["default", "name", "name:desc"],
+        labels: ["Custom order", "Title (A-Z)", "Title (Z-A)"],
       },
     };
     const html = page(null, [rows[0], library]);
@@ -315,6 +321,7 @@ describe("Settings", () => {
         kind: "choice",
         value: "default",
         options: ["default", "date_added:desc"],
+        labels: ["Custom order", "Date added (newest first)"],
       },
     };
     const actions = sent(library, (control) =>

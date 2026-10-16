@@ -1,3 +1,4 @@
+import type { HelloPayload } from "./bindings/HelloPayload";
 import type { ClientMessage } from "./bindings/ClientMessage";
 import type { OnboardingView } from "./bindings/OnboardingView";
 import type { ServerMessage } from "./bindings/ServerMessage";
@@ -24,6 +25,7 @@ export interface Position {
 }
 
 export interface State {
+  localization: Pick<HelloPayload, "language" | "strings"> | null;
   connected: boolean;
   expired: boolean;
   channels: Channels;
@@ -58,6 +60,7 @@ export function showsOnboarding(state: State): boolean {
 
 export class Connection {
   private state: State = {
+    localization: null,
     connected: false,
     expired: false,
     channels: {},
@@ -129,6 +132,10 @@ export class Connection {
           connected: true,
           version: message.payload.version,
           window: message.payload.window,
+          localization: {
+            language: message.payload.language,
+            strings: message.payload.strings,
+          },
         });
       case "onboarding":
         return this.update({ onboarding: message.payload });
@@ -136,6 +143,16 @@ export class Connection {
         return this.update({
           position: { ms: message.payload, at: this.now() },
         });
+      case "settings": {
+        const channels = applyChannel(this.state.channels, message);
+        const strings = message.payload.strings;
+        return this.update({
+          channels,
+          ...(channels !== this.state.channels && strings
+            ? { localization: { language: message.payload.language, strings } }
+            : {}),
+        });
+      }
       default:
         return this.update({
           channels: applyChannel(this.state.channels, message),

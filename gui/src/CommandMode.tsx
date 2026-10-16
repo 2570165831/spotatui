@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, sourceLabel, commandKind } from "./i18n";
 import {
   useEffect,
   useEffectEvent,
@@ -12,6 +13,7 @@ import type { SourcePayload } from "./bindings/SourcePayload";
 import {
   actionFor,
   COMMANDS,
+  commands,
   complete,
   directAction,
   loadRecent,
@@ -30,6 +32,7 @@ import { SourceBadge } from "./SourceBadge";
 
 /** The `:` palette: a command line over the current screen that runs existing Actions. */
 export function CommandMode({
+  s = EN,
   search,
   searchRev,
   source,
@@ -40,6 +43,7 @@ export function CommandMode({
   onQuit,
   onClose,
 }: {
+  s?: GuiStrings;
   search: SearchPayload | null;
   searchRev: number | null;
   source: SourcePayload | null;
@@ -80,7 +84,7 @@ export function CommandMode({
     searchRev > sent.rev;
   const rows =
     parsed.verb === "device" || answered
-      ? rowsFor(parsed, search, devices)
+      ? rowsFor(parsed, search, devices, s)
       : [];
   const pick = Math.min(cursor, rows.length - 1);
 
@@ -184,12 +188,17 @@ export function CommandMode({
   };
 
   const help = link
-    ? "Play this Spotify link"
+    ? s.play_spotify_link
     : parsed.verb
-      ? `${COMMANDS[parsed.verb].usage} · ${COMMANDS[parsed.verb].what}`
+      ? `${commands(s)[parsed.verb].usage} · ${commands(s)[parsed.verb].what}`
       : parsed.arg
-        ? `search “${parsed.arg}” in ${source?.active ?? "your music"}`
-        : "Type a command, or words to search";
+        ? fmt(s.search_command, {
+            query: parsed.arg,
+            source: source?.active
+              ? sourceLabel(source.active, s)
+              : s.your_music,
+          })
+        : s.command_prompt;
   const waiting =
     sent !== null && sent.query === parsed.arg && !answered && !link;
   return (
@@ -198,7 +207,7 @@ export function CommandMode({
         className="palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Command mode"
+        aria-label={s.command_mode}
         onClick={(event) => event.stopPropagation()}
       >
         <label className="palette-input">
@@ -206,7 +215,7 @@ export function CommandMode({
           <input
             type="text"
             role="combobox"
-            aria-label="Command"
+            aria-label={s.command}
             aria-expanded={rows.length > 0}
             aria-controls="palette-rows"
             aria-activedescendant={
@@ -223,20 +232,20 @@ export function CommandMode({
             onKeyDown={onKeyDown}
           />
           <span className="tag">
-            {parsed.verb || link ? "Command" : "Search"}
+            {parsed.verb || link ? s.command : s.search}
           </span>
         </label>
         <div className="palette-help">
           {help}
-          {waiting && " · searching…"}
+          {waiting && s.command_searching}
           {!waiting &&
             (parsed.verb === "play" || parsed.verb === "queue") &&
             parsed.arg &&
             !answered &&
-            " · enter to find"}
+            s.command_enter_find}
         </div>
         {rows.length > 0 && (
-          <ul id="palette-rows" role="listbox" aria-label="Results">
+          <ul id="palette-rows" role="listbox" aria-label={s.results}>
             {rows.map((row, index) => {
               const rowSource = sourceOf(row.uri);
               return (
@@ -248,11 +257,11 @@ export function CommandMode({
                   onClick={() => runRow(row, false)}
                 >
                   <span className="n">{index + 1}</span>
-                  <span className="kind">{row.kind}</span>
+                  <span className="kind">{commandKind(row.kind, s)}</span>
                   <span className="what">
                     <b>{row.title}</b> <span>{row.meta}</span>
                   </span>
-                  {rowSource && <SourceBadge source={rowSource} />}
+                  {rowSource && <SourceBadge s={s} source={rowSource} />}
                 </li>
               );
             })}
@@ -260,27 +269,27 @@ export function CommandMode({
         )}
         <div className="palette-lists">
           <div className="recent">
-            <span className="label">Recent · ↑</span>
+            <span className="label">{s.recent_commands}</span>
             {recent.slice(0, 5).map((entry) => (
               <span key={entry}>{entry}</span>
             ))}
           </div>
           <div className="verbs">
-            <span className="label">Commands · tab to complete</span>
+            <span className="label">{s.commands_complete}</span>
             {verbs.map((verb) => (
               <span key={verb}>
-                <b>{verb}</b> <span>{COMMANDS[verb].what}</span>
+                <b>{verb}</b> <span>{commands(s)[verb].what}</span>
               </span>
             ))}
           </div>
         </div>
         <KeyHints
           hints={[
-            "↓ then 1–9 pick",
-            "enter run",
-            "shift+enter play now",
-            "tab complete",
-            "esc close",
+            s.hint_pick,
+            s.hint_run,
+            s.hint_play_now,
+            s.hint_complete,
+            s.hint_close,
           ]}
         />
       </div>

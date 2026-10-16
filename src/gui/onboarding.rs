@@ -1,6 +1,7 @@
 //! The first-launch questions answered from the page: boot asks through
 //! [`Onboarding`] before any `App` exists, and each question waits for the page.
 
+use crate::core::i18n::Language;
 use crate::core::onboarding::{Onboarding, OnboardingAnswer, OnboardingPrompt};
 use crate::core::source::Source;
 use anyhow::{anyhow, Result};
@@ -73,6 +74,7 @@ pub(crate) enum OnboardingReplyAnswer {
 }
 
 pub(crate) struct BrowserOnboarding {
+  language: Language,
   view: watch::Sender<OnboardingView>,
   replies_tx: mpsc::Sender<OnboardingReply>,
   replies: Mutex<mpsc::Receiver<OnboardingReply>>,
@@ -91,9 +93,19 @@ impl Drop for PageConnection<'_> {
 }
 
 impl BrowserOnboarding {
+  #[cfg(test)]
   pub(crate) fn new() -> Self {
+    Self::with_language(Language::En)
+  }
+
+  pub(crate) fn language(&self) -> Language {
+    self.language
+  }
+
+  pub(crate) fn with_language(language: Language) -> Self {
     let (replies_tx, replies) = mpsc::channel();
     BrowserOnboarding {
+      language,
       view: watch::Sender::new(OnboardingView::default()),
       replies_tx,
       replies: Mutex::new(replies),
@@ -173,6 +185,10 @@ impl BrowserOnboarding {
 }
 
 impl Onboarding for BrowserOnboarding {
+  fn strings(&self) -> &'static crate::core::i18n::Strings {
+    self.language.strings()
+  }
+
   fn info(&self, text: &str) {
     self.view.send_modify(|view| {
       view.transcript.push_str(text);
@@ -220,8 +236,13 @@ impl Onboarding for BrowserOnboarding {
       .iter()
       .map(|source| SourceChoice {
         source: *source,
-        label: source.label().to_string(),
-        note: source.note().to_string(),
+        label: self
+          .language
+          .strings()
+          .sidebar
+          .source_label(*source)
+          .to_string(),
+        note: self.language.strings().gui.source_note(*source).to_string(),
       })
       .collect();
     match self.ask_page(OnboardingAsk::PickSources { options: choices })? {
@@ -270,6 +291,15 @@ mod tests {
   fn line(text: &str) -> OnboardingReplyAnswer {
     OnboardingReplyAnswer::Line {
       text: text.to_string(),
+    }
+  }
+
+  #[test]
+  fn shared_prompts_use_the_browser_preloaded_language() {
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let bridge = BrowserOnboarding::with_language(language);
+      let frontend: &dyn Onboarding = &bridge;
+      assert!(std::ptr::eq(frontend.strings(), language.strings()));
     }
   }
 

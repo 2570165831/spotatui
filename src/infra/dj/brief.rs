@@ -133,25 +133,25 @@ impl TasteBrief {
   /// Deliberately prose-and-lists rather than JSON: every backend consumes this,
   /// including small local models that handle a bulleted list better than a
   /// nested object.
+  #[cfg(any(feature = "ai-dj", test))]
   pub fn to_prompt_block(&self) -> String {
+    self.display_block(&crate::core::i18n::EN, self.period_label)
+  }
+
+  pub fn display_block(&self, strings: &crate::core::i18n::Strings, period: &str) -> String {
+    let s = &strings.status.tools;
     let mut out = String::new();
-    out.push_str(&format!(
-      "Listening history ({}, {} qualifying plays):\n",
-      self.period_label, self.total_plays
-    ));
-    push_list(&mut out, "Top artists", &self.top_artists);
-    push_list(&mut out, "Top tracks", &self.top_tracks);
-    push_list(&mut out, "Top albums", &self.top_albums);
-    push_list(
-      &mut out,
-      "Recently played (do not repeat these)",
-      &self.recent,
-    );
+    out.push_str(&s.history_summary(period, self.total_plays));
+    out.push('\n');
+    push_list(&mut out, s.brief_artists, &self.top_artists);
+    push_list(&mut out, s.brief_tracks, &self.top_tracks);
+    push_list(&mut out, s.brief_albums, &self.top_albums);
+    push_list(&mut out, s.brief_recent, &self.recent);
     if let Some(now) = &self.now_playing {
-      out.push_str(&format!("\nCurrently playing: {now}\n"));
+      out.push_str(&s.brief_now(now));
     }
     if let Some(vibe) = &self.vibe {
-      out.push_str(&format!("\nThe listener asked for: {vibe}\n"));
+      out.push_str(&s.brief_vibe(vibe));
     }
     out
   }

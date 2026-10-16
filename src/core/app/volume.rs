@@ -4,7 +4,7 @@ impl App {
   /// Coalesced Web API volume for an external device.
   fn queue_api_volume(&mut self, volume: u8) {
     if self.playback_owner() == PlaybackOwner::None {
-      self.set_status_message(NOTHING_PLAYING_STATUS, 4);
+      self.set_status_message(self.strings().status.app.nothing_playing, 4);
       return;
     }
     if self.native_parked_here() {

@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { NowPlaying } from "./bindings/NowPlaying";
@@ -18,11 +19,13 @@ import { Cover } from "./ui";
 
 /** The docked queue panel: the native queue can be played, moved and removed; Spotify's is read-only. */
 export function QueueDrawer({
+  s = EN,
   queue,
   item,
   send,
   onClose,
 }: {
+  s?: GuiStrings;
   queue: QueuePayload | null;
   item: NowPlaying | null;
   send: (action: Action) => void;
@@ -33,7 +36,7 @@ export function QueueDrawer({
   const spotify = sourceOf(item?.uri ?? null) === "Spotify";
   const mirrored = spotify
     ? (queue?.spotify.items ?? []).flatMap((entry) => {
-        const line = itemLine(entry);
+        const line = itemLine(entry, s);
         return line ? [line] : [];
       })
     : [];
@@ -62,7 +65,7 @@ export function QueueDrawer({
     <section
       ref={panel}
       className="queue-panel"
-      aria-label="Queue"
+      aria-label={s.queue}
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -73,20 +76,20 @@ export function QueueDrawer({
       }}
     >
       <header className="panel-head">
-        <h2>Queue</h2>
+        <h2>{s.queue}</h2>
         <button
           type="button"
           className="panel-close"
-          aria-label="Close queue"
+          aria-label={s.close_queue}
           onClick={onClose}
         >
           <Glyph name="close" />
         </button>
       </header>
       <div className="panel-body">
-        <h3>Now playing</h3>
+        <h3>{s.now_playing}</h3>
         {now ? (
-          <Row line={trackLine(now)} />
+          <Row s={s} line={trackLine(now)} />
         ) : item ? (
           <div className="queue-row">
             <Cover src={item.image_url} size={40} />
@@ -96,16 +99,16 @@ export function QueueDrawer({
             </span>
           </div>
         ) : (
-          <p className="panel-empty">Nothing is playing.</p>
+          <p className="panel-empty">{s.nothing_is_playing}</p>
         )}
-        <h3>Next in queue</h3>
+        <h3>{s.next_in_queue}</h3>
         {native.length === 0 ? (
-          <p className="panel-empty">Nothing is queued.</p>
+          <p className="panel-empty">{s.nothing_queued}</p>
         ) : (
           <ol
             ref={list}
             role="listbox"
-            aria-label="Next in queue"
+            aria-label={s.next_in_queue}
             aria-activedescendant={`queue-${cursor}`}
             tabIndex={0}
             data-focus
@@ -132,30 +135,32 @@ export function QueueDrawer({
                     });
                 }}
               >
-                <Row line={trackLine(track)} />
+                <Row s={s} line={trackLine(track)} />
               </li>
             ))}
           </ol>
         )}
         {mirrored.length > 0 && (
           <>
-            <h3>Next from: Spotify</h3>
-            <ol className="mirror" aria-label="Next from Spotify">
+            <h3>{s.next_from_spotify}</h3>
+            <ol className="mirror" aria-label={s.next_from_spotify_label}>
               {mirrored.map((line, index) => (
                 <li key={`${index}-${line.uri ?? line.title}`}>
-                  <Row line={line} />
+                  <Row s={s} line={line} />
                 </li>
               ))}
             </ol>
           </>
         )}
       </div>
-      <KeyHints hints={["enter play", "x remove", "J K move", "esc close"]} />
+      <KeyHints
+        hints={[s.hint_play, s.hint_remove, s.hint_reorder_move, s.hint_close]}
+      />
     </section>
   );
 }
 
-function Row({ line }: { line: QueueLine }) {
+function Row({ s = EN, line }: { s?: GuiStrings; line: QueueLine }) {
   const source = sourceOf(line.uri);
   return (
     <div className="queue-row">
@@ -164,9 +169,9 @@ function Row({ line }: { line: QueueLine }) {
         <strong>{line.title}</strong>
         <span>{line.subtitle}</span>
       </span>
-      {source && source !== "Spotify" && <SourceBadge source={source} />}
+      {source && source !== "Spotify" && <SourceBadge s={s} source={source} />}
       <span className="time">
-        {line.duration_ms > 0 ? clock(line.duration_ms) : "live"}
+        {line.duration_ms > 0 ? clock(line.duration_ms) : s.live}
       </span>
     </div>
   );

@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { TrackInfo } from "./bindings/TrackInfo";
@@ -12,6 +13,7 @@ import { PageHeader, PlayButton } from "./ui";
 const NO_TRACKS: TrackInfo[] = [];
 
 export interface RecentlyPlayedProps {
+  s?: GuiStrings;
   /** Most recent first; null before the first fetch. */
   recent: TrackInfo[] | null;
   /** A Spotify session exists; without one the list cannot load. */
@@ -24,6 +26,7 @@ export interface RecentlyPlayedProps {
 
 /** Spotify's recently played tracks. */
 export function RecentlyPlayed({
+  s = EN,
   recent,
   available,
   playingUri,
@@ -47,20 +50,20 @@ export function RecentlyPlayed({
     else if (tracks[cursor] && !event.repeat)
       send({ QueueTrack: tracks[cursor] });
   };
-  const title = "Recently played";
+  const title = s.recently_played;
   const first = tracks.findIndex((track) => track.uri);
 
   return (
     <section className="recent-page" aria-label={title}>
       <PageHeader
-        kind="History"
+        kind={s.history}
         title={title}
         image={null}
-        meta={recent && <span>{songCount(recent.length)}</span>}
+        meta={recent && <span>{songCount(recent.length, s)}</span>}
       />
       <div className="page-actions">
         <PlayButton
-          label={`Play ${title}`}
+          label={fmt(s.play_named, { name: title })}
           large
           disabled={first < 0}
           onClick={() => play(first)}
@@ -69,13 +72,14 @@ export function RecentlyPlayed({
       {tracks.length === 0 ? (
         <p className="list-empty">
           {recent
-            ? "Nothing played yet."
+            ? s.nothing_played
             : available
-              ? "Loading recently played…"
-              : "Recently played needs a Spotify session."}
+              ? s.loading_recent
+              : s.recent_needs_spotify}
         </p>
       ) : (
         <TrackTable
+          s={s}
           label={title}
           idPrefix="recent"
           tracks={tracks}

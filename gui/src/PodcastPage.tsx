@@ -1,3 +1,5 @@
+import { useStringsReader, type StringsReader } from "./useStringsReader";
+import { EN, type GuiStrings, fmt } from "./i18n";
 import {
   memo,
   useCallback,
@@ -37,6 +39,7 @@ type Send = (action: Action) => void;
 const NO_EPISODES: EpisodeInfo[] = [];
 
 export interface PodcastPageProps {
+  s?: GuiStrings;
   id: string;
   name: string;
   /** The last fetched show, which can still be another one. */
@@ -49,6 +52,7 @@ export interface PodcastPageProps {
 
 /** A podcast show with its episodes. */
 export const PodcastPage = memo(function PodcastPage({
+  s = EN,
   id,
   name,
   show,
@@ -56,6 +60,7 @@ export const PodcastPage = memo(function PodcastPage({
   active,
   send,
 }: PodcastPageProps) {
+  const readStrings = useStringsReader(s);
   const [want, setWant] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [shownId, setShownId] = useState(id);
@@ -104,8 +109,8 @@ export const PodcastPage = memo(function PodcastPage({
   if (!page)
     return (
       <section className="podcast-page" aria-label={name}>
-        <PageHeader kind="Podcast" title={name} image={null} />
-        <p className="podcast-empty">Loading episodes…</p>
+        <PageHeader kind={s.podcast} title={name} image={null} />
+        <p className="podcast-empty">{s.loading_episodes}</p>
       </section>
     );
 
@@ -126,25 +131,25 @@ export const PodcastPage = memo(function PodcastPage({
   return (
     <section className="podcast-page" aria-label={page.show.name}>
       <ShowHeader
+        readStrings={readStrings}
+        s={s}
         page={page}
         expanded={expanded}
         onExpand={() => setExpanded((open) => !open)}
         send={send}
       />
       <div className="page-section">
-        <h2>All episodes</h2>
+        <h2>{s.all_episodes}</h2>
         {episodes.length === 0 ? (
           <p className="podcast-empty">
-            {page.loaded
-              ? "This show has no episodes yet."
-              : "Loading episodes…"}
+            {page.loaded ? s.show_no_episodes : s.loading_episodes}
           </p>
         ) : (
           <div
             ref={list}
             className="episode-rows"
             role="listbox"
-            aria-label={`Episodes of ${page.show.name}`}
+            aria-label={fmt(s.episodes_of, { name: page.show.name })}
             aria-activedescendant={
               cursor >= 0 ? `episode-${cursor}` : undefined
             }
@@ -154,6 +159,8 @@ export const PodcastPage = memo(function PodcastPage({
           >
             {episodes.map((episode, index) => (
               <EpisodeRow
+                readStrings={readStrings}
+                s={s}
                 key={`${index}-${episode.uri ?? episode.name}`}
                 episode={episode}
                 index={index}
@@ -173,11 +180,15 @@ export const PodcastPage = memo(function PodcastPage({
 
 /** The show's header, its follow, play and copy actions, and its description. */
 export function ShowHeader({
+  s = EN,
+  readStrings = () => s,
   page,
   expanded,
   onExpand,
   send,
 }: {
+  s?: GuiStrings;
+  readStrings?: StringsReader;
   page: Podcast;
   expanded: boolean;
   onExpand: () => void;
@@ -191,7 +202,7 @@ export function ShowHeader({
   return (
     <>
       <PageHeader
-        kind="Podcast"
+        kind={s.podcast}
         title={show.name}
         image={show.image_url}
         meta={
@@ -199,7 +210,7 @@ export function ShowHeader({
             {show.publisher && <span>{show.publisher}</span>}
             {count > 0 && (
               <span className={show.publisher ? "meta-dot" : undefined}>
-                {count === 1 ? "1 episode" : `${count} episodes`}
+                {count === 1 ? s.one_episode : fmt(s.episodes_count, { count })}
               </span>
             )}
           </>
@@ -207,7 +218,7 @@ export function ShowHeader({
       />
       <div className="page-actions">
         <PlayButton
-          label="Play the newest episode"
+          label={s.play_newest_episode}
           large
           disabled={newest < 0}
           onClick={() => {
@@ -225,21 +236,22 @@ export function ShowHeader({
             send(page.saved ? { UnsaveShow: showId } : { SaveShow: showId })
           }
         >
-          {page.saved ? "Following" : "Follow"}
+          {page.saved ? s.following : s.follow}
         </button>
         <button
           type="button"
           className="icon-action"
-          aria-label="Copy link"
-          title="Copy link"
+          aria-label={s.copy_link}
+          title={s.copy_link}
           disabled={!showId}
           onClick={() =>
             showId &&
             void copyLink(
               showLink(showId),
-              "Copied the show link.",
+              "copied_show_link",
               send,
               navigator.clipboard,
+              readStrings,
             )
           }
         >
@@ -260,7 +272,7 @@ export function ShowHeader({
               aria-expanded={expanded}
               onClick={onExpand}
             >
-              {expanded ? "Show less" : "Show more"}
+              {expanded ? s.show_less : s.show_more}
             </button>
           )}
         </div>
@@ -271,6 +283,8 @@ export function ShowHeader({
 
 /** One episode: a click picks it, a double click or its play button plays it. */
 export const EpisodeRow = memo(function EpisodeRow({
+  s = EN,
+  readStrings = () => s,
   episode,
   index,
   selected,
@@ -279,6 +293,8 @@ export const EpisodeRow = memo(function EpisodeRow({
   onPlay,
   send,
 }: {
+  s?: GuiStrings;
+  readStrings?: StringsReader;
   episode: EpisodeInfo;
   index: number;
   selected: boolean;
@@ -287,10 +303,10 @@ export const EpisodeRow = memo(function EpisodeRow({
   onPlay: (index: number) => void;
   send: Send;
 }) {
-  const resume = resumeOf(episode);
+  const resume = resumeOf(episode, s);
   const episodeId = episode.id;
-  const date = episodeDate(episode.release_date);
-  const length = episodeLength(episode.duration_ms);
+  const date = episodeDate(episode.release_date, s);
+  const length = episodeLength(episode.duration_ms, s);
   return (
     <div
       id={`episode-${index}`}
@@ -303,7 +319,7 @@ export const EpisodeRow = memo(function EpisodeRow({
       <Cover src={episode.image_url} size={80} />
       <span className="episode-text">
         <span className="episode-name">
-          {playing && <span className="sr-only">Playing: </span>}
+          {playing && <span className="sr-only">{s.playing_prefix}</span>}
           {episode.name}
         </span>
         {episode.description && (
@@ -314,7 +330,7 @@ export const EpisodeRow = memo(function EpisodeRow({
             type="button"
             className="episode-play"
             tabIndex={-1}
-            aria-label={`Play ${episode.name}`}
+            aria-label={fmt(s.play_named, { name: episode.name })}
             disabled={!episode.uri}
             onClick={inRow(() => onPlay(index))}
             onDoubleClick={stop}
@@ -325,13 +341,13 @@ export const EpisodeRow = memo(function EpisodeRow({
           {length && (
             <span className={date ? "meta-dot" : undefined}>{length}</span>
           )}
-          {resume?.played && <span className="episode-played">Played</span>}
+          {resume?.played && <span className="episode-played">{s.played}</span>}
           {resume && !resume.played && (
             <>
               <span
                 className="episode-progress"
                 role="progressbar"
-                aria-label="Listened"
+                aria-label={s.listened}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={resume.percent}
@@ -345,17 +361,18 @@ export const EpisodeRow = memo(function EpisodeRow({
             type="button"
             className="episode-copy"
             tabIndex={-1}
-            aria-label={`Copy episode link for ${episode.name}`}
-            title="Copy episode link"
+            aria-label={fmt(s.copy_episode_link_named, { name: episode.name })}
+            title={s.copy_episode_link}
             disabled={!episodeId}
             onClick={inRow(
               () =>
                 episodeId &&
                 void copyLink(
                   episodeLink(episodeId),
-                  "Copied the episode link.",
+                  "copied_episode_link",
                   send,
                   navigator.clipboard,
+                  readStrings,
                 ),
             )}
             onDoubleClick={stop}

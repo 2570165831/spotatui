@@ -59,9 +59,9 @@ pub fn draw_input_and_help_box(
   app.view.input_scroll_offset.set(scroll_offset);
 
   let input_title = match app.view.input_context {
-    InputContext::PlaylistTrackSearch => "Search Playlist",
-    InputContext::SavedTrackSearch => "Search Liked Songs",
-    InputContext::GlobalSearch => "Search",
+    InputContext::PlaylistTrackSearch => app.strings().screens.search_playlist,
+    InputContext::SavedTrackSearch => app.strings().screens.search_liked,
+    InputContext::GlobalSearch => app.strings().screens.search,
   };
 
   let input = Paragraph::new(lines).scroll((0, scroll_offset)).block(
@@ -82,12 +82,15 @@ pub fn draw_input_and_help_box(
   } else if compact_top_row {
     (app.user_config.theme.inactive, "?")
   } else {
-    (app.user_config.theme.inactive, "Type ?")
+    (
+      app.user_config.theme.inactive,
+      app.strings().screens.type_help,
+    )
   };
 
   let block = Block::default()
     .title(Span::styled(
-      "Help",
+      app.strings().screens.help,
       Style::default().fg(help_content.0.into()),
     ))
     .borders(Borders::ALL)
@@ -110,12 +113,12 @@ pub fn draw_input_and_help_box(
   let settings_hint = if compact_top_row {
     settings_keybind_string
   } else {
-    format!("Type {}", settings_keybind_string)
+    app.strings().screens.type_key(&settings_keybind_string)
   };
   let settings_color = app.user_config.theme.inactive;
   let settings_block = Block::default()
     .title(Span::styled(
-      "Settings",
+      app.strings().screens.settings,
       Style::default().fg(settings_color.into()),
     ))
     .borders(Borders::ALL)
@@ -160,7 +163,7 @@ fn draw_radio_station_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) 
     f,
     app,
     layout_chunk,
-    "Radio Stations",
+    app.strings().screens.radio_stations,
     &stations,
     get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
     app.view.search_selected_tracks_index,
@@ -213,7 +216,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
             song_name += &app.user_config.padded_liked_icon();
           }
 
-          song_name += &item.name;
+          song_name += item.display_name(app.strings());
           song_name += &format!(" - {}", item.artists.join(", "));
           song_name
         })
@@ -225,7 +228,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       songs_area,
-      "Songs",
+      app.strings().screens.songs,
       &songs,
       get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
       app.view.search_selected_tracks_index,
@@ -254,7 +257,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       artists_area,
-      "Artists",
+      app.strings().screens.artists,
       &artists,
       get_search_results_highlight_state(app, SearchResultBlock::ArtistSearch),
       app.view.search_selected_artists_index,
@@ -283,7 +286,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
             "{} - {} ({})",
             item.name,
             join_artist_names(&item.artists),
-            item.album_type.as_deref().unwrap_or("unknown")
+            app.strings().screens.album_type(item.album_type.as_deref())
           ));
           album_artist
         })
@@ -295,7 +298,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       albums_area,
-      "Albums",
+      app.strings().screens.albums,
       &albums,
       get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
       app.view.search_selected_album_index,
@@ -312,14 +315,14 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     };
 
     if playlists.is_empty() {
-      let warning_text = "Cannot display Spotify created playlists. Try a more specific search to find user-created playlists.";
+      let warning_text = app.strings().screens.spotify_playlist_warning;
       let warning_paragraph = Paragraph::new(warning_text)
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(app.user_config.theme.hint.into()))
         .block(
           Block::default()
             .title(Span::styled(
-              "Playlists",
+              app.strings().screens.playlists,
               get_color(
                 get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
                 app.user_config.theme,
@@ -337,7 +340,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         f,
         app,
         playlist_area,
-        "Playlists",
+        app.strings().screens.playlists,
         &playlists,
         get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
         app.view.search_selected_playlists_index,
@@ -351,7 +354,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       podcasts_area,
-      "Podcasts",
+      app.strings().screens.podcasts,
       &match &app.search_results().shows {
         Some(podcasts) => podcasts
           .items
@@ -398,6 +401,7 @@ mod tests {
 
   fn station(name: &str, tags: Vec<String>, summary: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(format!("radio:https://example.com/{name}")),
       name: name.to_string(),
       artists: tags,
@@ -468,6 +472,49 @@ mod tests {
       assert!(
         content.contains(spotify_panel),
         "{spotify_panel} panel should render under Spotify: {content}"
+      );
+    }
+  }
+
+  #[test]
+  fn search_album_types_translate_without_changing_album_titles() {
+    use crate::core::i18n::Language;
+    use crate::core::plugin_api::AlbumInfo;
+    use unicode_width::UnicodeWidthStr;
+    let mut app = App::default();
+    app.set_search_results(crate::core::app::SearchResult {
+      albums: Some(crate::core::pagination::Paged {
+        items: vec![AlbumInfo {
+          name: "single {title}".into(),
+          album_type: Some("single".into()),
+          ..Default::default()
+        }],
+        total: 1,
+        ..Default::default()
+      }),
+      ..Default::default()
+    });
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let mut terminal = Terminal::new(TestBackend::new(180, 40)).unwrap();
+      terminal
+        .draw(|frame| draw_search_results(frame, &app, frame.area()))
+        .unwrap();
+      let buffer = terminal.backend().buffer();
+      let mut text = String::new();
+      for y in 0..40 {
+        let mut x = 0;
+        while x < 180 {
+          let symbol = buffer[(x, y)].symbol();
+          text.push_str(symbol);
+          x += symbol.width().max(1) as u16;
+        }
+      }
+      assert!(text.contains("single {title}"), "{text}");
+      assert!(
+        text.contains(&format!("({})", app.strings().screens.album_type_single)),
+        "{text}"
       );
     }
   }

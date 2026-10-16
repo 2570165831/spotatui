@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import {
   Children,
   useLayoutEffect,
@@ -71,6 +72,7 @@ export function PlayButton({
 
 /** A grid card: the cover, a title and a subtitle; the play button shows on hover. */
 export function Card({
+  s = EN,
   image,
   title,
   subtitle,
@@ -78,6 +80,7 @@ export function Card({
   onOpen,
   onPlay,
 }: {
+  s?: GuiStrings;
   image: string | null | undefined;
   title: string;
   subtitle: string;
@@ -100,7 +103,10 @@ export function Card({
       </button>
       {onPlay && (
         <span className="card-play">
-          <PlayButton label={`Play ${title}`} onClick={onPlay} />
+          <PlayButton
+            label={fmt(s.play_named, { name: title })}
+            onClick={onPlay}
+          />
         </span>
       )}
     </div>
@@ -109,12 +115,14 @@ export function Card({
 
 /** A titled row of cards. */
 export function Shelf({
+  s = EN,
   title,
   children,
   oneRow = false,
   onMore,
-  moreLabel = "Show all",
+  moreLabel = s.show_all,
 }: {
+  s?: GuiStrings;
   title: string;
   children: ReactNode;
   /** Render only the cards the first grid row holds, so no clipped card takes focus. */

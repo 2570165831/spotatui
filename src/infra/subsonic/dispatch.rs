@@ -30,7 +30,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 
@@ -153,8 +153,17 @@ pub async fn route_subsonic_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> boo
 pub(crate) async fn build_source(app: &Arc<Mutex<App>>) -> Option<SubsonicSource> {
   match build_sync_source(app).await {
     Ok(source) => Some(source),
-    Err(e) => {
-      set_error(app, e.to_string()).await;
+    Err(_) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_no_server
+          .to_string(),
+      )
+      .await;
       None
     }
   }
@@ -173,9 +182,7 @@ pub(crate) async fn build_sync_source(app: &Arc<Mutex<App>>) -> Result<SubsonicS
   };
 
   let Some(url) = url else {
-    return Err(anyhow!(
-      "No Subsonic server configured (set behavior.subsonic_url)"
-    ));
+    return Err(crate::core::playlist_sync::SyncReason::SubsonicNotConfigured.into());
   };
 
   // Env override takes precedence over the plaintext config field.
@@ -201,7 +208,17 @@ async fn load_subsonic_playlists(app: &Arc<Mutex<App>>) {
       let mut app = app.lock().await;
       *app.subsonic_playlists_mut() = playlists;
     }
-    Err(e) => set_error(app, format!("Cannot load Subsonic playlists: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_playlists_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -216,7 +233,17 @@ async fn load_subsonic_tracks(app: &Arc<Mutex<App>>, playlist_uri: &str) {
       let mut app = app.lock().await;
       app.set_source_track_table(playlist_uri, tracks, TrackTableContext::SubsonicPlaylist);
     }
-    Err(e) => set_error(app, format!("Cannot load Subsonic playlist: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_playlist_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -235,7 +262,17 @@ async fn run_subsonic_search(app: &Arc<Mutex<App>>, query: &str) {
       .lock()
       .await
       .show_source_search_tracks(query, results.tracks),
-    Err(e) => set_error(app, format!("Subsonic search failed: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_search_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -280,11 +317,27 @@ async fn acquire_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(p)) => Some(Arc::new(p)),
     Ok(Err(e)) => {
-      set_error(app, format!("No audio output for Subsonic playback: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_error(app, format!("Audio output init failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -324,7 +377,16 @@ async fn start_subsonic_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx:
     snapshot_tracks(&guard.track_table.tracks, search, uris)
   };
   if tracks.is_empty() {
-    set_error(app, "No Subsonic tracks to play".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .subsonic_no_tracks
+        .to_string(),
+    )
+    .await;
     return;
   }
   let index = start_idx.min(tracks.len() - 1);
@@ -332,7 +394,16 @@ async fn start_subsonic_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx:
   let track_id = match tracks[index].uri.as_deref().map(track_id_from_uri) {
     Some(Ok(id)) => id.to_string(),
     _ => {
-      set_error(app, "Invalid Subsonic track URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -354,7 +425,15 @@ async fn start_subsonic_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx:
   let tmp = match download_track(&source, &track_id).await {
     Ok(t) => t,
     Err(e) => {
-      set_error(app, format!("Cannot download Subsonic track: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_download_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -388,8 +467,28 @@ async fn start_subsonic_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx:
       guard.subsonic_playback = Some(state);
       guard.set_status_message(format!("\u{266a} {display}"), 4);
     }
-    Ok(Err(e)) => set_error(app, format!("Cannot play Subsonic track: {e}")).await,
-    Err(e) => set_error(app, format!("Subsonic playback task failed: {e}")).await,
+    Ok(Err(e)) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_play_failed(&e.to_string()),
+      )
+      .await
+    }
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_task_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -451,7 +550,16 @@ async fn replay_current(app: &Arc<Mutex<App>>) -> bool {
     }
   } else {
     teardown_subsonic(app).await;
-    set_error(app, "Cannot replay Subsonic track".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .subsonic_replay_failed
+        .to_string(),
+    )
+    .await;
   }
   true
 }
@@ -494,7 +602,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     }
     Plan::BadUri => {
       teardown_subsonic(app).await;
-      set_error(app, "Invalid Subsonic track URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -503,7 +620,15 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     Ok(t) => t,
     Err(e) => {
       teardown_subsonic(app).await;
-      set_error(app, format!("Cannot download Subsonic track: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_download_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -527,11 +652,27 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     Ok(Ok(())) => commit_index(app, target, tmp).await,
     Ok(Err(e)) => {
       teardown_subsonic(app).await;
-      set_error(app, format!("Cannot play Subsonic track: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_play_failed(&e.to_string()),
+      )
+      .await;
     }
     Err(e) => {
       teardown_subsonic(app).await;
-      set_error(app, format!("Subsonic playback task failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .subsonic_task_failed(&e.to_string()),
+      )
+      .await;
     }
   }
 }
@@ -740,5 +881,37 @@ mod tests {
       s.current().is_some_and(|t| !t.name.is_empty()),
       "metadata must resolve from the search results"
     );
+  }
+}
+
+#[cfg(test)]
+mod sync_error_localization_tests {
+  use super::*;
+  #[tokio::test]
+  async fn an_unconfigured_sync_source_is_structured_and_keeps_the_english_diagnostic() {
+    use crate::core::playlist_sync::SyncReason;
+    let mut state = App::default();
+    state.user_config.behavior.subsonic_url = None;
+    let app = Arc::new(Mutex::new(state));
+    let error = match build_sync_source(&app).await {
+      Err(error) => error,
+      Ok(_) => panic!("missing URL accepted"),
+    };
+    assert_eq!(
+      error.to_string(),
+      "No Subsonic server configured (set behavior.subsonic_url)"
+    );
+    let reason = SyncReason::from_error(&error);
+    assert_eq!(reason, SyncReason::SubsonicNotConfigured);
+    for strings in [
+      &crate::core::i18n::EN,
+      &crate::core::i18n::ZH_HANS,
+      &crate::core::i18n::ZH_HANT,
+    ] {
+      assert_eq!(
+        reason.render(strings),
+        strings.status.infra.sync_subsonic_not_configured
+      );
+    }
   }
 }

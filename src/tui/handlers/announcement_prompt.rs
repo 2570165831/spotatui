@@ -11,10 +11,14 @@ pub fn handler(key: Key, app: &mut App) {
           &app.runtime_state.dismissed_announcements,
         );
         if let Err(error) = app.save_runtime_state(&patch) {
-          app.handle_error(anyhow::anyhow!(
-            "Failed to persist dismissed announcement: {}",
-            error
-          ));
+          let message = app
+            .strings()
+            .popups
+            .announcement_save_failed(&error.to_string());
+          app.handle_error_with_message(
+            anyhow::anyhow!("Failed to persist dismissed announcement: {}", error),
+            message,
+          );
         }
       }
 

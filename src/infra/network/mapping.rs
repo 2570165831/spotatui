@@ -102,6 +102,7 @@ impl From<&SimplifiedArtist> for ArtistInfo {
 impl From<&FullTrack> for TrackInfo {
   fn from(t: &FullTrack) -> Self {
     TrackInfo {
+      generated_name: None,
       uri: t.id.as_ref().map(|id| id.uri()),
       name: t.name.clone(),
       artists: t.artists.iter().map(|a| a.name.clone()).collect(),
@@ -123,6 +124,7 @@ impl From<&FullTrack> for TrackInfo {
 impl From<&SimplifiedTrack> for TrackInfo {
   fn from(t: &SimplifiedTrack) -> Self {
     TrackInfo {
+      generated_name: None,
       uri: t.id.as_ref().map(|id| id.uri()),
       name: t.name.clone(),
       artists: t.artists.iter().map(|a| a.name.clone()).collect(),

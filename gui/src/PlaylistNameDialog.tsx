@@ -1,14 +1,17 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { KeyboardEvent } from "react";
 import { trapTab } from "./ConfirmDialog";
 import "./Dialog.css";
 
 /** The "Create playlist" dialog: a name field, Create and Cancel. The caller holds the name. */
 export function PlaylistNameDialog({
+  s = EN,
   name,
   onName,
   onCreate,
   onCancel,
 }: {
+  s?: GuiStrings;
   name: string;
   onName: (name: string) => void;
   onCreate: (name: string) => void;
@@ -41,20 +44,20 @@ export function PlaylistNameDialog({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={onKeyDown}
       >
-        <h2 id="playlist-name-title">Create playlist</h2>
+        <h2 id="playlist-name-title">{s.create_playlist}</h2>
         <label className="dialog-field">
-          <span>Name</span>
+          <span>{s.name}</span>
           <input
             type="text"
             autoFocus
             value={name}
-            placeholder="My playlist"
+            placeholder={s.my_playlist}
             onChange={(event) => onName(event.target.value)}
           />
         </label>
         <div className="dialog-buttons">
           <button type="button" className="dialog-cancel" onClick={onCancel}>
-            Cancel
+            {s.cancel}
           </button>
           <button
             type="button"
@@ -62,7 +65,7 @@ export function PlaylistNameDialog({
             disabled={blank}
             onClick={create}
           >
-            Create
+            {s.create}
           </button>
         </div>
       </div>

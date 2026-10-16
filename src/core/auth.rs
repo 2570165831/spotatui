@@ -34,11 +34,12 @@ pub async fn log_in_to_spotify(
   {
     use crate::infra::spotify::{credentials, session};
     let pending = credentials::begin_login().await?;
-    onboarding.info(&format!(
-      "Log in to Spotify: open {} and confirm the code {}\n",
-      pending.url(),
-      pending.code()
-    ));
+    onboarding.info(
+      &onboarding
+        .strings()
+        .onboarding
+        .spotify_login(pending.url(), pending.code()),
+    );
     if let Err(e) = open::that_detached(pending.url()) {
       log::warn!("could not open the browser: {e}");
     }
@@ -46,7 +47,7 @@ pub async fn log_in_to_spotify(
     session::log_in(credentials)
       .await
       .map_err(|reason| anyhow!(reason.message()))?;
-    onboarding.info("Logged in to Spotify.\n");
+    onboarding.info(onboarding.strings().onboarding.spotify_logged_in);
     Ok(SpotifyLogin(()))
   }
   #[cfg(not(feature = "spotify-session"))]

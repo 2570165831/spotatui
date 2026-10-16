@@ -760,6 +760,115 @@ pub fn apply_choice(behavior: &mut BehaviorConfig, choice: &DjSetupChoice) {
   }
 }
 
+// The picker stores English labels for existing callers. Frontends render from
+// the row's backend/model identity and readiness, never by rewriting that text.
+#[cfg(any(feature = "tui", test))]
+impl BackendOption {
+  pub fn label_with(&self, strings: &crate::core::i18n::Strings) -> String {
+    let strings = &strings.status.infra;
+    if let Some(command) = &self.command {
+      return strings.setup_keep_command(&command.join(" "));
+    }
+    if let Some(agent) = self.agent {
+      return strings.setup_no_api_key(agent);
+    }
+    match self.backend {
+      "anthropic" => strings.setup_anthropic.to_string(),
+      "openai_compat" => strings.setup_openai.to_string(),
+      _ => self.label.clone(),
+    }
+  }
+
+  pub fn note_with(&self, strings: &crate::core::i18n::Strings) -> String {
+    let strings = &strings.status.infra;
+    let note = if self.command.is_some() {
+      strings.setup_own_command
+    } else if let Some(agent) = self.agent {
+      match agent {
+        "claude" => strings.setup_claude_plan,
+        "codex" => strings.setup_codex_plan,
+        "agy" => strings.setup_agy_plan,
+        "copilot" => strings.setup_copilot_plan,
+        "opencode" => strings.setup_opencode_plan,
+        "gemini" => strings.setup_gemini_legacy,
+        _ => strings.setup_agent_subscription,
+      }
+    } else {
+      return match self.backend {
+        "anthropic" if self.ready => strings.setup_anthropic_billing.to_string(),
+        "anthropic" => strings.setup_needs_key(super::session::API_KEY_ENV),
+        "openai_compat" => strings.setup_openai_endpoint.to_string(),
+        _ => self.note.clone(),
+      };
+    };
+    if self.ready {
+      note.to_string()
+    } else {
+      format!("{note}{}", strings.setup_not_installed)
+    }
+  }
+}
+
+#[cfg(any(feature = "tui", test))]
+impl ModelOption {
+  pub fn label_with(
+    &self,
+    backend: &BackendOption,
+    strings: &crate::core::i18n::Strings,
+  ) -> String {
+    let strings = &strings.status.infra;
+    if backend.command.is_some() {
+      strings.setup_keep_as_is.to_string()
+    } else if self.custom {
+      strings.setup_custom.to_string()
+    } else if let Some(value) = &self.value {
+      value.clone()
+    } else if backend.is_agent() {
+      strings.setup_cli_default.to_string()
+    } else {
+      strings.setup_builtin_default(builtin_default(backend.backend))
+    }
+  }
+
+  pub fn note_with(&self, backend: &BackendOption, strings: &crate::core::i18n::Strings) -> String {
+    let strings = &strings.status.infra;
+    if backend.command.is_some() {
+      return strings.setup_own_model_note.to_string();
+    }
+    if self.custom {
+      return if backend.agent == Some("opencode") {
+        strings.setup_type_provider_model
+      } else {
+        strings.setup_type_model
+      }
+      .to_string();
+    }
+    let Some(value) = self.value.as_deref() else {
+      return if backend.is_agent() {
+        strings.setup_no_model_flag.to_string()
+      } else {
+        String::new()
+      };
+    };
+    let note = match (backend.agent, backend.backend, value) {
+      (Some("claude"), _, "haiku") => strings.setup_haiku_note,
+      (Some("claude"), _, "sonnet") => strings.setup_sonnet_note,
+      (Some("claude"), _, "opus") => strings.setup_opus_note,
+      (Some("claude"), _, "fable") => strings.setup_fable_note,
+      (Some("agy"), _, "gemini-3.6-flash-low") => strings.setup_cheapest,
+      (Some("agy"), _, "gemini-3.1-pro-high") => strings.setup_heaviest_gemini,
+      (Some("agy"), _, "claude-opus-4-6-thinking") => strings.setup_heaviest_all,
+      (Some("agy"), _, model) if AGY_MODELS.iter().any(|(id, _)| *id == model) => "",
+      (None, "anthropic", "claude-haiku-4-5") => strings.setup_price_haiku,
+      (None, "anthropic", "claude-sonnet-5") => strings.setup_price_sonnet,
+      (None, "anthropic", "claude-opus-5" | "claude-opus-4-8") => strings.setup_price_opus,
+      (None, "anthropic", "claude-fable-5") => strings.setup_price_fable,
+      _ => strings.setup_current,
+    };
+    note.to_string()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1520,5 +1629,33 @@ mod tests {
       ..choice
     };
     assert_eq!(choice.describe(), "claude");
+  }
+
+  #[test]
+  fn localized_picker_rows_preserve_english_and_model_identifiers() {
+    use crate::core::i18n::{EN, ZH_HANS, ZH_HANT};
+    for ready in [false, true] {
+      let behavior = behavior();
+      let rows = detect_backends_with(&behavior, ready.then_some("test-key"), |_| ready);
+      for row in rows {
+        assert_eq!(row.label_with(&EN), row.label);
+        assert_eq!(row.note_with(&EN), row.note);
+        let (models, _) = models_for(&row, &behavior);
+        for model in models {
+          assert_eq!(model.label_with(&row, &EN), model.label);
+          assert_eq!(model.note_with(&row, &EN), model.note);
+          if let Some(id) = &model.value {
+            assert_eq!(model.label_with(&row, &ZH_HANT), *id);
+          }
+        }
+      }
+    }
+    let behavior = behavior();
+    let rows = detect_backends_with(&behavior, None, |_| false);
+    let claude = rows.iter().find(|row| row.agent == Some("claude")).unwrap();
+    for strings in [&EN, &ZH_HANS, &ZH_HANT] {
+      assert!(claude.label_with(strings).contains("claude"));
+      assert!(claude.note_with(strings).contains("PATH"));
+    }
   }
 }

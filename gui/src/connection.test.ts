@@ -1,3 +1,4 @@
+import strings from "./bindings/strings.json";
 import { describe, expect, it, vi } from "vitest";
 import {
   Connection,
@@ -37,7 +38,14 @@ function harness(code: string | null, stored: Record<string, string> = {}) {
 const hello = (token: string | null) =>
   JSON.stringify({
     kind: "hello",
-    payload: { version: "0", token, revisions: {} },
+    payload: {
+      version: "0",
+      token,
+      revisions: {},
+      window: false,
+      language: "en",
+      strings: strings.EN,
+    },
   });
 
 describe("Connection", () => {
@@ -115,6 +123,45 @@ describe("Connection", () => {
     expect(connection.getState().version).toBe("0");
   });
 
+  it("receives the preboot table in Hello and ignores stale language revisions", () => {
+    const { connection, sockets } = harness("abc");
+    const receive = (message: object) =>
+      sockets[0].handlers.message(JSON.stringify(message));
+    receive({
+      kind: "hello",
+      payload: {
+        ...JSON.parse(hello("t1")).payload,
+        window: true,
+        language: "zh-Hant",
+        strings: strings.ZH_HANT,
+      },
+    });
+    expect(connection.getState().window).toBe(true);
+    expect(connection.getState().booted).toBe(false);
+    expect(
+      connection.getState().localization?.strings.gui.continue_button,
+    ).toBe(strings.ZH_HANT.gui.continue_button);
+    receive({
+      kind: "settings",
+      rev: 3,
+      payload: { language: "zh-Hans", strings: strings.ZH_HANS, rows: [] },
+    });
+    receive({
+      kind: "settings",
+      rev: 2,
+      payload: { language: "en", strings: strings.EN, rows: [] },
+    });
+    const active = connection.getState().localization;
+    expect(active?.language).toBe("zh-Hans");
+    expect(active?.strings.gui.settings).toBe(strings.ZH_HANS.gui.settings);
+    receive({
+      kind: "settings",
+      rev: 4,
+      payload: { language: "zh-Hans", strings: null, rows: [] },
+    });
+    expect(connection.getState().localization).toBe(active);
+  });
+
   it("the first route message marks the app booted", () => {
     const { connection, sockets } = harness("abc");
     sockets[0].handlers.message(hello("t1"));
@@ -165,6 +212,7 @@ describe("takeLaunchCode", () => {
 
 describe("showsOnboarding", () => {
   const base: State = {
+    localization: null,
     connected: true,
     expired: false,
     channels: {},

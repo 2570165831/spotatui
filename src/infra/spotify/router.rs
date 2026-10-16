@@ -224,10 +224,25 @@ async fn run(
     Route::AddToQueue => player::add_to_queue(session, query).await,
   }
 }
+pub(crate) fn localized_api_error(
+  status: StatusCode,
+  message: crate::core::i18n::LocalizedMessage,
+) -> anyhow::Error {
+  SpotifyApiError {
+    status,
+    body: message.to_string(),
+    localized_body: Some(message),
+    detail: None,
+    endpoint: None,
+  }
+  .into()
+}
+
 pub(crate) fn api_error(status: StatusCode, body: impl Into<String>) -> anyhow::Error {
   SpotifyApiError {
     status,
     body: body.into(),
+    localized_body: None,
     detail: None,
     endpoint: None,
   }

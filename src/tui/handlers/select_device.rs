@@ -111,36 +111,43 @@ fn select_source(app: &mut App) {
     }
   }
 
-  app.set_status_message(format!("Source: {}", source.label()), 4);
+  app.set_status_message(
+    app
+      .strings()
+      .status
+      .app
+      .source_selected(app.strings().sidebar.source_label(source)),
+    4,
+  );
   app.pop_navigation_stack();
 }
 
 /// Existing behaviour: transfer Spotify playback to the highlighted device.
 fn transfer_to_selected_device(app: &mut App) {
   let Some(index) = app.view.selected_device_index else {
-    app.set_status_message("No playback device selected", 4);
+    app.set_status_message(app.strings().status.app.no_playback_device_selected, 4);
     return;
   };
 
   let Some(devices) = app.devices() else {
-    app.set_status_message("No playback devices found", 4);
+    app.set_status_message(app.strings().status.app.no_playback_devices, 4);
     return;
   };
 
   let Some(device) = devices.devices.get(index) else {
-    app.set_status_message("Selected playback device is no longer available", 4);
+    app.set_status_message(app.strings().status.app.playback_device_unavailable, 4);
     return;
   };
 
   let Some(device_id) = &device.id else {
-    app.set_status_message("Selected playback device has no Spotify device id", 4);
+    app.set_status_message(app.strings().status.app.playback_device_no_id, 4);
     return;
   };
 
   // Both clones end the `app.devices` borrow before the apply.
   let device_id = device_id.clone();
   let device_name = device.name.clone();
-  app.set_status_message(format!("Switching playback to {}", device_name), 4);
+  app.set_status_message(app.strings().status.app.switching_device(&device_name), 4);
   app.apply(Action::TransferPlayback {
     device_id,
     persist: true,

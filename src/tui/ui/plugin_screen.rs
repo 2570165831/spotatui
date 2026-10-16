@@ -53,7 +53,7 @@ pub fn draw_plugin_screen(f: &mut Frame<'_>, app: &App) {
   let Some(content) = content else {
     // Registered (or mistyped) screen with no content published yet.
     let placeholder = Paragraph::new(Line::from(Span::styled(
-      format!("plugin screen '{name}' has no content yet"),
+      app.strings().screens.plugin_screen_empty(&name),
       Style::default().fg(app.user_config.theme.hint.into()),
     )));
     f.render_widget(placeholder, inner);
@@ -184,12 +184,7 @@ fn draw_cover_art(f: &mut Frame<'_>, app: &App, area: Rect, fit: PluginCoverArtF
   use ratatui::widgets::Clear;
 
   if !app.cover_art.available() {
-    draw_cover_art_message(
-      f,
-      app,
-      area,
-      crate::tui::cover_art::status_message(app.cover_art.status),
-    );
+    draw_cover_art_message(f, app, area, super::util::cover_art_status(app));
     return;
   }
 
@@ -213,7 +208,7 @@ fn draw_cover_art(f: &mut Frame<'_>, app: &App, area: Rect, fit: PluginCoverArtF
 fn draw_cover_art(f: &mut Frame<'_>, app: &App, area: Rect, _fit: PluginCoverArtFit) {
   // The widget still parses without the feature so a plugin degrades to a
   // labelled gap rather than failing at `set_screen`.
-  draw_cover_art_message(f, app, area, "Built without cover art");
+  draw_cover_art_message(f, app, area, app.strings().screens.cover_art_not_built);
 }
 
 fn draw_cover_art_message(f: &mut Frame<'_>, app: &App, area: Rect, message: &str) {

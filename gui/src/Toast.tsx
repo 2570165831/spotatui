@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { StatusPayload } from "./bindings/StatusPayload";
@@ -6,10 +7,12 @@ import { toastView } from "./toastModel";
 
 /** The api error first, else the status message. Both expire on the server. */
 export function Toast({
+  s = EN,
   status,
   route,
   send,
 }: {
+  s?: GuiStrings;
   status: StatusPayload | null;
   route: string | null;
   send: (action: Action) => void;
@@ -33,7 +36,7 @@ export function Toast({
           <span>{shownError}</span>
           <button
             type="button"
-            aria-label="Dismiss"
+            aria-label={s.dismiss}
             onClick={() => {
               // Leaving the error frame clears the error for every frontend.
               if (route === "error") send("Back");

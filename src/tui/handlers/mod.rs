@@ -46,7 +46,7 @@ mod track_table;
 use crate::core::action::{Action, CopyTarget, NavTarget};
 use crate::core::app::{
   ActiveBlock, App, ArtistBlock, InputContext, PlaybackOwner, RouteId, SearchResultBlock,
-  TrackTableContext, NOTHING_PLAYING_STATUS,
+  TrackTableContext,
 };
 use crate::core::requirement::{Availability, Capability, Requirement};
 use crate::core::source::Source;
@@ -321,13 +321,17 @@ pub fn handle_app(key: Key, app: &mut App) {
         if app.get_current_route().active_block == ActiveBlock::SearchResultBlock {
           handle_block_events(key, app);
         } else if !search_results::favorite_current_radio_station(app) {
-          app.set_status_message("No radio station selected or playing".to_string(), 4);
+          app.set_status_message(app.strings().status.app.no_radio_playing.to_string(), 4);
         }
       } else if app.active_source.supports_like() {
         app.apply(Action::ToggleSaveCurrentItem);
       } else {
         app.set_status_message(
-          format!("Like isn't available for {}", app.active_source.label()),
+          app
+            .strings()
+            .status
+            .app
+            .like_source_unavailable(app.strings().sidebar.source_label(app.active_source)),
           4,
         );
       }
@@ -423,12 +427,16 @@ pub(super) fn open_global_search(app: &mut App) -> bool {
       true
     }
     Availability::NeedsSpotify => {
-      app.set_status_message("Search needs a Spotify session", 4);
+      app.set_status_message(app.strings().status.app.search_needs_spotify, 4);
       false
     }
     Availability::NotForSource(_) | Availability::OnlyForSource(_) => {
       app.set_status_message(
-        format!("Search isn't available for {}", app.active_source.label()),
+        app
+          .strings()
+          .status
+          .app
+          .search_source_unavailable(app.strings().sidebar.source_label(app.active_source)),
         4,
       );
       false
@@ -447,12 +455,12 @@ fn copy_url(app: &mut App, copy: Action) {
       if has_item {
         app.apply(copy);
       } else {
-        app.set_status_message(NOTHING_PLAYING_STATUS, 4);
+        app.set_status_message(app.strings().status.app.nothing_playing, 4);
       }
     }
-    PlaybackOwner::None => app.set_status_message(NOTHING_PLAYING_STATUS, 4),
+    PlaybackOwner::None => app.set_status_message(app.strings().status.app.nothing_playing, 4),
     PlaybackOwner::AppleMusic | PlaybackOwner::Queue | PlaybackOwner::Decoded => {
-      app.set_status_message("Copy URL needs a Spotify track playing", 4)
+      app.set_status_message(app.strings().status.app.copy_needs_spotify, 4)
     }
   }
 }
@@ -625,7 +633,7 @@ fn handle_escape(app: &mut App) {
     }
     ActiveBlock::Dialog(dialog_context) => {
       if dialog_context == crate::core::app::DialogContext::PersistKeybindingFallback {
-        app.set_status_message("Using Alt+, for this session only", 4);
+        app.set_status_message(app.strings().status.app.shortcut_session_only, 4);
       }
       app.pop_navigation_stack();
       app.clear_dialog_state();
@@ -1218,6 +1226,7 @@ mod tests {
     app.set_search_results(crate::core::app::SearchResult {
       tracks: Some(Paged {
         items: vec![TrackInfo {
+          generated_name: None,
           uri: Some("radio:https://example.com/stream".to_string()),
           name: "Example FM".to_string(),
           artists: vec![],

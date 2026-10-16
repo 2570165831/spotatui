@@ -310,7 +310,7 @@ fn handle_settings_tabs_mouse(mouse: MouseEvent, tabs_area: Rect, app: &mut App)
     MouseEventKind::ScrollUp => switch_settings_category_left(app),
     MouseEventKind::Down(MouseButton::Left) => {
       if let Some(clicked_tab_index) =
-        settings_tab_index_from_click(tabs_area, mouse.column, mouse.row)
+        settings_tab_index_from_click(tabs_area, mouse.column, mouse.row, app.strings())
       {
         switch_settings_category_to(clicked_tab_index, app);
       }
@@ -741,6 +741,7 @@ fn settings_tab_index_from_click(
   tabs_area: Rect,
   mouse_column: u16,
   mouse_row: u16,
+  strings: &crate::core::i18n::Strings,
 ) -> Option<usize> {
   if tabs_area.width <= 2 || tabs_area.height <= 2 {
     return None;
@@ -777,7 +778,8 @@ fn settings_tab_index_from_click(
   let categories = SettingsCategory::all();
   for (index, category) in categories.iter().enumerate() {
     let tab_start = cursor;
-    let tab_width = left_padding_width + category.name().width() + right_padding_width;
+    let tab_width =
+      left_padding_width + category.localized_name(strings).width() + right_padding_width;
     let tab_end = tab_start.saturating_add(tab_width);
 
     if relative_column >= tab_start && relative_column < tab_end {
@@ -1656,12 +1658,21 @@ mod tests {
     let left_padding = 1u16;
     let right_padding = 1u16;
     let divider = 1u16;
-    let behavior_tab_width =
-      left_padding + SettingsCategory::Behavior.name().len() as u16 + right_padding;
-    let icons_tab_width =
-      left_padding + SettingsCategory::Icons.name().len() as u16 + right_padding;
-    let keybindings_tab_width =
-      left_padding + SettingsCategory::Keybindings.name().len() as u16 + right_padding;
+    let behavior_tab_width = left_padding
+      + SettingsCategory::Behavior
+        .localized_name(&crate::core::i18n::EN)
+        .len() as u16
+      + right_padding;
+    let icons_tab_width = left_padding
+      + SettingsCategory::Icons
+        .localized_name(&crate::core::i18n::EN)
+        .len() as u16
+      + right_padding;
+    let keybindings_tab_width = left_padding
+      + SettingsCategory::Keybindings
+        .localized_name(&crate::core::i18n::EN)
+        .len() as u16
+      + right_padding;
     let theme_title_start = inner_left
       + behavior_tab_width
       + divider
@@ -1681,6 +1692,29 @@ mod tests {
     assert_eq!(app.view.settings_category, SettingsCategory::Theme);
     assert_eq!(app.view.settings_selected_index, 0);
     assert!(!app.settings_items.is_empty());
+  }
+
+  #[test]
+  fn chinese_settings_tabs_use_the_same_cell_width_for_drawing_and_clicks() {
+    use crate::core::i18n::{ZH_HANS, ZH_HANT};
+    for strings in [&ZH_HANS, &ZH_HANT] {
+      let area = Rect::new(3, 2, 80, 3);
+      let mut column = area.x + 1;
+      for (index, category) in SettingsCategory::all().iter().enumerate() {
+        let width = category.localized_name(strings).width() as u16 + 2;
+        for x in column..column + width {
+          assert_eq!(
+            settings_tab_index_from_click(area, x, area.y + 1, strings),
+            Some(index)
+          );
+        }
+        column += width + 1;
+      }
+      assert_eq!(
+        settings_tab_index_from_click(area, column, area.y + 1, strings),
+        None
+      );
+    }
   }
 
   #[test]
@@ -2392,6 +2426,7 @@ mod tests {
         collaborative: false,
         public: None,
         image_url: None,
+        generated_name: None,
       })
       .collect();
 

@@ -73,9 +73,9 @@ fn build_discord_playback(app: &App) -> Option<discord_rpc::DiscordPlayback> {
   let state = if snapshot.is_playing {
     base_state
   } else if base_state.is_empty() {
-    "Paused".to_string()
+    app.strings().status.app.paused.to_string()
   } else {
-    format!("Paused: {}", base_state)
+    app.strings().status.app.paused_details(&base_state)
   };
 
   Some(discord_rpc::DiscordPlayback {

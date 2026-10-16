@@ -145,7 +145,7 @@ impl App {
       self.current_playback_context = None;
     }
 
-    self.set_status_message("Native streaming disconnected; attempting recovery.", 8);
+    self.set_status_message(self.strings().status.app.native_disconnected, 8);
     if let Some(tx) = &self.streaming_recovery_tx {
       self.native_backend_pending = tx
         .send(crate::infra::player::StreamingRecoveryRequest {
@@ -203,7 +203,7 @@ impl App {
         .is_ok()
       });
       if self.native_backend_pending {
-        self.set_status_message("Reconnecting native streaming…", 6);
+        self.set_status_message(self.strings().status.app.native_reconnecting, 6);
       }
     }
     true
@@ -303,13 +303,13 @@ impl App {
     };
     if pending.parked_at.elapsed() > max_parked_age() {
       self.pending_start_playback = None;
-      self.set_status_message("Playback request expired during native recovery.", 6);
+      self.set_status_message(self.strings().status.app.native_request_expired, 6);
       return;
     }
     if !self.native_should_drive() {
       return;
     }
-    self.set_status_message("Resuming playback request…", 4);
+    self.set_status_message(self.strings().status.app.resuming_request, 4);
     self.dispatch(IoEvent::StartPlayback(
       pending.context_uri,
       pending.uris,

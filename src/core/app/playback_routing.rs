@@ -1,11 +1,14 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) const NOTHING_PLAYING_STATUS: &str = "Nothing is playing";
 
 /// The status for a Spotify gesture the parked native backend cannot serve.
+#[cfg(all(test, feature = "streaming"))]
 const SPOTIFY_PARKED_STATUS: &str = "Press play to resume Spotify";
 
 /// The status shown when a Spotify-bound request finds no session.
+#[cfg(test)]
 pub(crate) const SPOTIFY_NOT_CONNECTED_STATUS: &str =
   "Spotify not connected. Press `d` and pick Spotify to log in.";
 
@@ -163,7 +166,7 @@ impl App {
       return;
     }
     if self.playback_owner() == PlaybackOwner::None {
-      self.set_status_message(NOTHING_PLAYING_STATUS, 4);
+      self.set_status_message(self.strings().status.app.nothing_playing, 4);
       return;
     }
     #[cfg(feature = "streaming")]
@@ -176,7 +179,7 @@ impl App {
         }
         self.refuse_parked_gesture();
       } else if self.native_playback_recovery.is_none() {
-        self.set_status_message(NOTHING_PLAYING_STATUS, 4);
+        self.set_status_message(self.strings().status.app.nothing_playing, 4);
       } else {
         // The rebuild restores the snapshot, which now asks to play.
         self.set_native_playback_intent(true);
@@ -191,10 +194,10 @@ impl App {
   pub(crate) fn refuse_parked_gesture(&mut self) {
     #[cfg(feature = "streaming")]
     if self.native_backend_pending {
-      self.set_status_message("Reconnecting native streaming…", 5);
+      self.set_status_message(self.strings().status.app.native_reconnecting, 5);
       return;
     }
-    self.set_status_message(SPOTIFY_PARKED_STATUS, 4);
+    self.set_status_message(self.strings().status.app.spotify_parked, 4);
   }
 
   /// Whether the cached Spotify playback belongs to the parked native backend,
@@ -627,6 +630,7 @@ impl App {
       self.all_playlists(),
       &snapshot.metadata.album,
       &self.polled_track_artists(snapshot.item_uri.as_deref()),
+      self.strings(),
     )
   }
 
@@ -710,12 +714,13 @@ pub(crate) fn context_display_name(
   playlists: &[PlaylistInfo],
   album: &str,
   artists: &[(String, String)],
+  strings: &crate::core::i18n::Strings,
 ) -> Option<String> {
   if let Some((_, name)) = described.filter(|(described_uri, _)| described_uri == uri) {
     return Some(name.clone());
   }
   if uri.contains(":collection") {
-    return Some("Liked Songs".to_string());
+    return Some(strings.sidebar.liked_songs.to_string());
   }
   match uri.split(':').nth(1)? {
     "playlist" => playlists
@@ -737,13 +742,49 @@ mod tests {
   use crate::core::app::test_support::*;
 
   #[test]
+  fn playback_status_fixtures_match_the_english_catalog() {
+    let strings = &crate::core::i18n::EN.status.app;
+    assert_eq!(NOTHING_PLAYING_STATUS, strings.nothing_playing);
+    assert_eq!(SPOTIFY_NOT_CONNECTED_STATUS, strings.spotify_not_connected);
+    #[cfg(feature = "streaming")]
+    assert_eq!(SPOTIFY_PARKED_STATUS, strings.spotify_parked);
+  }
+
+  #[test]
+  fn collection_contexts_follow_the_language_without_replacing_spotify_descriptions() {
+    for strings in [
+      &crate::core::i18n::EN,
+      &crate::core::i18n::ZH_HANS,
+      &crate::core::i18n::ZH_HANT,
+    ] {
+      let uri = "spotify:user:me:collection";
+      assert_eq!(
+        context_display_name(uri, None, &[], "", &[], strings),
+        Some(strings.sidebar.liked_songs.to_string())
+      );
+      let described = (uri.to_string(), "{name} 中文".to_string());
+      assert_eq!(
+        context_display_name(uri, Some(&described), &[], "", &[], strings),
+        Some("{name} 中文".to_string())
+      );
+    }
+  }
+
+  #[test]
   fn context_display_name_prefers_spotifys_description_for_the_same_uri() {
     let described = ("spotify:playlist:p1".to_string(), "Daily Mix 1".to_string());
     let playlists = [crate::core::test_helpers::playlist_info(
       "p1", "Road", "me", false,
     )];
     assert_eq!(
-      context_display_name("spotify:playlist:p1", Some(&described), &playlists, "", &[]),
+      context_display_name(
+        "spotify:playlist:p1",
+        Some(&described),
+        &playlists,
+        "",
+        &[],
+        &crate::core::i18n::EN
+      ),
       Some("Daily Mix 1".to_string())
     );
   }
@@ -755,7 +796,14 @@ mod tests {
       "p1", "Road", "me", false,
     )];
     assert_eq!(
-      context_display_name("spotify:playlist:p1", Some(&described), &playlists, "", &[]),
+      context_display_name(
+        "spotify:playlist:p1",
+        Some(&described),
+        &playlists,
+        "",
+        &[],
+        &crate::core::i18n::EN
+      ),
       Some("Road".to_string())
     );
   }
@@ -766,7 +814,8 @@ mod tests {
       ("spotify:artist:a".to_string(), "First".to_string()),
       ("spotify:artist:x".to_string(), "Second".to_string()),
     ];
-    let name = |uri| context_display_name(uri, None, &[], "Album", &artists);
+    let name =
+      |uri| context_display_name(uri, None, &[], "Album", &artists, &crate::core::i18n::EN);
     assert_eq!(name("spotify:album:a"), Some("Album".to_string()));
     assert_eq!(
       name("spotify:user:me:collection"),
@@ -783,11 +832,25 @@ mod tests {
   #[test]
   fn an_unknown_context_kind_has_no_name() {
     assert_eq!(
-      context_display_name("spotify:show:s", None, &[], "Album", &[]),
+      context_display_name(
+        "spotify:show:s",
+        None,
+        &[],
+        "Album",
+        &[],
+        &crate::core::i18n::EN
+      ),
       None
     );
     assert_eq!(
-      context_display_name("spotify:playlist:p9", None, &[], "", &[]),
+      context_display_name(
+        "spotify:playlist:p9",
+        None,
+        &[],
+        "",
+        &[],
+        &crate::core::i18n::EN
+      ),
       None
     );
   }

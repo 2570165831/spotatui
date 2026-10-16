@@ -17,7 +17,34 @@ Machine-managed runtime state lives separately in `$XDG_STATE_HOME/spotatui/stat
 
 Most invalid values log a warning and fall back to the default. A misspelled key is usually ignored. Structural mistakes (an unknown sort field, a bad template placeholder, an invalid column id, an icon that is too wide) are logged as warnings and the affected value falls back to its built-in default. Warnings go to the log file whose path is printed at startup, a `spotatui_logs/spotatuilog<pid>` file inside your system temp directory (`%TEMP%` on Windows, `$TMPDIR` where set, otherwise `/tmp`). The startup line reports the resolved path, so copy it from there rather than guessing.
 
-Only two kinds of errors are fatal: YAML syntax errors (the file cannot be parsed at all) and a handful of out-of-range numeric values that bypass the warn-and-fallback policy: `volume_increment` outside 0–100, a tick rate (or animation tick rate) outside 1–999ms, an unparseable `auto_update_delay`, `playback_poll_seconds` below 1, and `like_animation_frames` below 1.
+Fatal errors include YAML syntax errors (the file cannot be parsed at all), and a handful of out-of-range numeric values that bypass the warn-and-fallback policy: `volume_increment` outside 0–100, a tick rate (or animation tick rate) outside 1–999ms, an unparseable `auto_update_delay`, `playback_poll_seconds` below 1, and `like_animation_frames` below 1.
+
+## Interface language
+
+Chinese tables follow in stacked translation PRs. The language choices are selectable now; areas without Chinese data display their English fallback.
+
+`behavior.language` accepts `auto` (the default), `en`, `zh-Hans` (Simplified Chinese),
+and `zh-Hant` (Traditional Chinese). Common spellings such as `zh-CN`, `zh_CN`,
+`zh`, and `ZH-HANS` are accepted and saved canonically. Unknown values warn and
+fall back to `auto` without aborting configuration loading. Change it live in Settings; the terminal and
+browser/desktop frontends share the same table. The language picker displays `auto` as **Auto (system)**, while the saved value stays
+`auto`. CLI output and logs remain English.
+
+`auto` reads the first nonempty `LC_ALL`, `LC_MESSAGES`, or `LANG`. Without one,
+macOS uses the first preferred `AppleLanguages` entry and Windows uses its UI
+culture. Other platforms, unavailable preferences, and every non-Chinese language
+use English. `zh_CN`, `zh_SG`, and `zh-Hans` select Simplified Chinese; `zh_TW`,
+`zh_HK`, `zh_MO`, and `zh-Hant` select Traditional Chinese. Explicit script tags
+win over regions; bare `zh` selects Simplified Chinese. Locale encodings such as
+`.UTF-8` are ignored. The system locale is sampled once at startup; choose a language
+explicitly or restart after changing the system preference.
+
+`LANGUAGE` is not used: it is a gettext fallback list, while this setting selects
+one interface language and follows POSIX message-locale precedence.
+
+Translations preserve product names, keybinding letters, configuration keys, and
+user/server content such as track titles. A message without a translation falls
+back to English.
 
 ## Behavior
 
@@ -25,6 +52,7 @@ Only two kinds of errors are fatal: YAML syntax errors (the file cannot be parse
 
 ```yaml
 behavior:
+  language: auto                  # auto | en | zh-Hans | zh-Hant
   # Timing
   seek_milliseconds: 5000          # seek step for < / >
   tick_rate_milliseconds: 250      # UI event-loop cadence (1..=999, fatal if outside)

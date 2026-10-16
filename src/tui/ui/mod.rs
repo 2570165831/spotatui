@@ -236,3 +236,6 @@ mod tests {
     assert!(all_text.contains("Top Tracks"), "missing Top Tracks panel");
   }
 }
+
+#[cfg(test)]
+mod localization_tests;

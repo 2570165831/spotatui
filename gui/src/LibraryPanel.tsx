@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, tabLabel, sourceLabel } from "./i18n";
 import {
   memo,
   useCallback,
@@ -24,7 +25,9 @@ import { unmatchedTotal } from "./healthModel";
 import { Glyph } from "./Icon";
 import {
   ALBUM_SORTS,
+  albumSorts,
   ARTIST_SORTS,
+  artistSorts,
   createPlaylistAction,
   createsPlaylists,
   focusAfterAsk,
@@ -42,6 +45,9 @@ import {
   sortChoice,
   wantsNextPage,
   type PlaylistRemoval,
+  type PlaylistRemovalTarget,
+  removalTarget,
+  removalText,
   type SidebarRow,
 } from "./libraryModel";
 import "./LibraryPanel.css";
@@ -63,6 +69,7 @@ type OpenMenu = (
 
 /** The left "Your Library" panel; memoized, so the shell's playback ticks skip it. */
 export const LibraryPanel = memo(function LibraryPanel({
+  s = EN,
   playlists,
   artists,
   source,
@@ -74,6 +81,7 @@ export const LibraryPanel = memo(function LibraryPanel({
   artistSort,
   loggedOut = false,
 }: {
+  s?: GuiStrings;
   playlists: SourcePlaylists | null;
   /** The followed artists; null before the library channel arrived. */
   artists: ArtistInfo[] | null;
@@ -102,12 +110,12 @@ export const LibraryPanel = memo(function LibraryPanel({
   const [expanded, setExpanded] = useState(() => loadExpanded(pageStorage()));
   const [naming, setNaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{
-    removal: PlaylistRemoval;
+    removal: PlaylistRemovalTarget;
     at: Point;
     opener: HTMLElement;
   } | null>(null);
   const [asking, setAsking] = useState<{
-    removal: PlaylistRemoval;
+    removal: PlaylistRemovalTarget;
     opener: HTMLElement;
   } | null>(null);
   const createButton = useRef<HTMLButtonElement>(null);
@@ -176,7 +184,8 @@ export const LibraryPanel = memo(function LibraryPanel({
     [expanded],
   );
   const openMenu: OpenMenu = useCallback(
-    (removal, at, opener) => setMenu({ removal, at, opener }),
+    (removal, at, opener) =>
+      setMenu({ removal: removalTarget(removal), at, opener }),
     [],
   );
   const closeAsk = (confirmed: boolean) => {
@@ -193,11 +202,11 @@ export const LibraryPanel = memo(function LibraryPanel({
   };
 
   return (
-    <nav className="library-panel" aria-label="Your Library">
+    <nav className="library-panel" aria-label={s.your_library}>
       <header className="library-head">
         <h2>
           <Glyph name="library" size={22} />
-          Your Library
+          {s.your_library}
         </h2>
         <div className="library-tools">
           {createsPlaylists(active) && (
@@ -205,33 +214,25 @@ export const LibraryPanel = memo(function LibraryPanel({
               ref={createButton}
               type="button"
               className="library-create"
-              aria-label="Create playlist"
-              title="Create playlist"
+              aria-label={s.create_playlist}
+              title={s.create_playlist}
               onClick={() => setNaming("")}
             >
               <Glyph name="plus" size={18} />
             </button>
           )}
           {active && compiled.length > 1 && (
-            <select
-              className="library-source"
-              aria-label="Source"
-              value={active}
-              onChange={(event) =>
-                send({ SelectSource: event.target.value as Source })
-              }
-            >
-              {compiled.map((choice) => (
-                <option key={choice} value={choice}>
-                  {choice}
-                </option>
-              ))}
-            </select>
+            <SourceSelect
+              s={s}
+              active={active}
+              compiled={compiled}
+              send={send}
+            />
           )}
         </div>
       </header>
-      {spotify && loggedOut && <SpotifyLogin send={send} />}
-      <div className="library-filters" role="group" aria-label="Show">
+      {spotify && loggedOut && <SpotifyLogin s={s} send={send} />}
+      <div className="library-filters" role="group" aria-label={s.show}>
         {filters.map((name) => (
           <button
             key={name}
@@ -239,22 +240,22 @@ export const LibraryPanel = memo(function LibraryPanel({
             aria-pressed={name === filter}
             onClick={() => choose(name)}
           >
-            {name}
+            {tabLabel(name, s)}
           </button>
         ))}
       </div>
       {filter === "Albums" && (
         <SortSelect
-          label="Sort albums"
-          options={ALBUM_SORTS}
+          label={s.sort_albums}
+          options={albumSorts(s)}
           value={albumOrder}
           onChange={setAlbumPick}
         />
       )}
       {filter === "Artists" && (
         <SortSelect
-          label="Sort artists"
-          options={ARTIST_SORTS}
+          label={s.sort_artists}
+          options={artistSorts(s)}
           value={artistOrder}
           onChange={setArtistPick}
         />
@@ -267,6 +268,7 @@ export const LibraryPanel = memo(function LibraryPanel({
       >
         {filter === "Playlists" && (
           <PlaylistRows
+            s={s}
             playlists={playlists}
             source={active}
             unmatched={unmatched}
@@ -282,13 +284,16 @@ export const LibraryPanel = memo(function LibraryPanel({
           (albums.length ? (
             albums.map((album, index) => (
               <Row
+                s={s}
                 key={`${index}-${album.id ?? album.name}`}
                 cover={<Cover src={album.image_url} size={48} />}
                 title={album.name}
                 subline={
                   album.artists.length
-                    ? `Album · ${album.artists.map((a) => a.name).join(", ")}`
-                    : "Album"
+                    ? fmt(s.album_by, {
+                        artists: album.artists.map((a) => a.name).join(", "),
+                      })
+                    : s.album
                 }
                 current={view.page === "album" && view.id === album.id}
                 onClick={
@@ -299,16 +304,17 @@ export const LibraryPanel = memo(function LibraryPanel({
               />
             ))
           ) : (
-            <p className="library-empty">No saved albums.</p>
+            <p className="library-empty">{s.no_saved_albums}</p>
           ))}
         {filter === "Artists" &&
           (artists === null ? (
-            <p className="library-empty">Loading artists…</p>
+            <p className="library-empty">{s.loading_artists}</p>
           ) : artists.length === 0 ? (
-            <p className="library-empty">No followed artists.</p>
+            <p className="library-empty">{s.no_followed_artists}</p>
           ) : (
             sortedArtists.map((artist, index) => (
               <Row
+                s={s}
                 key={`${index}-${artist.id ?? artist.name}`}
                 cover={
                   <Cover
@@ -319,7 +325,7 @@ export const LibraryPanel = memo(function LibraryPanel({
                   />
                 }
                 title={artist.name}
-                subline="Artist"
+                subline={s.artist}
                 current={view.page === "artist" && view.id === artist.id}
                 onClick={
                   artist.id
@@ -336,6 +342,7 @@ export const LibraryPanel = memo(function LibraryPanel({
           ))}
         {filter === "Podcasts" && (
           <ShowRows
+            s={s}
             shows={playlists?.saved_shows ?? []}
             view={view}
             open={open}
@@ -349,7 +356,8 @@ export const LibraryPanel = memo(function LibraryPanel({
             groups={[
               [
                 {
-                  label: menu.removal.label,
+                  id: "remove-library",
+                  label: removalText(menu.removal, s).label,
                   kind: "action",
                   action: menu.removal.action,
                 },
@@ -370,10 +378,9 @@ export const LibraryPanel = memo(function LibraryPanel({
         )}
       {asking &&
         createPortal(
-          <ConfirmDialog
-            title={asking.removal.title}
-            body={asking.removal.body}
-            confirm={asking.removal.confirm}
+          <PlaylistRemovalDialog
+            s={s}
+            target={asking.removal}
             onConfirm={() => {
               removePlaylist(asking.removal, view, send, open);
               closeAsk(true);
@@ -385,6 +392,7 @@ export const LibraryPanel = memo(function LibraryPanel({
       {naming !== null &&
         createPortal(
           <PlaylistNameDialog
+            s={s}
             name={naming}
             onName={setNaming}
             onCreate={(name) => {
@@ -401,12 +409,18 @@ export const LibraryPanel = memo(function LibraryPanel({
 });
 
 /** Starts the device login; the server answers with the pairing code in the status line. */
-export function SpotifyLogin({ send }: { send: (action: Action) => void }) {
+export function SpotifyLogin({
+  s = EN,
+  send,
+}: {
+  s?: GuiStrings;
+  send: (action: Action) => void;
+}) {
   return (
     <div className="library-login">
-      <p>Spotify is not connected.</p>
+      <p>{s.spotify_not_connected}</p>
       <button type="button" onClick={() => send({ SelectSource: "Spotify" })}>
-        Log in to Spotify
+        {s.spotify_login}
       </button>
     </div>
   );
@@ -443,22 +457,29 @@ export function SortSelect({
 
 /** The saved podcast shows; a row opens its show page. */
 export function ShowRows({
+  s = EN,
   shows,
   view,
   open,
 }: {
+  s?: GuiStrings;
   shows: ShowInfo[];
   view: View;
   open: OpenView;
 }) {
   if (shows.length === 0)
-    return <p className="library-empty">No saved podcasts.</p>;
+    return <p className="library-empty">{s.no_saved_podcasts}</p>;
   return shows.map((show, index) => (
     <Row
+      s={s}
       key={`${index}-${show.id ?? show.name}`}
       cover={<Cover src={show.image_url} size={48} />}
       title={show.name}
-      subline={show.publisher ? `Podcast · ${show.publisher}` : "Podcast"}
+      subline={
+        show.publisher
+          ? fmt(s.podcast_by, { publisher: show.publisher })
+          : s.podcast
+      }
       current={view.page === "show" && view.id === show.id}
       onClick={
         show.id
@@ -471,6 +492,7 @@ export function ShowRows({
 
 /** Liked Songs, Recently played, the active source's playlists or stations, and Library health. */
 export const PlaylistRows = memo(function PlaylistRows({
+  s = EN,
   playlists,
   source,
   unmatched,
@@ -481,6 +503,7 @@ export const PlaylistRows = memo(function PlaylistRows({
   onToggle,
   onMenu,
 }: {
+  s?: GuiStrings;
   playlists: SourcePlaylists | null;
   source: Source | null;
   unmatched: number;
@@ -509,15 +532,16 @@ export const PlaylistRows = memo(function PlaylistRows({
   };
   const playlistRow = (row: SidebarRow, key: string, depth = 0) => (
     <Row
+      s={s}
       key={key}
       cover={<Cover src={row.image} size={48} />}
       title={row.name}
       subline={
         source === "Radio"
-          ? "Radio station"
+          ? s.radio_station
           : row.count === null
-            ? "Playlist"
-            : `Playlist · ${songCount(row.count)}`
+            ? s.playlist
+            : fmt(s.playlist_count, { count: songCount(row.count, s) })
       }
       current={view.page === "playlist" && view.uri === row.uri}
       depth={depth}
@@ -525,7 +549,7 @@ export const PlaylistRows = memo(function PlaylistRows({
       onMenu={
         menus && playlists
           ? (at, opener) => {
-              const removal = playlistRemoval(source, row, playlists);
+              const removal = playlistRemoval(source, row, playlists, s);
               if (removal) onMenu(removal, at, opener);
             }
           : undefined
@@ -535,25 +559,27 @@ export const PlaylistRows = memo(function PlaylistRows({
   return (
     <>
       <Row
+        s={s}
         cover={
           <span className="liked-tile" aria-hidden="true">
             <Glyph name="heart" size={20} filled />
           </span>
         }
-        title="Liked Songs"
-        subline="Playlist"
+        title={s.liked_songs}
+        subline={s.playlist}
         current={view.page === "liked"}
         onClick={() => open({ page: "liked" })}
       />
       {source === "Spotify" && (
         <Row
+          s={s}
           cover={
             <span className="recent-tile" aria-hidden="true">
               <Glyph name="clock" size={20} />
             </span>
           }
-          title="Recently played"
-          subline="Your listening history"
+          title={s.recently_played}
+          subline={s.listening_history}
           current={view.page === "recent"}
           onClick={() => open({ page: "recent" })}
         />
@@ -562,6 +588,7 @@ export const PlaylistRows = memo(function PlaylistRows({
         ? tree.map((item, index) =>
             item.kind === "folder" ? (
               <FolderRow
+                s={s}
                 key={`${index}-${item.uri}`}
                 name={item.name}
                 depth={item.depth}
@@ -574,13 +601,16 @@ export const PlaylistRows = memo(function PlaylistRows({
           )
         : rows.map((row) => playlistRow(row, row.uri))}
       <Row
+        s={s}
         cover={<Cover src={null} size={48} fallback="link" />}
-        title="Library health"
+        title={s.library_health}
         subline={
           unmatched > 0 ? (
-            <span className="warn">{unmatched} unmatched</span>
+            <span className="warn">
+              {fmt(s.unmatched_count, { count: unmatched })}
+            </span>
           ) : (
-            "Playlist sync"
+            s.playlist_sync
           )
         }
         current={view.page === "health"}
@@ -590,18 +620,18 @@ export const PlaylistRows = memo(function PlaylistRows({
   );
 });
 
-const MENU_HINT = "Right-click or Shift+F10 for more options";
-
 const indent = (depth: number) =>
   depth > 0 ? { paddingLeft: 8 + depth * 16 } : undefined;
 
 /** A playlist folder: a disclosure button; the arrow keys open and close it too. */
 function FolderRow({
+  s = EN,
   name,
   depth,
   expanded,
   onToggle,
 }: {
+  s?: GuiStrings;
   name: string;
   depth: number;
   expanded: boolean;
@@ -627,7 +657,7 @@ function FolderRow({
       </span>
       <span className="library-row-text">
         <span className="library-row-title">{name}</span>
-        <span className="library-row-sub">Folder</span>
+        <span className="library-row-sub">{s.folder}</span>
       </span>
       <span className="folder-chevron" aria-hidden="true">
         <Glyph name="forward" size={16} />
@@ -638,6 +668,7 @@ function FolderRow({
 
 /** One compact row: the cover, the name and a gray subline. */
 function Row({
+  s = EN,
   cover,
   title,
   subline,
@@ -646,6 +677,7 @@ function Row({
   onClick,
   onMenu,
 }: {
+  s?: GuiStrings;
   cover: ReactNode;
   title: string;
   subline: ReactNode;
@@ -682,7 +714,7 @@ function Row({
     <button
       type="button"
       className="library-row"
-      title={onMenu ? `${title}\n${MENU_HINT}` : title}
+      title={onMenu ? `${title}\n${s.row_menu_hint}` : title}
       aria-current={current ? "page" : undefined}
       aria-haspopup={onMenu ? "menu" : undefined}
       aria-keyshortcuts={onMenu ? "Shift+F10 ContextMenu" : undefined}
@@ -703,5 +735,58 @@ function Row({
         </span>
       )}
     </button>
+  );
+}
+
+/** Display labels never become Source protocol tokens. */
+export function SourceSelect({
+  s = EN,
+  active,
+  compiled,
+  send,
+}: {
+  s?: GuiStrings;
+  active: Source;
+  compiled: Source[];
+  send: (action: Action) => void;
+}) {
+  return (
+    <select
+      className="library-source"
+      aria-label={s.source}
+      value={active}
+      onChange={(event) => send({ SelectSource: event.target.value as Source })}
+    >
+      {compiled.map((choice) => (
+        <option key={choice} value={choice}>
+          {sourceLabel(choice, s)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** A pending question keeps its identity while the active language changes. */
+export function PlaylistRemovalDialog({
+  s = EN,
+  target,
+  onConfirm,
+  onCancel,
+}: {
+  s?: GuiStrings;
+  target: PlaylistRemovalTarget;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const text = removalText(target, s);
+  return (
+    <ConfirmDialog
+      s={s}
+      title={text.title}
+      body={text.body}
+      confirm={text.confirm}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }

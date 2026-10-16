@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, sourceBadge } from "./i18n";
 import type { ReactNode } from "react";
 import type { Source } from "./bindings/Source";
 
@@ -71,11 +72,17 @@ export function SourceIcon({ source }: { source: Source }) {
 }
 
 /** The source name with its icon. */
-export function SourceBadge({ source }: { source: Source }) {
+export function SourceBadge({
+  source,
+  s = EN,
+}: {
+  source: Source;
+  s?: GuiStrings;
+}) {
   return (
     <span className="badge">
       <SourceIcon source={source} />
-      <span className="name">{source.toUpperCase()}</span>
+      <span className="name">{sourceBadge(source, s)}</span>
     </span>
   );
 }

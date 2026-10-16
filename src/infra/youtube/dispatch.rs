@@ -171,7 +171,17 @@ async fn run_youtube_search(app: &Arc<Mutex<App>>, query: &str) {
       .lock()
       .await
       .show_source_search_tracks(query, results.tracks),
-    Err(e) => set_error(app, format!("YouTube search failed: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_search_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -222,7 +232,17 @@ async fn publish_playlists(app: &Arc<Mutex<App>>, file: &super::playlists::Playl
 async fn load_playlists(app: &Arc<Mutex<App>>) {
   match read_playlists_file().await {
     Ok(file) => publish_playlists(app, &file).await,
-    Err(e) => set_error(app, format!("Cannot load YouTube playlists: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_playlists_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -231,12 +251,29 @@ async fn load_playlist_tracks(app: &Arc<Mutex<App>>, uri: &str) {
   let file = match read_playlists_file().await {
     Ok(f) => f,
     Err(e) => {
-      set_error(app, format!("Cannot load YouTube playlists: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_playlists_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
   let Some(playlist) = super::playlists::find_playlist(&file, uri) else {
-    set_error(app, "That YouTube playlist no longer exists".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .youtube_playlist_missing
+        .to_string(),
+    )
+    .await;
     return;
   };
   let rows: Vec<TrackInfo> = playlist
@@ -265,9 +302,22 @@ async fn create_playlist(app: &Arc<Mutex<App>>, name: &str) {
     Ok(file) => {
       publish_playlists(app, &file).await;
       let mut guard = app.lock().await;
-      guard.set_status_message(format!("Created YouTube playlist \"{}\"", name.trim()), 4);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.youtube_created(name.trim()), 4)
+      };
     }
-    Err(e) => set_error(app, format!("Cannot create YouTube playlist: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_create_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -288,9 +338,22 @@ async fn delete_playlist(app: &Arc<Mutex<App>>, uri: &str) {
       if guard.youtube_open_playlist.as_deref() == Some(uri) {
         guard.youtube_open_playlist = None;
       }
-      guard.set_status_message(format!("Deleted YouTube playlist \"{name}\""), 4);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.youtube_deleted(&name), 4)
+      };
     }
-    Err(e) => set_error(app, format!("Cannot delete YouTube playlist: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_delete_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -319,13 +382,30 @@ async fn add_track_to_playlist(app: &Arc<Mutex<App>>, playlist_ref: &str, video_
     find_video_row(&guard, video_ref)
   };
   let Some(row) = row else {
-    set_error(app, "Cannot resolve that video's metadata".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .youtube_metadata_missing
+        .to_string(),
+    )
+    .await;
     return;
   };
   let stored = match super::playlists::track_info_to_stored(&row) {
     Ok(s) => s,
     Err(e) => {
-      set_error(app, format!("Cannot add video to playlist: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_add_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -344,13 +424,31 @@ async fn add_track_to_playlist(app: &Arc<Mutex<App>>, playlist_ref: &str, video_
     Ok((added, playlist_name, file)) => {
       publish_playlists(app, &file).await;
       let msg = if added {
-        format!("Added \"{}\" to {playlist_name}", row.name)
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_added(&row.name, &playlist_name)
       } else {
-        format!("\"{}\" is already in {playlist_name}", row.name)
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_already_added(&row.name, &playlist_name)
       };
       app.lock().await.set_status_message(msg, 4);
     }
-    Err(e) => set_error(app, format!("Cannot add video to playlist: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_add_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -386,9 +484,22 @@ async fn remove_track_from_playlist(app: &Arc<Mutex<App>>, playlist_ref: &str, v
         guard.track_table.tracks = remaining;
         guard.clamp_track_table_cursor();
       }
-      guard.set_status_message(format!("Removed \"{title}\" from playlist"), 4);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.youtube_removed(&title), 4)
+      };
     }
-    Err(e) => set_error(app, format!("Cannot remove video from playlist: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_remove_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -431,11 +542,27 @@ async fn acquire_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(p)) => Some(Arc::new(p)),
     Ok(Err(e)) => {
-      set_error(app, format!("No audio output for YouTube playback: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_error(app, format!("Audio output init failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -463,8 +590,12 @@ pub(crate) async fn download_for_queue(source: &YouTubeSource, uri: &str) -> Res
 
 /// Decode-failure hint: without ffmpeg on `$PATH`, yt-dlp leaves the download
 /// as a fragmented DASH container some decoders reject.
-fn decode_hint(e: impl std::fmt::Display) -> String {
-  format!("Cannot play YouTube audio: {e} (installing ffmpeg fixes most container issues)")
+async fn decode_hint(app: &Arc<Mutex<App>>, e: impl std::fmt::Display) -> String {
+  crate::infra::app_strings(app)
+    .await
+    .status
+    .infra
+    .youtube_decode_failed(&e.to_string())
 }
 
 /// Begin playing a queue of YouTube videos, taking over the session and
@@ -482,7 +613,16 @@ async fn start_youtube_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx: 
     snapshot_tracks(&guard.track_table.tracks, search, uris)
   };
   if tracks.is_empty() {
-    set_error(app, "No YouTube videos to play".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .youtube_no_tracks
+        .to_string(),
+    )
+    .await;
     return;
   }
   let index = start_idx.min(tracks.len() - 1);
@@ -494,7 +634,12 @@ async fn start_youtube_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx: 
   if tracks[index].duration_ms == 0 && !is_placeholder(&tracks[index]) {
     set_error(
       app,
-      "Live streams aren't supported on the YouTube source yet".to_string(),
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .youtube_no_live
+        .to_string(),
     )
     .await;
     return;
@@ -503,7 +648,16 @@ async fn start_youtube_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx: 
   let video_id = match tracks[index].uri.as_deref().map(video_id_from_uri) {
     Some(Ok(id)) => id.to_string(),
     _ => {
-      set_error(app, "Invalid YouTube URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -521,14 +675,25 @@ async fn start_youtube_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx: 
   // yt-dlp can take a while; let the user know something is happening.
   {
     let mut guard = app.lock().await;
-    guard.set_status_message(format!("Fetching {}\u{2026}", tracks[index].name), 30);
+    {
+      let strings = guard.strings();
+      guard.set_status_message(strings.status.infra.fetching(&tracks[index].name), 30)
+    };
   }
 
   // Download off the lock, then decode on the blocking pool.
   let (tmp, resolved) = match download_audio(&source, &video_id).await {
     Ok(t) => t,
     Err(e) => {
-      set_error(app, format!("Cannot download YouTube audio: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_download_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -565,8 +730,18 @@ async fn start_youtube_queue(app: &Arc<Mutex<App>>, uris: &[String], start_idx: 
       guard.youtube_playback = Some(state);
       guard.set_status_message(format!("\u{266a} {display}"), 4);
     }
-    Ok(Err(e)) => set_error(app, decode_hint(e)).await,
-    Err(e) => set_error(app, format!("YouTube playback task failed: {e}")).await,
+    Ok(Err(e)) => set_error(app, decode_hint(app, e).await).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_task_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -628,7 +803,16 @@ async fn replay_current(app: &Arc<Mutex<App>>) -> bool {
     }
   } else {
     teardown_youtube(app).await;
-    set_error(app, "Cannot replay YouTube track".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .youtube_replay_failed
+        .to_string(),
+    )
+    .await;
   }
   true
 }
@@ -679,7 +863,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     }
     Plan::BadUri => {
       teardown_youtube(app).await;
-      set_error(app, "Invalid YouTube URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
     Plan::Live => {
@@ -689,7 +882,12 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
       teardown_youtube(app).await;
       set_error(
         app,
-        "Live streams aren't supported on the YouTube source yet".to_string(),
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_no_live
+          .to_string(),
       )
       .await;
       return;
@@ -698,14 +896,25 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
 
   {
     let mut guard = app.lock().await;
-    guard.set_status_message(format!("Fetching {name}\u{2026}"), 30);
+    {
+      let strings = guard.strings();
+      guard.set_status_message(strings.status.infra.fetching(&name), 30)
+    };
   }
 
   let (tmp, resolved) = match download_audio(&source, &video_id).await {
     Ok(t) => t,
     Err(e) => {
       teardown_youtube(app).await;
-      set_error(app, format!("Cannot download YouTube audio: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_download_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -732,11 +941,19 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     }
     Ok(Err(e)) => {
       teardown_youtube(app).await;
-      set_error(app, decode_hint(e)).await;
+      set_error(app, decode_hint(app, e).await).await;
     }
     Err(e) => {
       teardown_youtube(app).await;
-      set_error(app, format!("YouTube playback task failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .youtube_task_failed(&e.to_string()),
+      )
+      .await;
     }
   }
 }
@@ -802,6 +1019,7 @@ mod tests {
 
   fn video(uri: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(uri.to_string()),
       name: name.to_string(),
       artists: vec!["Channel".to_string()],

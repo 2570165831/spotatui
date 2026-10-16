@@ -225,7 +225,7 @@ async fn run_cli_inner() -> Result<()> {
   // credential task in the UI launch can hold its own handle.
   #[cfg(feature = "tui")]
   let onboarding: Arc<dyn crate::core::onboarding::Onboarding> =
-    Arc::new(crate::tui::onboarding::ConsoleOnboarding);
+    Arc::new(crate::tui::onboarding::ConsoleOnboarding::default());
   #[cfg(not(feature = "tui"))]
   let onboarding: Arc<dyn crate::core::onboarding::Onboarding> = Arc::new(HeadlessOnboarding);
 

@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { ArtistPayload } from "./bindings/ArtistPayload";
@@ -13,6 +14,7 @@ const POPULAR_MORE = 10;
 
 /** An artist page; `artist.page` is the last fetched artist, which can still be another one. */
 export function ArtistPage({
+  s = EN,
   id,
   name,
   artist,
@@ -20,6 +22,7 @@ export function ArtistPage({
   open,
   send,
 }: {
+  s?: GuiStrings;
   id: string;
   name: string;
   artist: ArtistPayload | null;
@@ -41,7 +44,7 @@ export function ArtistPage({
     return (
       <section className="artist-page">
         <PageHeader
-          kind="Artist"
+          kind={s.artist}
           title={name}
           image={null}
           round
@@ -74,7 +77,7 @@ export function ArtistPage({
   return (
     <section className="artist-page">
       <PageHeader
-        kind="Artist"
+        kind={s.artist}
         title={page.name}
         image={page.image_url}
         round
@@ -82,7 +85,7 @@ export function ArtistPage({
       />
       <div className="page-actions">
         <PlayButton
-          label={`Play ${page.name}`}
+          label={fmt(s.play_named, { name: page.name })}
           large
           onClick={() =>
             send({ PlayContext: { uri: `spotify:artist:${id}`, offset: null } })
@@ -96,14 +99,15 @@ export function ArtistPage({
             send(page.following ? { UnfollowArtist: id } : { FollowArtist: id })
           }
         >
-          {page.following ? "Following" : "Follow"}
+          {page.following ? s.following : s.follow}
         </button>
       </div>
       {shown.length > 0 && (
-        <section className="page-section" aria-label="Popular">
-          <h2>Popular</h2>
+        <section className="page-section" aria-label={s.popular}>
+          <h2>{s.popular}</h2>
           <TrackTable
-            label="Popular"
+            s={s}
+            label={s.popular}
             idPrefix="artist"
             tracks={shown}
             cursor={cursor}
@@ -121,18 +125,19 @@ export function ArtistPage({
               className="text-action"
               onClick={() => setMore((shows) => !shows)}
             >
-              {more ? "Show less" : "See more"}
+              {more ? s.show_less : s.see_more}
             </button>
           )}
         </section>
       )}
       {page.albums.length > 0 && (
-        <Shelf oneRow title="Discography">
+        <Shelf s={s} oneRow title={s.discography}>
           {page.albums.map((album, index) => {
             const year = yearOf(album.release_date);
-            const kind = albumKind(album.album_type);
+            const kind = albumKind(album.album_type, s);
             return (
               <Card
+                s={s}
                 key={album.id ?? `${index}-${album.name}`}
                 image={album.image_url}
                 title={album.name}
@@ -148,13 +153,14 @@ export function ArtistPage({
         </Shelf>
       )}
       {related.length > 0 && (
-        <Shelf oneRow title="Fans also like">
+        <Shelf s={s} oneRow title={s.fans_also_like}>
           {related.map((entry) => (
             <Card
+              s={s}
               key={entry.id}
               image={entry.image_url}
               title={entry.name}
-              subtitle="Artist"
+              subtitle={s.artist}
               round
               onOpen={() =>
                 open({ page: "artist", id: entry.id, name: entry.name })

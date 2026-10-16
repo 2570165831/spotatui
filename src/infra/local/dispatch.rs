@@ -227,7 +227,16 @@ async fn replay_current(app: &Arc<Mutex<App>>) -> bool {
     if let Some(local) = ended {
       Arc::clone(&local.player).stop_detached_holding(local);
     }
-    set_error(app, "Cannot replay local file".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .local_replay_failed
+        .to_string(),
+    )
+    .await;
   }
   true
 }
@@ -247,7 +256,16 @@ async fn player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
 /// auto-advance reuse [`play_index`] against the queue published here.
 async fn start_local_queue(app: &Arc<Mutex<App>>, queue: Vec<String>, start_idx: usize) {
   if queue.is_empty() {
-    set_error(app, "No local tracks to play".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .local_no_tracks
+        .to_string(),
+    )
+    .await;
     return;
   }
   let index = start_idx.min(queue.len() - 1);
@@ -255,7 +273,15 @@ async fn start_local_queue(app: &Arc<Mutex<App>>, queue: Vec<String>, start_idx:
   let path = match file_uri_to_path(&queue[index]) {
     Ok(path) => path,
     Err(e) => {
-      set_error(app, format!("Invalid local file URI: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_uri_invalid(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -297,13 +323,14 @@ async fn start_local_queue(app: &Arc<Mutex<App>>, queue: Vec<String>, start_idx:
       // Publish the session exactly once, now that the source is decoding.
       // Publish-once covers the empty-sink race here: `local_playback` is `None`
       // throughout the decode above, so `advancing` starts `false`.
-      let display_name = info.name.clone();
       let mut app = app.lock().await;
+      let display_name = info.display_name(app.strings()).to_owned();
       let mut state = LocalPlaybackState {
         player,
         queue,
         index,
         name: info.name,
+        generated_name: info.generated_name,
         artists: info.artists.join(", "),
         album: info.album,
         duration_ms: info.duration_ms,
@@ -321,8 +348,28 @@ async fn start_local_queue(app: &Arc<Mutex<App>>, queue: Vec<String>, start_idx:
       app.local_playback = Some(state);
       app.set_status_message(format!("\u{266a} {display_name}"), 4);
     }
-    Ok(Err(e)) => set_error(app, format!("Cannot play local file: {e}")).await,
-    Err(e) => set_error(app, format!("Local playback task failed: {e}")).await,
+    Ok(Err(e)) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_play_failed(&e.to_string()),
+      )
+      .await
+    }
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_task_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -381,7 +428,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
     Ok(path) => path,
     Err(e) => {
       // Commit the index so the tick advances past this entry, then surface.
-      fail_index(app, target, format!("Invalid local file URI: {e}")).await;
+      fail_index(
+        app,
+        target,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_uri_invalid(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -397,12 +453,10 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
 
   match result {
     Ok(Ok(info)) => {
-      let display_name = info.name.clone();
-      commit_index(app, target, info).await;
-      app
-        .lock()
-        .await
-        .set_status_message(format!("\u{266a} {display_name}"), 4);
+      let mut guard = app.lock().await;
+      let display_name = info.display_name(guard.strings()).to_owned();
+      commit_index(&mut guard, target, info);
+      guard.set_status_message(format!("\u{266a} {display_name}"), 4);
     }
     Ok(Err(e)) => {
       // `stage_file` clears the sink before any fallible step, so on a normal
@@ -411,7 +465,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
       // defense-in-depth: it is idempotent and guarantees no stale audio even if
       // the blocking closure failed *before* reaching `stage_file`.
       Arc::clone(&player).stop_detached();
-      fail_index(app, target, format!("Cannot play local file: {e}")).await;
+      fail_index(
+        app,
+        target,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_play_failed(&e.to_string()),
+      )
+      .await;
     }
     Err(e) => {
       // The blocking task panicked (e.g. inside the tag read) *before*
@@ -419,7 +482,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
       // Stop it explicitly so the empty sink lets the tick auto-advance instead
       // of dead-ending on a stale track with a silently moved index.
       Arc::clone(&player).stop_detached();
-      fail_index(app, target, format!("Local playback task failed: {e}")).await;
+      fail_index(
+        app,
+        target,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_task_failed(&e.to_string()),
+      )
+      .await;
     }
   }
 }
@@ -429,17 +501,13 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize) {
 /// the previous metadata in place (the empty sink + moved index lets the tick
 /// carry on past the bad track).
 ///
-async fn commit_index(
-  app: &Arc<Mutex<App>>,
-  target: usize,
-  info: crate::core::plugin_api::TrackInfo,
-) {
-  let mut guard = app.lock().await;
+fn commit_index(guard: &mut App, target: usize, info: crate::core::plugin_api::TrackInfo) {
   if let Some(local) = guard.local_playback.as_mut() {
     local.index = target;
     local.advancing = false;
     local.failed_since_played.clear();
     local.name = info.name;
+    local.generated_name = info.generated_name;
     local.artists = info.artists.join(", ");
     local.album = info.album;
     local.duration_ms = info.duration_ms;
@@ -479,7 +547,15 @@ async fn fail_index(app: &Arc<Mutex<App>>, target: usize, msg: String) {
   match exhausted {
     Some(local) => {
       Arc::clone(&local.player).stop_detached_holding(local);
-      set_error(app, format!("{msg} — no playable tracks left, stopping")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_exhausted(&msg),
+      )
+      .await;
     }
     None => set_error(app, msg).await,
   }
@@ -497,11 +573,27 @@ async fn acquire_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(player)) => Some(Arc::new(player)),
     Ok(Err(e)) => {
-      set_error(app, format!("No audio output for local playback: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_error(app, format!("Audio output init failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -535,7 +627,12 @@ async fn music_root(app: &Arc<Mutex<App>>) -> Option<String> {
   if root.is_none() {
     set_error(
       app,
-      "No local music folder configured (set behavior.local_music_path)".to_string(),
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .local_no_folder
+        .to_string(),
     )
     .await;
   }
@@ -560,8 +657,28 @@ async fn load_local_playlists(app: &Arc<Mutex<App>>) {
       *app.local_playlists_mut() = playlists;
       app.view.local_playlists_index = 0;
     }
-    Ok(Err(e)) => set_error(app, format!("Cannot scan music folder: {e}")).await,
-    Err(e) => set_error(app, format!("Local folder scan failed: {e}")).await,
+    Ok(Err(e)) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_scan_failed(&e.to_string()),
+      )
+      .await
+    }
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_scan_task_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -581,7 +698,27 @@ async fn load_local_tracks(app: &Arc<Mutex<App>>, playlist_uri: &str) {
       let mut app = app.lock().await;
       app.set_source_track_table(playlist_uri, tracks, TrackTableContext::LocalPlaylist);
     }
-    Ok(Err(e)) => set_error(app, format!("Cannot read folder: {e}")).await,
-    Err(e) => set_error(app, format!("Local track scan failed: {e}")).await,
+    Ok(Err(e)) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_read_failed(&e.to_string()),
+      )
+      .await
+    }
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .local_tracks_scan_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }

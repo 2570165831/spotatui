@@ -203,6 +203,7 @@ mod tests {
 
   fn track(id: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(format!("spotify:track:{id}")),
       name: name.to_string(),
       artists: vec!["Artist".to_string()],

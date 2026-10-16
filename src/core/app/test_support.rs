@@ -33,6 +33,7 @@ pub(super) fn full_track(id: &str, name: &str) -> FullTrack {
 
 pub(super) fn queue_track(uri: Option<&str>, name: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: uri.map(|u| u.to_string()),
     name: name.to_string(),
     artists: vec!["Artist".to_string()],

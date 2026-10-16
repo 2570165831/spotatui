@@ -79,15 +79,10 @@ pub struct DjLibrary {
 
 impl DjLibrary {
   /// One line for the transcript, so the cost of the crawl is visible.
-  pub fn summary(&self) -> String {
-    let mut text = format!(
-      "Indexed {} track(s) across {} playlist(s)",
-      self.tracks, self.playlists
-    );
+  pub fn summary_with(&self, strings: &crate::core::i18n::Strings) -> String {
+    let mut text = strings.status.infra.dj_indexed(self.tracks, self.playlists);
     if self.truncated {
-      text.push_str(&format!(
-        " (stopped at {MAX_LIBRARY_TRACKS}; the rest is not filtered)"
-      ));
+      text.push_str(&strings.status.infra.dj_index_capped(MAX_LIBRARY_TRACKS));
     }
     text
   }
@@ -98,7 +93,7 @@ impl DjLibrary {
 /// Lives here rather than in [`tools`] because it is needed with or without a
 /// front door compiled in.
 pub fn current_track_label(app: &crate::core::app::App) -> Option<String> {
-  let snapshot = crate::infra::media_metadata::current_playback_snapshot(app)?;
+  let snapshot = crate::infra::media_metadata::tracking_playback_snapshot(app)?;
   Some(format!(
     "{} — {}",
     snapshot.metadata.title,

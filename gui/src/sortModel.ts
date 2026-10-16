@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { Source } from "./bindings/Source";
 import type { TrackInfo } from "./bindings/TrackInfo";
@@ -18,19 +19,24 @@ export interface ShownRow {
 }
 
 /** The sort select's options, the values `behavior.default_sort_playlist_tracks` takes. */
-export const SORT_OPTIONS: { value: string; label: string }[] = [
-  { value: "default", label: "Custom order" },
-  { value: "name", label: "Title (A-Z)" },
-  { value: "name:desc", label: "Title (Z-A)" },
-  { value: "date_added", label: "Date added (oldest first)" },
-  { value: "date_added:desc", label: "Date added (newest first)" },
-  { value: "artist", label: "Artist (A-Z)" },
-  { value: "artist:desc", label: "Artist (Z-A)" },
-  { value: "album", label: "Album (A-Z)" },
-  { value: "album:desc", label: "Album (Z-A)" },
-  { value: "duration", label: "Duration (shortest first)" },
-  { value: "duration:desc", label: "Duration (longest first)" },
-];
+export function sortOptions(
+  s: GuiStrings = EN,
+): { value: string; label: string }[] {
+  return [
+    { value: "default", label: s.sort_custom },
+    { value: "name", label: s.sort_title },
+    { value: "name:desc", label: s.sort_title_desc },
+    { value: "date_added", label: s.sort_date },
+    { value: "date_added:desc", label: s.sort_date_desc },
+    { value: "artist", label: s.sort_artist },
+    { value: "artist:desc", label: s.sort_artist_desc },
+    { value: "album", label: s.sort_album },
+    { value: "album:desc", label: s.sort_album_desc },
+    { value: "duration", label: s.sort_duration },
+    { value: "duration:desc", label: s.sort_duration_desc },
+  ];
+}
+export const SORT_OPTIONS = sortOptions();
 
 const FIELDS: readonly SortField[] = [
   "default",

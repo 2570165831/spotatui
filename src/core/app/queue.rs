@@ -12,7 +12,7 @@ impl App {
   /// Add an item to the Spotify Web API queue of the active device.
   pub(crate) fn add_to_spotify_queue(&mut self, uri: String) {
     if self.apple_music_owns_playback() || uri.starts_with("applemusic:") {
-      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      self.set_status_message(self.strings().status.app.music_cannot_queue, 4);
       return;
     }
     // No device holds a Spotify queue while the native backend is parked.
@@ -32,19 +32,19 @@ impl App {
   pub fn add_track_to_native_queue(&mut self, track: TrackInfo) {
     // Music keeps its own queue, which spotatui can't reach.
     if self.apple_music_owns_playback() {
-      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      self.set_status_message(self.strings().status.app.music_cannot_queue, 4);
       return;
     }
     let Some(uri) = track.uri.clone() else {
-      self.set_status_message("Cannot queue: track has no URI", 3);
+      self.set_status_message(self.strings().status.app.queue_no_uri, 3);
       return;
     };
     if uri.starts_with("radio:") {
-      self.set_status_message("Radio stations can't be queued", 3);
+      self.set_status_message(self.strings().status.app.radio_cannot_queue, 3);
       return;
     }
     if uri.starts_with("applemusic:") {
-      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 3);
+      self.set_status_message(self.strings().status.app.music_cannot_queue, 3);
       return;
     }
     // A Spotify track controlled on an external device has no native sink to
@@ -57,13 +57,13 @@ impl App {
       self.dispatch(IoEvent::AddItemToQueue(uri));
       return;
     }
-    let name = track.name.clone();
+    let name = track.display_name(self.strings()).to_owned();
     self.native_queue.push(track);
     info!(
       "queued {uri} at position {} of the native queue",
       self.native_queue.len()
     );
-    self.set_status_message(format!("Queued: {name}"), 3);
+    self.set_status_message(self.strings().status.app.queued(&name), 3);
     // Keep the Spotify mirror queue ([`Self::queue`]) current while a native
     // Spotify context is playing: it is the snapshot source for the resume
     // target when this newly-queued item later suspends the context.
@@ -94,7 +94,7 @@ impl App {
   /// the queue, suspending a playing context mid-track first.
   pub(crate) fn play_queue_item(&mut self, uri: &str, position: usize) {
     if self.apple_music_owns_playback() || uri.starts_with("applemusic:") {
-      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      self.set_status_message(self.strings().status.app.music_cannot_queue, 4);
       return;
     }
     let Some(skip) = self.queue_position_for(uri, position) else {
@@ -244,7 +244,11 @@ impl App {
   /// for the Queue screen's "Now playing" row. `None` when the slot is empty.
   pub fn queue_now_display(&self) -> Option<String> {
     let track = self.queue_now_track()?;
-    Some(format!("{} - {}", track.name, track.artists.join(", ")))
+    Some(format!(
+      "{} - {}",
+      track.display_name(self.strings()),
+      track.artists.join(", ")
+    ))
   }
 
   /// Handle a native-streaming `EndOfTrack` while the native queue is in play.

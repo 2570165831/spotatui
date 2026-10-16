@@ -1,3 +1,6 @@
+import { useStringsReader } from "./useStringsReader";
+import { copyLink } from "./pagesModel";
+import { EN, type GuiStrings } from "./i18n";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { NowPlaying } from "./bindings/NowPlaying";
@@ -22,6 +25,7 @@ import { usePosition } from "./usePosition";
 
 /** The listening party: host or join, then the room with the listeners and the host's queue. */
 export function Party({
+  s = EN,
   party,
   connected,
   item,
@@ -30,6 +34,7 @@ export function Party({
   active,
   send,
 }: {
+  s?: GuiStrings;
   party: PartyPayload | null;
   connected: boolean;
   item: NowPlaying | null;
@@ -48,9 +53,10 @@ export function Party({
       ?.focus();
   }, [view, active]);
   if (!party || !room)
-    return <Start party={party} connected={connected} send={send} />;
+    return <Start s={s} party={party} connected={connected} send={send} />;
   return (
     <Room
+      s={s}
       party={party}
       room={room}
       item={item}
@@ -63,10 +69,12 @@ export function Party({
 }
 
 function Start({
+  s = EN,
   party,
   connected,
   send,
 }: {
+  s?: GuiStrings;
   party: PartyPayload | null;
   connected: boolean;
   send: (action: Action) => void;
@@ -84,23 +92,15 @@ function Start({
   return (
     <div className="party" data-focus tabIndex={-1}>
       <div className="party-head">
-        <h1>Listening party</h1>
-        <span>
-          {connecting
-            ? "Connecting…"
-            : "Listen together: everyone plays the same Spotify song at the same moment."}
-        </span>
+        <h1>{s.listening_party}</h1>
+        <span>{connecting ? s.connecting : s.party_intro}</span>
       </div>
-      {!available && (
-        <p className="notice-line">
-          A listening party needs a Spotify session.
-        </p>
-      )}
+      {!available && <p className="notice-line">{s.party_needs_spotify}</p>}
       <div className="party-start">
-        <section aria-label="Host a party">
-          <span className="label">Host</span>
-          <h2>Start a party</h2>
-          <p>You get a code to share. Guests hear what you play on Spotify.</p>
+        <section aria-label={s.host_party}>
+          <span className="label">{s.host}</span>
+          <h2>{s.start_party}</h2>
+          <p>{s.party_host_intro}</p>
           <button
             type="button"
             className="primary"
@@ -110,12 +110,12 @@ function Start({
               send("StartParty");
             }}
           >
-            Start a party
+            {s.start_party}
           </button>
         </section>
-        <section aria-label="Join a party">
-          <span className="label">Join</span>
-          <h2>Join a party</h2>
+        <section aria-label={s.join_party}>
+          <span className="label">{s.join}</span>
+          <h2>{s.join_party}</h2>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -126,7 +126,7 @@ function Start({
             }}
           >
             <label>
-              <span>Code</span>
+              <span>{s.code}</span>
               <input
                 type="text"
                 value={code}
@@ -137,17 +137,17 @@ function Start({
               />
             </label>
             <label>
-              <span>Your name</span>
+              <span>{s.your_name}</span>
               <input
                 type="text"
                 value={name}
-                placeholder="Sam"
+                placeholder={s.name_placeholder}
                 disabled={disabled}
                 onChange={(event) => setName(normalizeName(event.target.value))}
               />
             </label>
             <button type="submit" disabled={disabled || !join}>
-              Join
+              {s.join}
             </button>
           </form>
         </section>
@@ -157,6 +157,7 @@ function Start({
 }
 
 function Room({
+  s = EN,
   party,
   room,
   item,
@@ -165,6 +166,7 @@ function Room({
   active,
   send,
 }: {
+  s?: GuiStrings;
   party: PartyPayload;
   room: PartyRoom;
   item: NowPlaying | null;
@@ -173,6 +175,7 @@ function Room({
   active: boolean;
   send: (action: Action) => void;
 }) {
+  const readStrings = useStringsReader(s);
   const [confirming, setConfirming] = useState(false);
   const [want, setWant] = useState<QueueCursor>({ index: 0, uri: null });
   const playingUri = item?.uri ?? null;
@@ -193,11 +196,14 @@ function Room({
 
   const copy = () => {
     if (!room.code) return;
-    const failed = () =>
-      send({ NotifyError: ["Could not copy the party code.", 4] });
-    const write = navigator.clipboard?.writeText(room.code);
-    if (!write) return failed();
-    write.then(() => send({ Notify: ["Copied the party code.", 3] }), failed);
+    void copyLink(
+      room.code,
+      "copy_party_done",
+      send,
+      navigator.clipboard,
+      readStrings,
+      "copy_party_failed",
+    );
   };
   const leave = () => {
     if (room.host && !confirming) setConfirming(true);
@@ -228,44 +234,44 @@ function Room({
   return (
     <div className="party" tabIndex={-1} data-focus onKeyDown={onKeyDown}>
       <div className="party-head">
-        <h1>Listening party</h1>
-        <span>{headline(party)}</span>
+        <h1>{s.listening_party}</h1>
+        <span>{headline(party, s)}</span>
         {room.code ? (
           <button type="button" className="code" onClick={copy}>
-            {room.code} <kbd>y copy</kbd>
+            {room.code} <kbd>{s.copy_hint}</kbd>
           </button>
         ) : (
-          <span className="code">Getting a code…</span>
+          <span className="code">{s.getting_code}</span>
         )}
         {confirming ? (
-          <span className="confirm" role="group" aria-label="End the party">
-            End it for everyone?
+          <span className="confirm" role="group" aria-label={s.end_party_label}>
+            {s.end_party_question}
             <button type="button" className="danger" onClick={leave}>
-              End party
+              {s.end_party}
             </button>
             <button
               type="button"
               autoFocus
               onClick={() => setConfirming(false)}
             >
-              Keep it
+              {s.keep_it}
             </button>
           </span>
         ) : (
           <button type="button" onClick={leave}>
-            {room.host ? "End party" : "Leave party"}
+            {room.host ? s.end_party : s.leave_party}
           </button>
         )}
       </div>
       <div className="party-room">
-        <section aria-label="Everyone hears">
+        <section aria-label={s.everyone_hears}>
           <span className="label">
-            {following ? "Everyone hears" : "You hear"}
+            {following ? s.everyone_hears : s.you_hear}
           </span>
           <div className="hears">
             <Cover src={item?.image_url} size={120} />
             <div>
-              <span className="song">{item?.title ?? "Nothing playing"}</span>
+              <span className="song">{item?.title ?? s.nothing_playing}</span>
               {item && (
                 <span className="meta">
                   {[item.artists.join(", "), item.album]
@@ -278,20 +284,12 @@ function Room({
             </div>
           </div>
           {room.host && !live && (
-            <p className="hint">
-              Guests follow Spotify songs only. They keep the last one until you
-              play Spotify again.
-            </p>
+            <p className="hint">{s.spotify_follow_only}</p>
           )}
-          {!following && (
-            <p className="hint">
-              You stopped following the host: your own playback has the speaker.
-              Play a Spotify song or wait for the next one to follow again.
-            </p>
-          )}
-          <span className="label">Each listener plays their own copy</span>
+          {!following && <p className="hint">{s.stopped_following}</p>}
+          <span className="label">{s.each_own_copy}</span>
           <ul className="listeners">
-            {listeners(room).map((listener, index) => (
+            {listeners(room, s).map((listener, index) => (
               <li key={`${index}-${listener.name}`}>
                 <span
                   className="avatar-dot"
@@ -311,31 +309,31 @@ function Room({
                 checked={room.shared_control}
                 onChange={() => send("TogglePartyControlMode")}
               />
-              Guests can control playback <kbd>c</kbd>
+              {s.guest_controls} <kbd>c</kbd>
             </label>
           )}
         </section>
-        <section aria-label="Up next">
+        <section aria-label={s.up_next}>
           <div className="section-head">
-            <h2>Up next</h2>
-            {room.host && <kbd>J K move · x remove</kbd>}
+            <h2>{s.up_next}</h2>
+            {room.host && <kbd>{s.queue_keys}</kbd>}
           </div>
           {!room.host ? (
-            <p className="empty">The host picks the songs.</p>
+            <p className="empty">{s.host_picks_songs}</p>
           ) : native.length === 0 && mirror.length === 0 ? (
-            <p className="empty">Nothing is queued.</p>
+            <p className="empty">{s.nothing_queued}</p>
           ) : (
             <>
               <div className="qrow head" aria-hidden="true">
                 <span>#</span>
                 <span />
-                <span>Song</span>
-                <span>Guests</span>
+                <span>{s.song}</span>
+                <span>{s.guests}</span>
               </div>
               {native.length > 0 && (
                 <ol
                   role="listbox"
-                  aria-label="Your queue"
+                  aria-label={s.your_queue}
                   aria-activedescendant={`party-q-${cursor}`}
                   tabIndex={0}
                   onKeyDown={(event) => {
@@ -362,7 +360,7 @@ function Room({
                         <b>{track.name}</b>
                         <span>{track.artists.join(", ")}</span>
                       </span>
-                      <span className="only">only you</span>
+                      <span className="only">{s.only_you}</span>
                     </li>
                   ))}
                 </ol>
@@ -379,7 +377,7 @@ function Room({
                       <b>{track.name}</b>
                       <span>{track.artists.join(", ")}</span>
                     </span>
-                    <span>guests follow</span>
+                    <span>{s.guests_follow}</span>
                   </li>
                 ))}
               </ol>
@@ -390,8 +388,8 @@ function Room({
       <KeyHints
         hints={
           room.host
-            ? ["y copy code", "c guest control", "L end party"]
-            : ["y copy code", "L leave"]
+            ? [s.hint_copy_code, s.hint_guest_control, s.hint_end_party]
+            : [s.hint_copy_code, s.hint_leave]
         }
       />
     </div>

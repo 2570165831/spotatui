@@ -1,3 +1,5 @@
+import { useStringsReader } from "./useStringsReader";
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { AlbumInfo } from "./bindings/AlbumInfo";
@@ -19,6 +21,7 @@ import { PageHeader, PlayButton } from "./ui";
 
 /** An album page; `album` is the last fetched album, which can still be another one. */
 export function AlbumPage({
+  s = EN,
   id,
   album,
   saved,
@@ -26,6 +29,7 @@ export function AlbumPage({
   open,
   send,
 }: {
+  s?: GuiStrings;
   id: string;
   album: AlbumInfo | null;
   /** The album is in the user's library. */
@@ -34,6 +38,7 @@ export function AlbumPage({
   open: OpenView;
   send: (action: Action) => void;
 }) {
+  const readStrings = useStringsReader(s);
   const [want, setWant] = useState(0);
   const [shownId, setShownId] = useState(id);
   if (shownId !== id) {
@@ -44,7 +49,12 @@ export function AlbumPage({
   if (!album || album.id !== id)
     return (
       <section className="album-page">
-        <PageHeader kind="Album" title="Loading…" image={null} tone="album" />
+        <PageHeader
+          kind={s.album}
+          title={s.loading}
+          image={null}
+          tone="album"
+        />
       </section>
     );
 
@@ -65,14 +75,14 @@ export function AlbumPage({
       send({ QueueTrack: tracks[cursor] });
   };
   const year = yearOf(album.release_date);
-  const released = releaseLine(album.release_date);
+  const released = releaseLine(album.release_date, s);
   const albumId = album.id;
-  const saveLabel = saved ? "Remove from Your Library" : "Save to Your Library";
+  const saveLabel = saved ? s.remove_from_library : s.save_to_library;
 
   return (
     <section className="album-page">
       <PageHeader
-        kind={albumKind(album.album_type)}
+        kind={albumKind(album.album_type, s)}
         title={album.name}
         image={album.image_url}
         tone="album"
@@ -98,13 +108,13 @@ export function AlbumPage({
               </span>
             ))}
             {year && <span className="meta-dot">{year}</span>}
-            <span className="meta-dot">{lengthLine(tracks)}</span>
+            <span className="meta-dot">{lengthLine(tracks, s)}</span>
           </>
         }
       />
       <div className="page-actions">
         <PlayButton
-          label={`Play ${album.name}`}
+          label={fmt(s.play_named, { name: album.name })}
           large
           disabled={tracks.length === 0}
           onClick={() => play(0)}
@@ -126,16 +136,17 @@ export function AlbumPage({
         <button
           type="button"
           className="icon-action"
-          aria-label="Copy album link"
-          title="Copy album link"
+          aria-label={s.copy_album_link}
+          title={s.copy_album_link}
           disabled={!albumId}
           onClick={() =>
             albumId &&
             void copyLink(
               `https://open.spotify.com/album/${albumId}`,
-              "Copied the album link.",
+              "copied_album_link",
               send,
               navigator.clipboard,
+              readStrings,
             )
           }
         >
@@ -144,6 +155,7 @@ export function AlbumPage({
       </div>
       <div className="page-tracks">
         <TrackTable
+          s={s}
           label={album.name}
           idPrefix="album"
           tracks={tracks}

@@ -65,19 +65,19 @@ impl App {
 
   pub fn copy_friend_code(&mut self) {
     let Some(code) = self.friend_code.clone() else {
-      self.set_status_message("Friend code not loaded yet", 3);
+      self.set_status_message(self.strings().status.app.friend_code_loading, 3);
       return;
     };
 
     let Some(clipboard) = &mut self.clipboard else {
-      self.set_status_message("Clipboard not available", 3);
+      self.set_status_message(self.strings().status.app.clipboard_unavailable, 3);
       return;
     };
 
     if clipboard.set_text(code.clone()).is_ok() {
-      self.set_status_message(format!("Copied friend code: {}", code), 3);
+      self.set_status_message(self.strings().status.app.friend_code_copied(&code), 3);
     } else {
-      self.set_status_message("Failed to copy to clipboard", 3);
+      self.set_status_message(self.strings().status.app.clipboard_copy_failed, 3);
     }
   }
 

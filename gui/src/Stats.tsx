@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { memo, useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { StatsPayload } from "./bindings/StatsPayload";
@@ -9,24 +10,26 @@ import {
   cyclesTo,
   groupThousands,
   moveText,
-  PERIODS,
+  periods,
   playable,
   sentence,
 } from "./statsModel";
 
 const SHOWN = 10;
 const PLAYS_ROW = ["7d", "30d", "all"];
-const PLAYS_LABEL: Record<string, string> = {
-  "7d": "plays in the last 7 days",
-  "30d": "plays in the last 30 days",
-  all: "plays, all time",
-};
+const playsLabels = (s: GuiStrings): Record<string, string> => ({
+  "7d": s.plays_seven_days,
+  "30d": s.plays_thirty_days,
+  all: s.plays_all_time,
+});
 
 /** The Stats screen: plays per period, rank movements and the top lists, from local history. */
 export const Stats = memo(function Stats({
+  s = EN,
   stats,
   send,
 }: {
+  s?: GuiStrings;
   stats: StatsPayload | null;
   send: (action: Action) => void;
 }) {
@@ -89,9 +92,9 @@ export const Stats = memo(function Stats({
       onKeyDown={onKeyDown}
     >
       <div className="stats-head">
-        <h1>Stats</h1>
-        <div role="tablist" aria-label="Period">
-          {PERIODS.map((entry) => (
+        <h1>{s.stats}</h1>
+        <div role="tablist" aria-label={s.period}>
+          {periods(s).map((entry) => (
             <button
               key={entry.key}
               type="button"
@@ -103,18 +106,14 @@ export const Stats = memo(function Stats({
             </button>
           ))}
         </div>
-        <kbd>[ ] change period · e export</kbd>
+        <kbd>{s.period_export_hint}</kbd>
       </div>
       {!stats?.loaded ? (
         <p className="empty">
-          {stats?.loading
-            ? "Loading…"
-            : "Your listening history is not loaded."}
+          {stats?.loading ? s.loading : s.history_not_loaded}
         </p>
       ) : noHistory ? (
-        <p className="empty">
-          No listening history recorded yet. Play something!
-        </p>
+        <p className="empty">{s.no_listening_history}</p>
       ) : (
         <>
           <div className="stats-plays">
@@ -123,12 +122,12 @@ export const Stats = memo(function Stats({
                 <div className={key === period ? "big current" : "big"}>
                   {groupThousands(plays(key))}
                 </div>
-                <div className="label">{PLAYS_LABEL[key]}</div>
+                <div className="label">{playsLabels(s)[key]}</div>
               </div>
             ))}
             <div className="movements">
               {stats.movements.map((movement) => {
-                const [before, mark, after] = sentence(movement, period);
+                const [before, mark, after] = sentence(movement, period, s);
                 return (
                   <span key={`${movement.kind}-${movement.name}`}>
                     {before}
@@ -140,16 +139,16 @@ export const Stats = memo(function Stats({
             </div>
           </div>
           {emptyPeriod ? (
-            <p className="empty">No plays in this period yet.</p>
+            <p className="empty">{s.no_period_plays}</p>
           ) : (
             <div className="stats-lists">
-              <section aria-label="Top artists">
+              <section aria-label={s.top_artists}>
                 <div className="list-head">
-                  <h2>Top artists</h2>
-                  {period !== "all" && <span>vs all time</span>}
+                  <h2>{s.top_artists}</h2>
+                  {period !== "all" && <span>{s.vs_all_time}</span>}
                 </div>
                 {stats.top_artists.slice(0, SHOWN).map((row, index) => {
-                  const move = moveText(row, index + 1);
+                  const move = moveText(row, index + 1, s);
                   return (
                     <div key={row.title} className="line artist">
                       <span className="n">{index + 1}</span>
@@ -161,9 +160,9 @@ export const Stats = memo(function Stats({
                   );
                 })}
               </section>
-              <section aria-label="Top albums">
+              <section aria-label={s.top_albums}>
                 <div className="list-head">
-                  <h2>Top albums</h2>
+                  <h2>{s.top_albums}</h2>
                 </div>
                 {stats.top_albums.slice(0, SHOWN).map((row, index) => (
                   <div key={row.title} className="line album">
@@ -172,19 +171,20 @@ export const Stats = memo(function Stats({
                   </div>
                 ))}
               </section>
-              <section aria-label="Top tracks">
+              <section aria-label={s.top_tracks}>
                 <div className="list-head">
-                  <h2>Top tracks</h2>
+                  <h2>{s.top_tracks}</h2>
                 </div>
                 <div
                   role="listbox"
-                  aria-label="Top tracks"
+                  aria-label={s.top_tracks}
                   tabIndex={0}
                   data-focus
                   aria-activedescendant={`stats-track-${cursor}`}
                 >
                   {tracks.map((row, index) => (
                     <Track
+                      s={s}
                       key={`${index}-${row.uri ?? row.title}`}
                       row={row}
                       index={index}
@@ -201,8 +201,8 @@ export const Stats = memo(function Stats({
             </div>
           )}
           {stats.week_tracks.length > 0 && (
-            <section className="week" aria-label="Last 7 days">
-              <h2>This week, top five</h2>
+            <section className="week" aria-label={s.last_seven_days}>
+              <h2>{s.week_top_five}</h2>
               {stats.week_tracks.map((row, index) => (
                 <div key={`${index}-${row.uri ?? row.title}`}>
                   <span className="rank">{index + 1}</span>
@@ -214,18 +214,22 @@ export const Stats = memo(function Stats({
           )}
         </>
       )}
-      <KeyHints hints={["[ ] period", "e export", "j k move", "enter play"]} />
+      <KeyHints
+        hints={[s.hint_period, s.hint_export, s.hint_move, s.hint_play]}
+      />
     </div>
   );
 });
 
 function Track({
+  s = EN,
   row,
   index,
   selected,
   onPick,
   onPlay,
 }: {
+  s?: GuiStrings;
   row: StatsRow;
   index: number;
   selected: boolean;
@@ -238,9 +242,7 @@ function Track({
       id={`stats-track-${index}`}
       aria-selected={selected}
       aria-disabled={playable(row.uri) ? undefined : true}
-      title={
-        playable(row.uri) ? undefined : "Only Spotify tracks play from Stats"
-      }
+      title={playable(row.uri) ? undefined : s.stats_spotify_only}
       className="line track"
       onClick={onPick}
       onDoubleClick={onPlay}

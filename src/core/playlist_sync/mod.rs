@@ -320,10 +320,86 @@ pub enum LinkOutcome {
   #[default]
   Ran,
   /// Nothing was attempted and nothing is wrong, such as a source not logged in.
-  Skipped(String),
+  Skipped(SyncReason),
   /// Something the source did answer went wrong; the text is what it said.
-  Failed(String),
+  Failed(SyncReason),
 }
+
+/// Keep application reasons structured so a saved report follows language changes.
+/// Provider errors remain literal; `Display` stays English for CLI output and logs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SyncReason {
+  NoMirrors,
+  SpotifyNotConnected,
+  #[cfg(feature = "qobuz")]
+  QobuzNotLoggedIn,
+  #[cfg(feature = "subsonic")]
+  SubsonicNotConfigured,
+  SourceNotCompiled {
+    source: Source,
+    feature: &'static str,
+  },
+  UnsupportedSource(Source),
+  Unreachable {
+    source: Source,
+    error: String,
+  },
+  Raw(String),
+}
+
+impl SyncReason {
+  pub fn render(&self, strings: &crate::core::i18n::Strings) -> String {
+    let status = &strings.status.infra;
+    match self {
+      Self::NoMirrors => strings.screens.no_mirrors.to_string(),
+      Self::SpotifyNotConnected => status.sync_spotify_not_connected.to_string(),
+      #[cfg(feature = "qobuz")]
+      Self::QobuzNotLoggedIn => status.sync_qobuz_not_logged_in.to_string(),
+      #[cfg(feature = "subsonic")]
+      Self::SubsonicNotConfigured => status.sync_subsonic_not_configured.to_string(),
+      Self::SourceNotCompiled { source, feature } => {
+        status.sync_source_not_compiled(strings.sidebar.source_label(*source), feature)
+      }
+      Self::UnsupportedSource(source) => {
+        status.sync_source_unsupported(strings.sidebar.source_label(*source))
+      }
+      Self::Unreachable { source, error } => {
+        status.sync_source_unreachable(strings.sidebar.source_label(*source), error)
+      }
+      Self::Raw(error) => error.clone(),
+    }
+  }
+
+  pub fn from_error(error: &anyhow::Error) -> Self {
+    // A provider may add context around any error; preserve that entire diagnostic.
+    if error.chain().count() == 1 {
+      if let Some(reason) = error.downcast_ref::<Self>() {
+        return reason.clone();
+      }
+    }
+    Self::Raw(format!("{error:#}"))
+  }
+}
+
+impl From<String> for SyncReason {
+  fn from(error: String) -> Self {
+    Self::Raw(error)
+  }
+}
+
+impl From<&str> for SyncReason {
+  fn from(error: &str) -> Self {
+    Self::Raw(error.to_string())
+  }
+}
+
+impl std::fmt::Display for SyncReason {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(&self.render(&crate::core::i18n::EN))
+  }
+}
+
+impl std::error::Error for SyncReason {}
 
 /// What one mirror did, folded into its link's report.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -414,13 +490,18 @@ impl LinkReport {
 
   /// This link's line in the CLI report.
   pub fn line(&self) -> String {
+    self.line_with(&crate::core::i18n::EN)
+  }
+
+  /// Render both the report and its reason with the current interface language.
+  pub fn line_with(&self, strings: &crate::core::i18n::Strings) -> String {
+    let screens = &strings.screens;
     match &self.outcome {
-      LinkOutcome::Ran => format!(
-        "{}: {} added, {} removed, {} unmatched",
-        self.name, self.added, self.removed, self.unmatched
-      ),
-      LinkOutcome::Skipped(why) => format!("{}: skipped ({why})", self.name),
-      LinkOutcome::Failed(why) => format!("{}: failed ({why})", self.name),
+      LinkOutcome::Ran => {
+        screens.sync_run_totals(&self.name, self.added, self.removed, self.unmatched)
+      }
+      LinkOutcome::Skipped(why) => screens.sync_run_skipped(&self.name, &why.render(strings)),
+      LinkOutcome::Failed(why) => screens.sync_run_failed(&self.name, &why.render(strings)),
     }
   }
 }
@@ -439,6 +520,102 @@ impl LinkOutcome {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn structured_sync_reasons_keep_english_diagnostics_and_follow_the_display_table() {
+    use crate::core::i18n::{EN, ZH_HANS, ZH_HANT};
+    let reasons = [
+      #[cfg(feature = "qobuz")]
+      (SyncReason::QobuzNotLoggedIn, "Qobuz is not logged in"),
+      #[cfg(feature = "subsonic")]
+      (
+        SyncReason::SubsonicNotConfigured,
+        "No Subsonic server configured (set behavior.subsonic_url)",
+      ),
+      (SyncReason::NoMirrors, "no mirrors"),
+      (SyncReason::SpotifyNotConnected, "Spotify is not connected"),
+      (
+        SyncReason::SourceNotCompiled {
+          source: Source::Qobuz,
+          feature: "qobuz",
+        },
+        "Qobuz is not compiled into this build (feature `qobuz`)",
+      ),
+      (
+        SyncReason::UnsupportedSource(Source::Local),
+        "Local Files playlists cannot be synced",
+      ),
+      (
+        SyncReason::Unreachable {
+          source: Source::Radio,
+          error: "{source}: HTTP 503".into(),
+        },
+        "Internet Radio unreachable: {source}: HTTP 503",
+      ),
+      (
+        SyncReason::Raw("{source}: provider detail".into()),
+        "{source}: provider detail",
+      ),
+    ];
+    for (reason, english) in reasons {
+      assert_eq!(reason.to_string(), english);
+      assert_eq!(
+        SyncReason::from_error(&anyhow::Error::new(reason.clone())),
+        reason
+      );
+      for strings in [&EN, &ZH_HANS, &ZH_HANT] {
+        let mut report = LinkReport::new("id", "{reason} 中文");
+        report.note(LinkOutcome::Skipped(reason.clone()));
+        assert_eq!(
+          report.line_with(strings),
+          strings
+            .screens
+            .sync_run_skipped("{reason} 中文", &reason.render(strings))
+        );
+        assert_eq!(
+          report.line(),
+          format!("{{reason}} 中文: skipped ({english})")
+        );
+        report.note(LinkOutcome::Failed(reason.clone()));
+        assert_eq!(
+          report.line_with(strings),
+          strings
+            .screens
+            .sync_run_failed("{reason} 中文", &reason.render(strings))
+        );
+      }
+    }
+    for strings in [&EN, &ZH_HANS, &ZH_HANT] {
+      assert_eq!(
+        SyncReason::UnsupportedSource(Source::Local).render(strings),
+        strings
+          .status
+          .infra
+          .sync_source_unsupported(strings.sidebar.source_label(Source::Local))
+      );
+      assert_eq!(
+        SyncReason::Unreachable {
+          source: Source::Radio,
+          error: "{source}: HTTP 503".into()
+        }
+        .render(strings),
+        strings.status.infra.sync_source_unreachable(
+          strings.sidebar.source_label(Source::Radio),
+          "{source}: HTTP 503"
+        )
+      );
+    }
+    let wrapped = anyhow::Error::new(SyncReason::NoMirrors).context("provider {detail}");
+    assert_eq!(
+      SyncReason::from_error(&wrapped).to_string(),
+      "provider {detail}: no mirrors"
+    );
+    let raw = anyhow::anyhow!("{{source}}: HTTP 503").context("provider detail");
+    assert_eq!(
+      SyncReason::from_error(&raw).to_string(),
+      "provider detail: {source}: HTTP 503"
+    );
+  }
 
   fn track(key: &str, title: &str, artist: &str, duration_ms: u64) -> SyncTrack {
     SyncTrack {
@@ -830,27 +1007,27 @@ mod tests {
       added: 1,
       removed: 0,
       unmatched: 1,
-      outcome: LinkOutcome::Skipped("Qobuz is not logged in".to_string()),
+      outcome: LinkOutcome::Skipped("Qobuz is not logged in".into()),
     });
     assert_eq!(report.added, 3);
     assert_eq!(report.removed, 1);
     assert_eq!(report.unmatched, 4);
     assert_eq!(
       report.outcome,
-      LinkOutcome::Skipped("Qobuz is not logged in".to_string())
+      LinkOutcome::Skipped("Qobuz is not logged in".into())
     );
 
-    report.note(LinkOutcome::Skipped("a later skip".to_string()));
+    report.note(LinkOutcome::Skipped("a later skip".into()));
     assert_eq!(
       report.outcome,
-      LinkOutcome::Skipped("Qobuz is not logged in".to_string())
+      LinkOutcome::Skipped("Qobuz is not logged in".into())
     );
 
-    report.note(LinkOutcome::Failed("429 rate limited".to_string()));
-    report.note(LinkOutcome::Skipped("too late".to_string()));
+    report.note(LinkOutcome::Failed("429 rate limited".into()));
+    report.note(LinkOutcome::Skipped("too late".into()));
     assert_eq!(
       report.outcome,
-      LinkOutcome::Failed("429 rate limited".to_string())
+      LinkOutcome::Failed("429 rate limited".into())
     );
   }
 
@@ -866,11 +1043,11 @@ mod tests {
     assert_eq!(ran.line(), "Road Trip: 3 added, 1 removed, 2 unmatched");
 
     let mut skipped = LinkReport::new("def456", "Focus");
-    skipped.note(LinkOutcome::Skipped("Spotify is not connected".to_string()));
+    skipped.note(LinkOutcome::Skipped("Spotify is not connected".into()));
     assert_eq!(skipped.line(), "Focus: skipped (Spotify is not connected)");
 
     let mut failed = LinkReport::new("ghi789", "Gym");
-    failed.note(LinkOutcome::Failed("429 rate limited".to_string()));
+    failed.note(LinkOutcome::Failed("429 rate limited".into()));
     assert_eq!(failed.line(), "Gym: failed (429 rate limited)");
   }
 
@@ -888,7 +1065,7 @@ mod tests {
       outcome: LinkOutcome::Ran,
     });
     let mut second = LinkReport::new("def456", "Focus");
-    second.note(LinkOutcome::Skipped("Qobuz is not logged in".to_string()));
+    second.note(LinkOutcome::Skipped("Qobuz is not logged in".into()));
 
     let mut report = SyncReport {
       links: vec![first, second],
@@ -919,7 +1096,7 @@ mod tests {
       "Playlist sync (dry run): 3 added, 1 removed, 2 unmatched"
     );
 
-    report.links[1].note(LinkOutcome::Failed("the write was refused".to_string()));
+    report.links[1].note(LinkOutcome::Failed("the write was refused".into()));
     assert!(report.failed());
 
     report.error = Some("429 rate limited".to_string());

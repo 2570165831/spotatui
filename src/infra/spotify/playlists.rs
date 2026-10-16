@@ -501,7 +501,7 @@ pub async fn remove_items(
     });
     anyhow::ensure!(
       !positioned,
-      "The playlist changed since it loaded; open it again and retry"
+      crate::core::i18n::LocalizedMessage::new(|s| s.status.infra.playlist_changed.to_string())
     );
     return Ok(json!({ "snapshot_id": hex(current.revision()) }));
   }

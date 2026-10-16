@@ -139,9 +139,16 @@ impl App {
   /// Every frontend dismisses through [`Self::clear_api_error`], and one that
   /// never dismisses gets the [`API_ERROR_TTL`] backstop on the tick.
   pub fn handle_error(&mut self, e: anyhow::Error) {
+    let message = e.to_string();
+    self.handle_error_with_message(e, message);
+  }
+
+  /// Keep the original diagnostic in the log while presenting a localized
+  /// message through the same error route, lifetime, and display revision.
+  pub fn handle_error_with_message(&mut self, e: anyhow::Error, message: String) {
     info!("error occurred: {}", e);
     self.push_navigation_stack(RouteId::Error, ActiveBlock::Error);
-    self.api_error = e.to_string();
+    self.api_error = message;
     self.api_error_expires_at = Some(Instant::now() + API_ERROR_TTL);
     self.display_revisions.bump(DisplayDomain::Status);
   }
@@ -373,5 +380,22 @@ mod tests {
     app.api_error_expires_at = Some(Instant::now() - Duration::from_secs(1));
     app.expire_api_error();
     assert_eq!((status_rev(&app), route_rev(&app)), (s0 + 2, r0 + 1));
+  }
+  #[test]
+  fn localized_errors_keep_the_same_route_lifetime_and_dismissal() {
+    let mut app = App::default();
+    let before = app.display_revisions().get(DisplayDomain::Status);
+    app.handle_error_with_message(
+      anyhow!("Original diagnostic"),
+      "无法播放：Original diagnostic".into(),
+    );
+    assert_eq!(app.api_error(), "无法播放：Original diagnostic");
+    assert_eq!(app.get_current_route().id, RouteId::Error);
+    assert!(app.api_error_expires_at.is_some());
+    assert!(app.display_revisions().get(DisplayDomain::Status) > before);
+    app.clear_api_error();
+    assert!(app.api_error().is_empty());
+    assert!(app.api_error_expires_at.is_none());
+    assert_ne!(app.get_current_route().id, RouteId::Error);
   }
 }

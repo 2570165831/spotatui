@@ -1057,6 +1057,7 @@ mod dj_actions {
 
   fn dj_track(uri: Option<&str>, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: uri.map(str::to_string),
       name: name.to_string(),
       artists: vec!["Artist".to_string()],
@@ -2239,7 +2240,7 @@ fn every_library_target_has_one_sidebar_row_with_a_distinct_label() {
   let rows = crate::core::app::library_row_requirements();
   let mut labels = Vec::new();
   for (target, _) in rows {
-    let label = target.name();
+    let label = target.localized_name(&crate::core::i18n::EN);
     assert!(!labels.contains(&label), "duplicate label {label}");
     labels.push(label);
   }
@@ -2258,7 +2259,12 @@ fn every_library_target_has_one_sidebar_row_with_a_distinct_label() {
       | LibraryTarget::Artists
       | LibraryTarget::Podcasts => true,
     };
-    assert_eq!(has_row(target), expected, "{}", target.name());
+    assert_eq!(
+      has_row(target),
+      expected,
+      "{}",
+      target.localized_name(&crate::core::i18n::EN)
+    );
   }
 }
 
@@ -2668,6 +2674,7 @@ fn open_playlist_folder_scopes_the_visible_items() {
   )];
   *app.playlist_folder_items_mut() = vec![
     PlaylistFolderItem::Folder(PlaylistFolder {
+      generated_name: false,
       name: "Mixes".to_string(),
       current_id: 0,
       target_id: 1,
@@ -3561,6 +3568,7 @@ fn toggle_sort_order_flips_the_recorded_direction_without_resorting() {
 
 fn queued(uri: &str, name: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri.to_string()),
     name: name.to_string(),
     artists: vec![],

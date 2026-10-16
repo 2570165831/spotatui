@@ -231,13 +231,6 @@ impl VisualizerStyle {
     &[VisualizerStyle::Cava, VisualizerStyle::BarGraph]
   }
 
-  pub fn name(&self) -> &'static str {
-    match self {
-      VisualizerStyle::Cava => "Cava",
-      VisualizerStyle::BarGraph => "Bar Graph",
-    }
-  }
-
   pub fn next(&self) -> Self {
     let styles = Self::all();
     let current_idx = styles.iter().position(|s| s == self).unwrap_or(0);
@@ -554,6 +547,7 @@ pub struct KeyBindings {
 
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BehaviorConfigString {
+  pub language: Option<crate::core::i18n::Language>,
   pub seek_milliseconds: Option<u32>,
   pub volume_increment: Option<u8>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -677,6 +671,7 @@ pub struct BehaviorConfigString {
 
 #[derive(Clone)]
 pub struct BehaviorConfig {
+  pub language: crate::core::i18n::Language,
   pub seek_milliseconds: u32,
   pub volume_increment: u8,
   /// User-configured initial volume default. It seeds `state.yml` only when
@@ -1215,6 +1210,7 @@ impl UserConfig {
       },
       plugin_command_keys: HashMap::new(),
       behavior: BehaviorConfig {
+        language: crate::core::i18n::Language::Auto,
         seek_milliseconds: 5 * 1000,
         volume_increment: 10,
         volume_percent: None,
@@ -1548,6 +1544,9 @@ impl UserConfig {
   }
 
   pub fn load_behaviorconfig(&mut self, behavior_config: BehaviorConfigString) -> Result<()> {
+    if let Some(language) = behavior_config.language {
+      self.behavior.language = language;
+    }
     if let Some(behavior_string) = behavior_config.seek_milliseconds {
       self.behavior.seek_milliseconds = behavior_string;
     }
@@ -2310,6 +2309,7 @@ impl UserConfig {
 
     // Helper to build behavior config from current values
     let build_behavior = || BehaviorConfigString {
+      language: Some(self.behavior.language),
       seek_milliseconds: Some(self.behavior.seek_milliseconds),
       volume_increment: Some(self.behavior.volume_increment),
       volume_percent: self.behavior.volume_percent,
@@ -3947,5 +3947,56 @@ playbar_control_labels:
       ])
     )
     .is_ok());
+  }
+}
+
+#[cfg(test)]
+mod language_tests {
+  use super::*;
+  use crate::core::i18n::Language;
+
+  #[test]
+  fn language_defaults_to_auto_and_each_choice_round_trips_through_the_config_file() {
+    assert_eq!(UserConfig::new().behavior.language, Language::Auto);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yml");
+    for language in [
+      Language::Auto,
+      Language::En,
+      Language::ZhHans,
+      Language::ZhHant,
+    ] {
+      let mut config = UserConfig::new();
+      config.path_to_config = Some(UserConfigPaths {
+        config_file_path: path.clone(),
+      });
+      config
+        .load_behaviorconfig(
+          serde_yaml::from_str(&format!("language: {}", language.as_str())).unwrap(),
+        )
+        .unwrap();
+      config.save_config().unwrap();
+      let saved: UserConfigString =
+        serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+      assert_eq!(saved.behavior.unwrap().language, Some(language));
+    }
+  }
+
+  #[test]
+  fn language_aliases_are_accepted_and_unknown_values_fall_back_to_auto() {
+    for (value, expected) in [
+      ("zh-CN", Language::ZhHans),
+      ("zh_CN", Language::ZhHans),
+      ("zh", Language::ZhHans),
+      ("ZH-HANS", Language::ZhHans),
+      ("zh_TW", Language::ZhHant),
+      ("fr", Language::Auto),
+      ("42", Language::Auto),
+      ("false", Language::Auto),
+    ] {
+      let config: BehaviorConfigString =
+        serde_yaml::from_str(&format!("language: {value}")).unwrap();
+      assert_eq!(config.language, Some(expected), "{value}");
+    }
   }
 }

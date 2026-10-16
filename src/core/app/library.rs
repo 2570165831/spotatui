@@ -897,13 +897,13 @@ impl App {
 
   /// Save or unsave the item playing right now, through the ownership order.
   pub fn toggle_save_current_item(&mut self) {
-    const REFUSED: &str = "The current playback source cannot be liked";
+    let refused = self.strings().status.app.current_source_cannot_like;
     let uri = match self.playing_item() {
       PlayingItem::Spotify(PlayableItem::Track(track)) => Ok(track.id.as_ref().map(|id| id.uri())),
       PlayingItem::Spotify(PlayableItem::Episode(episode)) => Ok(Some(episode.id.uri())),
       PlayingItem::Spotify(_) | PlayingItem::Nothing => Ok(None),
-      PlayingItem::QueuedSpotify(track) => track.uri.clone().ok_or(REFUSED).map(Some),
-      PlayingItem::NotSpotify => Err(REFUSED),
+      PlayingItem::QueuedSpotify(track) => track.uri.clone().ok_or(refused).map(Some),
+      PlayingItem::NotSpotify => Err(refused),
     };
     match uri {
       Ok(Some(uri)) => self.dispatch(IoEvent::ToggleSaveTrack(uri)),

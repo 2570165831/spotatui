@@ -11,6 +11,9 @@
 //! MCP clients cache `tools/list`, and a stable order also improves prompt-cache
 //! hit rates when the tools are rendered into model context.
 
+//! Tool schemas and replies intentionally stay English: they are model-facing
+//! protocol text, independent of the user's interface language.
+
 use super::{brief, DjSuggestion, MAX_BATCH};
 use crate::core::action::Action;
 use crate::core::app::App;
@@ -502,6 +505,10 @@ impl std::fmt::Display for ToolCallError {
 pub struct ToolOutcome {
   /// Human/model-readable text. Always populated.
   pub text: String,
+  /// Localized presentation only, in every language: the visible line is picked
+  /// when it is shown, so a language switch during a slow call still applies.
+  /// MCP and model responses keep the English `text`.
+  display: Option<crate::core::i18n::LocalizedMessage>,
   /// Machine-readable mirror, when the tool has one. MCP-only: the in-TUI DJ
   /// feeds `text` back to its model, which reads prose perfectly well.
   #[cfg_attr(not(feature = "mcp-server"), allow(dead_code))]
@@ -514,6 +521,7 @@ impl ToolOutcome {
   pub fn ok(text: impl Into<String>) -> Self {
     Self {
       text: text.into(),
+      display: None,
       structured: None,
       is_error: false,
     }
@@ -522,6 +530,7 @@ impl ToolOutcome {
   pub fn with_data(text: impl Into<String>, structured: Value) -> Self {
     Self {
       text: text.into(),
+      display: None,
       structured: Some(structured),
       is_error: false,
     }
@@ -530,9 +539,43 @@ impl ToolOutcome {
   pub fn error(text: impl Into<String>) -> Self {
     Self {
       text: text.into(),
+      display: None,
       structured: None,
       is_error: true,
     }
+  }
+  /// The model always receives EN; the visible result uses the same renderer.
+  pub fn ok_localized<T: Into<String>>(render: impl Fn(&crate::core::i18n::Strings) -> T) -> Self {
+    let mut result = Self::ok(render(&crate::core::i18n::EN));
+    result.display = Some(crate::core::i18n::LocalizedMessage::new(|strings| {
+      render(strings).into()
+    }));
+    result
+  }
+
+  pub fn error_localized<T: Into<String>>(
+    render: impl Fn(&crate::core::i18n::Strings) -> T,
+  ) -> Self {
+    let mut result = Self::ok_localized(render);
+    result.is_error = true;
+    result
+  }
+
+  pub fn data_localized<T: Into<String>>(
+    render: impl Fn(&crate::core::i18n::Strings) -> T,
+    structured: Value,
+  ) -> Self {
+    let mut result = Self::ok_localized(render);
+    result.structured = Some(structured);
+    result
+  }
+
+  /// The visible line in `language`, chosen when it is shown.
+  pub fn display_text(&self, language: crate::core::i18n::Language) -> &str {
+    self
+      .display
+      .as_ref()
+      .map_or(&self.text, |message| message.text(language))
   }
 }
 
@@ -876,30 +919,35 @@ pub async fn execute_app_only(app: &Arc<Mutex<App>>, call: &DjToolCall) -> Optio
       // bookkeeping) applies; the old raw `IoEvent::NextTrack` dispatch missed
       // the App-side branches.
       app.apply(Action::NextTrack);
-      Some(ToolOutcome::ok("Skipped to the next track"))
+      Some(ToolOutcome::ok_localized(|strings| {
+        strings.status.tools.skipped
+      }))
     }
     DjToolCall::SetDjVibe { vibe } => {
       let mut app = app.lock().await;
       // The apply arm bumps the DJ generation exactly once (the adopt-one-bump
       // rule in the turn loop depends on that count).
       app.apply(Action::SetDjVibe(vibe.clone()));
-      Some(ToolOutcome::ok(match vibe.as_deref() {
-        Some(vibe) => format!("DJ vibe set to: {vibe}. {}", vibe_effect(&app)),
-        None => "DJ vibe cleared".to_string(),
+      Some(ToolOutcome::ok_localized(|strings| match vibe.as_deref() {
+        Some(vibe) => strings
+          .status
+          .tools
+          .vibe_set(vibe, vibe_effect(&app, strings)),
+        None => strings.status.tools.vibe_cleared.to_string(),
       }))
     }
     DjToolCall::ListPlaylists => Some(playlists_outcome(app).await),
     DjToolCall::CreatePlaylist { name, uris } => Some(
-      spotify_write(app, Action::CreatePlaylist {
-        name: name.clone(),
-        track_uris: uris.clone(),
-      })
+      spotify_write(
+        app,
+        Action::CreatePlaylist {
+          name: name.clone(),
+          track_uris: uris.clone(),
+        },
+      )
       .await
       .unwrap_or_else(|| {
-        ToolOutcome::ok(format!(
-          "Creating the playlist \"{name}\" with {} track(s). It is in list_playlists once Spotify has made it.",
-          uris.len()
-        ))
+        ToolOutcome::ok_localized(|strings| strings.status.tools.creating(name, uris.len()))
       }),
     ),
     DjToolCall::AddToPlaylist { playlist, uris } => {
@@ -916,10 +964,9 @@ pub async fn execute_app_only(app: &Arc<Mutex<App>>, call: &DjToolCall) -> Optio
           track: uri.clone(),
         });
       }
-      Some(ToolOutcome::ok(format!(
-        "Adding {} track(s) to {playlist}",
-        uris.len()
-      )))
+      Some(ToolOutcome::ok_localized(|strings| {
+        strings.status.tools.adding(uris.len(), playlist)
+      }))
     }
     DjToolCall::RemoveFromPlaylist {
       playlist,
@@ -930,16 +977,19 @@ pub async fn execute_app_only(app: &Arc<Mutex<App>>, call: &DjToolCall) -> Optio
         return Some(refused);
       }
       Some(
-        spotify_write(app, Action::RemoveTrackFromPlaylist {
-          playlist: playlist.clone(),
-          track: uri.clone(),
-          position: *position,
-        })
+        spotify_write(
+          app,
+          Action::RemoveTrackFromPlaylist {
+            playlist: playlist.clone(),
+            track: uri.clone(),
+            position: *position,
+          },
+        )
         .await
         .unwrap_or_else(|| {
-          ToolOutcome::ok(format!(
-            "Removing {uri} at position {position} from {playlist}, if that is the track there"
-          ))
+          ToolOutcome::ok_localized(|strings| {
+            strings.status.tools.removing(uri, *position, playlist)
+          })
         }),
       )
     }
@@ -949,17 +999,15 @@ pub async fn execute_app_only(app: &Arc<Mutex<App>>, call: &DjToolCall) -> Optio
       } else {
         Action::UnfollowArtist(artist.clone())
       };
-      Some(
-        spotify_write(app, action)
-          .await
-          .unwrap_or_else(|| {
-            ToolOutcome::ok(if *follow {
-              format!("Following spotify:artist:{artist}")
-            } else {
-              format!("Unfollowing spotify:artist:{artist}")
-            })
-          }),
-      )
+      Some(spotify_write(app, action).await.unwrap_or_else(|| {
+        ToolOutcome::ok_localized(|strings| {
+          if *follow {
+            strings.status.tools.following(artist)
+          } else {
+            strings.status.tools.unfollowing(artist)
+          }
+        })
+      }))
     }
     // These run the network handlers: with the Spotify client on the Spotify
     // lane, or with none when the call has no Spotify item. `play_now` confirms
@@ -977,9 +1025,7 @@ pub async fn execute_app_only(app: &Arc<Mutex<App>>, call: &DjToolCall) -> Optio
 }
 
 fn not_connected() -> ToolOutcome {
-  ToolOutcome::error(
-    "spotatui has no Spotify session. Log in from the spotatui UI, then try again.",
-  )
+  ToolOutcome::error_localized(|strings| strings.status.tools.session_unavailable)
 }
 
 /// Applies a Spotify write through the pump; `Some` error without a session.
@@ -1004,10 +1050,7 @@ fn uneditable_playlist(app: &App, uri: &str) -> Option<ToolOutcome> {
     .iter()
     .find(|playlist| playlist.uri == uri)?;
   (!playlist.collaborative && !owns_playlist(app, playlist)).then(|| {
-    ToolOutcome::error(format!(
-      "\"{}\" is not a playlist the user owns or collaborates on, so it cannot be edited",
-      playlist.name
-    ))
+    ToolOutcome::error_localized(|strings| strings.status.tools.uneditable(&playlist.name))
   })
 }
 
@@ -1067,24 +1110,34 @@ async fn playlists_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
 /// It is never *ignored*, which is why this points at the fallback: the vibe is
 /// stored on `App` and comes back out through `get_listening_history`, so an
 /// agent running its own top-up loop can read it and honour it itself.
-fn vibe_effect(app: &App) -> &'static str {
+fn vibe_effect(app: &App, strings: &crate::core::i18n::Strings) -> &'static str {
   #[cfg(feature = "ai-dj")]
   {
     if app.dj.auto_queue {
-      "The built-in DJ will follow it from its next refill."
+      strings.status.tools.vibe_on
     } else {
-      "The built-in DJ's auto-queue is off, so nothing will act on it until the user turns it on; \
-       queue tracks yourself in the meantime. get_listening_history returns it either way."
+      strings.status.tools.vibe_off
     }
   }
   #[cfg(not(feature = "ai-dj"))]
   {
-    // `App::dj` exists under `dj-core`, so `auto_queue` is readable here — but it
-    // is permanently false in this build, and saying "auto-queue is off" would
-    // imply it could be turned on.
     let _ = app;
-    "This build has no built-in auto-queue DJ, so nothing will act on it automatically. It is \
-     stored and returned by get_listening_history, so you can follow it yourself when you queue."
+    strings.status.tools.vibe_unavailable
+  }
+}
+
+fn tool_period_label(
+  period: crate::infra::history::RecapPeriod,
+  strings: &crate::core::i18n::Strings,
+) -> &'static str {
+  use crate::infra::history::RecapPeriod;
+  let s = &strings.status.tools;
+  match period {
+    RecapPeriod::SevenDays => s.period_week,
+    RecapPeriod::ThirtyDays => s.period_month,
+    RecapPeriod::Month => s.period_this_month,
+    RecapPeriod::Year => s.period_year,
+    RecapPeriod::All => s.period_all,
   }
 }
 
@@ -1097,8 +1150,16 @@ async fn history_outcome(
   let loaded = tokio::task::spawn_blocking(crate::infra::history::load_listens).await;
   let listens = match loaded {
     Ok(Ok(listens)) => listens,
-    Ok(Err(e)) => return ToolOutcome::error(format!("Could not read listening history: {e}")),
-    Err(e) => return ToolOutcome::error(format!("Listening history task failed: {e}")),
+    Ok(Err(e)) => {
+      return ToolOutcome::error_localized(|strings| {
+        strings.status.tools.history_failed(&e.to_string())
+      })
+    }
+    Err(e) => {
+      return ToolOutcome::error_localized(|strings| {
+        strings.status.tools.history_task_failed(&e.to_string())
+      })
+    }
   };
 
   let mut summary = brief::build_brief(&listens, period);
@@ -1109,11 +1170,12 @@ async fn history_outcome(
   }
 
   if summary.is_sparse() {
-    return ToolOutcome::ok(format!(
-      "Very little listening history so far ({} qualifying plays in {}). Ask the user what they \
-       feel like instead of inferring it.",
-      summary.total_plays, summary.period_label
-    ));
+    return ToolOutcome::ok_localized(|strings| {
+      strings
+        .status
+        .tools
+        .history_sparse(summary.total_plays, tool_period_label(period, strings))
+    });
   }
 
   let structured = json!({
@@ -1126,7 +1188,10 @@ async fn history_outcome(
     "now_playing": summary.now_playing,
     "vibe": summary.vibe,
   });
-  ToolOutcome::with_data(summary.to_prompt_block(), structured)
+  ToolOutcome::data_localized(
+    |strings| summary.display_block(strings, tool_period_label(period, strings)),
+    structured,
+  )
 }
 
 async fn now_playing_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
@@ -1135,20 +1200,25 @@ async fn now_playing_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
   // One snapshot for both the label and the transport state: it is the
   // source-agnostic view (Spotify, local, Subsonic, YouTube, radio), so this
   // works whatever is actually producing sound.
-  match crate::infra::media_metadata::current_playback_snapshot(&app) {
+  match crate::infra::media_metadata::tracking_playback_snapshot(&app) {
     Some(snapshot) => {
       let label = format!(
         "{} — {}",
         snapshot.metadata.title,
         snapshot.primary_artist()
       );
-      let state = if snapshot.is_playing {
-        "playing"
-      } else {
-        "paused"
-      };
-      ToolOutcome::with_data(
-        format!("{state}: {label} ({queue_depth} track(s) queued)"),
+      ToolOutcome::data_localized(
+        |strings| {
+          strings.status.tools.now_playing(
+            if snapshot.is_playing {
+              strings.status.tools.playing
+            } else {
+              strings.status.tools.paused
+            },
+            &label,
+            queue_depth,
+          )
+        },
         json!({
           "track": label,
           "is_playing": snapshot.is_playing,
@@ -1160,8 +1230,8 @@ async fn now_playing_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
     // Same keys as the playing branch, `is_live` included: a payload whose shape
     // depends on playback state makes a client read a missing key as unknown
     // rather than as "no, this is not a live stream".
-    None => ToolOutcome::with_data(
-      format!("Nothing is playing ({queue_depth} track(s) queued)"),
+    None => ToolOutcome::data_localized(
+      |strings| strings.status.tools.nothing_playing(queue_depth),
       json!({
         "track": Value::Null,
         "is_playing": false,
@@ -1175,7 +1245,10 @@ async fn now_playing_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
 async fn queue_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
   let app = app.lock().await;
   if app.native_queue.is_empty() {
-    return ToolOutcome::with_data("The queue is empty", json!({"tracks": []}));
+    return ToolOutcome::data_localized(
+      |strings| strings.status.tools.queue_empty,
+      json!({"tracks": []}),
+    );
   }
   let labels = app
     .native_queue
@@ -1195,6 +1268,30 @@ async fn queue_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
 mod tests {
   use super::*;
   use crate::infra::history::RecapPeriod;
+
+  #[test]
+  fn a_tool_outcome_shows_its_text_in_the_language_at_display_time() {
+    use crate::core::i18n::{Language, ZH_HANS, ZH_HANT};
+    // The Chinese tables still equal English here, so tell them apart by identity.
+    let outcome = ToolOutcome::ok_localized(|strings| {
+      if std::ptr::eq(strings, &ZH_HANS) {
+        "hans"
+      } else if std::ptr::eq(strings, &ZH_HANT) {
+        "hant"
+      } else {
+        "en"
+      }
+    });
+
+    assert_eq!(outcome.text, "en", "the model and MCP always get English");
+    assert_eq!(outcome.display_text(Language::En), "en");
+    assert_eq!(outcome.display_text(Language::ZhHans), "hans");
+    assert_eq!(outcome.display_text(Language::ZhHant), "hant");
+    assert_eq!(
+      ToolOutcome::ok("plain").display_text(Language::ZhHans),
+      "plain"
+    );
+  }
 
   #[test]
   fn every_tool_schema_is_a_valid_object_schema() {

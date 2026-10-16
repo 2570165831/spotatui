@@ -446,11 +446,11 @@ impl App {
         match (&track.album_id, track.id.as_ref().or(track.uri.as_ref())) {
           (Some(album_id), _) => Ok(IoEvent::GetAlbum(album_id.clone())),
           (None, Some(track_id)) => Ok(IoEvent::GetAlbumForTrack(track_id.clone())),
-          (None, None) => Err("The queued track has no album id"),
+          (None, None) => Err(self.strings().status.app.queued_no_album),
         }
       }
-      PlayingItem::NotSpotify => Err("Jump to album needs a Spotify track playing"),
-      PlayingItem::Nothing => Err(NOTHING_PLAYING_STATUS),
+      PlayingItem::NotSpotify => Err(self.strings().status.app.jump_album_spotify),
+      PlayingItem::Nothing => Err(self.strings().status.app.nothing_playing),
     };
     match event {
       Ok(event) => self.dispatch(event),
@@ -471,15 +471,15 @@ impl App {
             .as_ref()
             .map(|id| (id.id().to_string(), artist.name.clone()))
         })
-        .ok_or("The playing track has no artist id"),
+        .ok_or(self.strings().status.app.playing_no_artist),
       PlayingItem::Spotify(_) => return,
       PlayingItem::QueuedSpotify(track) => track
         .artist_refs
         .first()
         .and_then(|artist| artist.id.clone().map(|id| (id, artist.name.clone())))
-        .ok_or("The queued track has no artist id"),
-      PlayingItem::NotSpotify => Err("Jump to artist needs a Spotify track playing"),
-      PlayingItem::Nothing => Err(NOTHING_PLAYING_STATUS),
+        .ok_or(self.strings().status.app.queued_no_artist),
+      PlayingItem::NotSpotify => Err(self.strings().status.app.jump_artist_spotify),
+      PlayingItem::Nothing => Err(self.strings().status.app.nothing_playing),
     };
     match artist {
       Ok((artist_id, artist_name)) => self.get_artist(artist_id, artist_name),
@@ -495,11 +495,11 @@ impl App {
     match self.playing_item() {
       PlayingItem::Spotify(_) | PlayingItem::Nothing => {}
       PlayingItem::QueuedSpotify(_) => {
-        self.set_status_message("The queue slot has no play context", 4);
+        self.set_status_message(self.strings().status.app.queue_no_context, 4);
         return;
       }
       PlayingItem::NotSpotify => {
-        self.set_status_message("Jump to context needs a Spotify track playing", 4);
+        self.set_status_message(self.strings().status.app.jump_context_spotify, 4);
         return;
       }
     }
@@ -514,7 +514,7 @@ impl App {
         )
       });
     let Some((context_type, playlist)) = context else {
-      self.set_status_message(NOTHING_PLAYING_STATUS, 4);
+      self.set_status_message(self.strings().status.app.nothing_playing, 4);
       return;
     };
     match context_type {

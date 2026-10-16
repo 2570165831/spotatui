@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { AlbumInfo } from "./bindings/AlbumInfo";
 import type { DiscoverPayload } from "./bindings/DiscoverPayload";
@@ -13,10 +14,10 @@ export const SHELF_MAX = 8;
 export const QUICK_PLAYLISTS = 7;
 
 /** The Home greeting for a local hour. */
-export function greeting(hour: number): string {
-  if (hour >= 5 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 18) return "Good afternoon";
-  return "Good evening";
+export function greeting(hour: number, s: GuiStrings = EN): string {
+  if (hour >= 5 && hour < 12) return s.good_morning;
+  if (hour >= 12 && hour < 18) return s.good_afternoon;
+  return s.good_evening;
 }
 
 /** The first track of each album in play order, for the Recently played shelf. */
@@ -65,10 +66,10 @@ export function discoverView(playlist: DiscoverPlaylist): View {
 }
 
 /** "Album", "Single" or "Compilation" from the lowercased album type. */
-export function albumKind(type: string | null): string {
-  if (type === "single") return "Single";
-  if (type === "compilation") return "Compilation";
-  return "Album";
+export function albumKind(type: string | null, s: GuiStrings = EN): string {
+  if (type === "single") return s.single;
+  if (type === "compilation") return s.compilation;
+  return s.album;
 }
 
 /** The year of a release date; null when unknown (Spotify says `0000`). */
@@ -78,23 +79,31 @@ export function yearOf(date: string | null): string | null {
 }
 
 /** "12 songs, 45 min", or "1 hr 5 min" from one hour. */
-export function lengthLine(tracks: TrackInfo[]): string {
-  const songs = `${tracks.length} ${tracks.length === 1 ? "song" : "songs"}`;
+export function lengthLine(tracks: TrackInfo[], s: GuiStrings = EN): string {
+  const songs = fmt(tracks.length === 1 ? s.one_song_count : s.songs_count, {
+    count: tracks.length,
+  });
   const minutes = Math.round(
     tracks.reduce((sum, track) => sum + track.duration_ms, 0) / 60_000,
   );
   const time =
     minutes >= 60
-      ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min`
-      : `${minutes} min`;
-  return `${songs}, ${time}`;
+      ? fmt(s.hours_minutes, {
+          hours: Math.floor(minutes / 60),
+          minutes: minutes % 60,
+        })
+      : fmt(s.minutes_short, { minutes });
+  return fmt(s.songs_duration, { songs, time });
 }
 
 /** A full date as "March 3, 2017"; a year or a month stays as given. */
-export function releaseLine(date: string | null): string | null {
+export function releaseLine(
+  date: string | null,
+  s: GuiStrings = EN,
+): string | null {
   if (!date || !yearOf(date)) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(s.date_locale, {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -132,15 +141,22 @@ export function radioRows(
 /** Copy a link and report it in a toast, the way the track menu does. */
 export function copyLink(
   text: string,
-  done: string,
+  done:
+    | "copied_album_link"
+    | "copied_song_link"
+    | "copied_show_link"
+    | "copied_episode_link"
+    | "copy_party_done",
   send: (action: Action) => void,
   clipboard: Pick<Clipboard, "writeText"> | undefined,
+  readStrings: () => GuiStrings = () => EN,
+  failure: "copy_link_failed" | "copy_party_failed" = "copy_link_failed",
 ): Promise<void> {
-  const failed = () => send({ NotifyError: ["Could not copy the link.", 4] });
+  const failed = () => send({ NotifyError: [readStrings()[failure], 4] });
   const write = clipboard?.writeText(text);
   if (!write) {
     failed();
     return Promise.resolve();
   }
-  return write.then(() => send({ Notify: [done, 3] }), failed);
+  return write.then(() => send({ Notify: [readStrings()[done], 3] }), failed);
 }

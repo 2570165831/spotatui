@@ -1,6 +1,6 @@
 //! Terminal cover-art rendering and per-surface dither caches.
 
-use crate::core::art::{CoverArtStatus, CoverArtStore};
+use crate::core::art::CoverArtStore;
 use crate::core::plugin_api::PluginCoverArtFit;
 use crate::core::theme::{resolve, Color, Palette};
 use crate::core::user_config::UserConfig;
@@ -18,18 +18,6 @@ use std::sync::{mpsc, Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 mod dither;
 use dither::{Algorithm, Mask};
-
-/// The message shown in place of the image when none is loaded, so "no art"
-/// always reads as a deliberate outcome rather than a blank pane. Shared by the
-/// fullscreen view and the plugin-screen `cover_art` widget.
-pub fn status_message(status: CoverArtStatus) -> &'static str {
-  match status {
-    CoverArtStatus::Loading => "Loading cover art...",
-    CoverArtStatus::Unavailable => "No cover art for this source",
-    CoverArtStatus::Failed => "Cover art unavailable",
-    CoverArtStatus::Loaded | CoverArtStatus::NotStarted => "No cover art available",
-  }
-}
 
 impl PluginCoverArtFit {
   /// The `ratatui-image` resize strategy for this fit mode. Kept private so

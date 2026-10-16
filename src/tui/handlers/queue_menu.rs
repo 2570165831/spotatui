@@ -121,6 +121,7 @@ mod tests {
 
   fn track(uri: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(uri.to_string()),
       name: name.to_string(),
       artists: vec!["Artist".to_string()],

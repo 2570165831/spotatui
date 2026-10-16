@@ -439,7 +439,7 @@ fn selected_radio_station(app: &App) -> Option<TrackInfo> {
 
 pub(super) fn favorite_selected_radio_station(app: &mut App) {
   let Some(station) = selected_radio_station(app) else {
-    app.set_status_message("No radio station selected".to_string(), 4);
+    app.set_status_message(app.strings().status.app.no_radio_selected.to_string(), 4);
     return;
   };
   app.apply(Action::FavoriteRadioStation(station));
@@ -726,6 +726,7 @@ mod tests {
 
   fn station(uri: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(uri.to_string()),
       name: name.to_string(),
       artists: vec!["ambient".to_string()],

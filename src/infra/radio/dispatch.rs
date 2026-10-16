@@ -103,7 +103,16 @@ pub async fn route_radio_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
     IoEvent::NextTrack | IoEvent::PreviousTrack | IoEvent::ForcePreviousTrack
       if player(app).await.is_some() =>
     {
-      set_error(app, "Live radio: no track skipping".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_no_skip
+          .to_string(),
+      )
+      .await;
       true
     }
     _ => false,
@@ -128,10 +137,10 @@ async fn load_radio_stations(app: &Arc<Mutex<App>>) {
   let empty = stations.is_empty();
   *guard.radio_stations_mut() = stations;
   if empty {
-    guard.set_status_message(
-      "No radio stations configured or saved; search to add some".to_string(),
-      6,
-    );
+    {
+      let strings = guard.strings();
+      guard.set_status_message(strings.status.infra.radio_empty.to_string(), 6)
+    };
   }
 }
 
@@ -146,7 +155,17 @@ async fn run_radio_search(app: &Arc<Mutex<App>>, query: &str) {
       .lock()
       .await
       .show_source_search_tracks(query, results.tracks),
-    Err(e) => set_error(app, format!("Radio search failed: {e}")).await,
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_search_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -213,11 +232,27 @@ async fn acquire_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(p)) => Some(Arc::new(p)),
     Ok(Err(e)) => {
-      set_error(app, format!("No audio output for radio playback: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_error(app, format!("Audio output init failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -228,7 +263,16 @@ async fn start_radio(app: &Arc<Mutex<App>>, uri: &str) {
   let url = match stream_url_from_uri(uri) {
     Ok(u) => u.to_string(),
     Err(_) => {
-      set_error(app, "Invalid radio URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -249,7 +293,15 @@ async fn start_radio(app: &Arc<Mutex<App>>, uri: &str) {
   let opened = match open_radio_stream(&url).await {
     Ok(o) => o,
     Err(e) => {
-      set_error(app, format!("Cannot open radio stream: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_open_failed(&e.to_string()),
+      )
+      .await;
       return;
     }
   };
@@ -295,7 +347,12 @@ async fn start_radio(app: &Arc<Mutex<App>>, uri: &str) {
       cancel();
       set_error(
         app,
-        "Cannot play radio stream: no recognisable audio format in time.".to_string(),
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_probe_timeout
+          .to_string(),
       )
       .await;
       return;
@@ -309,11 +366,27 @@ async fn start_radio(app: &Arc<Mutex<App>>, uri: &str) {
       match tokio::task::spawn_blocking(move || decode_player.play_prepared(prepared)).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
-          set_error(app, format!("Cannot play radio stream: {e}")).await;
+          set_error(
+            app,
+            crate::infra::app_strings(app)
+              .await
+              .status
+              .infra
+              .radio_play_failed(&e.to_string()),
+          )
+          .await;
           return;
         }
         Err(e) => {
-          set_error(app, format!("Radio playback task failed: {e}")).await;
+          set_error(
+            app,
+            crate::infra::app_strings(app)
+              .await
+              .status
+              .infra
+              .radio_task_failed(&e.to_string()),
+          )
+          .await;
           return;
         }
       }
@@ -328,10 +401,33 @@ async fn start_radio(app: &Arc<Mutex<App>>, uri: &str) {
         station,
         now_playing,
       });
-      guard.set_status_message(format!("\u{266a} {display} (live)"), 4);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.radio_playing(&display), 4)
+      };
     }
-    Ok(Err(e)) => set_error(app, format!("Cannot play radio stream: {e}")).await,
-    Err(e) => set_error(app, format!("Radio playback task failed: {e}")).await,
+    Ok(Err(e)) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_play_failed(&e.to_string()),
+      )
+      .await
+    }
+    Err(e) => {
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .radio_task_failed(&e.to_string()),
+      )
+      .await
+    }
   }
 }
 
@@ -365,6 +461,7 @@ mod tests {
 
   fn station_row(uri: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(uri.to_string()),
       name: name.to_string(),
       artists: vec![],

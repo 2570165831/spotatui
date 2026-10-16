@@ -101,7 +101,7 @@ impl App {
     self.pending_playlist_open = Some(id_str.clone());
     self.reset_playlist_tracks_view(playlist_id, context);
     self.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
-    self.set_status_message("Loading playlist…", 3);
+    self.set_status_message(self.strings().status.app.loading_playlist, 3);
     self.dispatch(IoEvent::GetPlaylistItems(id_str, self.playlist_offset));
   }
 
@@ -288,7 +288,7 @@ impl App {
       return;
     };
     self.reset_playlist_tracks_view(playlist_id.clone(), context);
-    self.set_status_message("Loading playlist…", 3);
+    self.set_status_message(self.strings().status.app.loading_playlist, 3);
     self.dispatch(IoEvent::GetPlaylistItems(playlist_id.id().to_string(), 0));
   }
 
@@ -475,6 +475,30 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn clearing_a_stale_playlist_filter_reports_the_refetch_in_the_selected_language() {
+    use crate::core::i18n::Language;
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let (tx, rx) = channel();
+      let mut config = UserConfig::new();
+      config.behavior.language = language;
+      let mut app = App::new(tx, config, Some(SystemTime::now()));
+      app.playlist_track_table_id = Some(playlist_id("37i9dQZF1DX4WYpdgoIcn6"));
+      app.track_table.context = Some(TrackTableContext::MyPlaylists);
+      app
+        .playlist_track_pages
+        .upsert_page_by_offset(playlist_page(0, 1, &["0000000000000000000001"], false));
+      app.playlist_track_pages.mark_stale();
+      app.active_playlist_track_filter = Some("歌".to_string());
+      app.clear_playlist_track_filter();
+      assert_eq!(
+        app.status_message(),
+        Some(app.strings().status.app.loading_playlist)
+      );
+      assert!(matches!(rx.try_recv(), Ok(IoEvent::GetPlaylistItems(_, 0))));
+    }
+  }
   use super::*;
   use crate::core::app::test_support::*;
 

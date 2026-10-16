@@ -4,6 +4,7 @@
 use super::lan::CastDevice;
 use super::router::upstream_error;
 use super::session::SpotifySession;
+use crate::core::i18n::LocalizedMessage;
 use anyhow::{anyhow, bail, Context as _};
 use reqwest::Method;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -185,14 +186,24 @@ impl CastChannel {
   async fn open(address: SocketAddr) -> anyhow::Result<Self> {
     let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(address))
       .await
-      .map_err(|_| anyhow!("no answer from {address}"))??;
+      .map_err(|_| {
+        anyhow!(LocalizedMessage::new(|s| s
+          .status
+          .infra
+          .cast_no_answer(&address.to_string())))
+      })??;
     let connector = TlsConnector::from(Arc::new(tls_config()?));
     let stream = tokio::time::timeout(
       CONNECT_TIMEOUT,
       connector.connect(ServerName::IpAddress(address.ip().into()), tcp),
     )
     .await
-    .map_err(|_| anyhow!("no TLS handshake with {address}"))??;
+    .map_err(|_| {
+      anyhow!(LocalizedMessage::new(|s| s
+        .status
+        .infra
+        .cast_no_tls(&address.to_string())))
+    })??;
     let mut channel = Self { stream };
     channel
       .send(CONNECTION_NS, RECEIVER, json!({ "type": "CONNECT" }))
@@ -228,11 +239,16 @@ impl CastChannel {
       self.stream.read_exact(&mut len).await?;
       let len = u32::from_be_bytes(len) as usize;
       if len > MAX_MESSAGE {
-        bail!("a {len}-byte Cast message");
+        bail!(LocalizedMessage::new(|s| s
+          .status
+          .infra
+          .cast_message_size(len)));
       }
       let mut frame = vec![0u8; len];
       self.stream.read_exact(&mut frame).await?;
-      let message = CastMessage::decode(&frame).context("a malformed Cast message")?;
+      let message = CastMessage::decode(&frame).context(LocalizedMessage::new(|s| {
+        s.status.infra.cast_malformed.to_string()
+      }))?;
       if message.namespace != HEARTBEAT_NS {
         return Ok(message);
       }
@@ -267,7 +283,12 @@ impl CastChannel {
       }
     })
     .await
-    .map_err(|_| anyhow!("no reply to {kind}"))?
+    .map_err(|_| {
+      anyhow!(LocalizedMessage::new(|s| s
+        .status
+        .infra
+        .cast_no_reply(&kind)))
+    })?
   }
 }
 
@@ -293,8 +314,12 @@ pub async fn log_in(session: &SpotifySession, device: &CastDevice) -> anyhow::Re
       |reply| reply["type"] == "LAUNCH_ERROR" || spotify_transport(reply).is_some(),
     )
     .await?;
-  let transport = spotify_transport(&status)
-    .ok_or_else(|| anyhow!("the Spotify receiver did not start: {}", status["reason"]))?;
+  let transport = spotify_transport(&status).ok_or_else(|| {
+    anyhow!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .cast_receiver_failed(&status["reason"].to_string())))
+  })?;
   channel
     .send(CONNECTION_NS, &transport, json!({ "type": "CONNECT" }))
     .await?;
@@ -318,9 +343,13 @@ pub async fn log_in(session: &SpotifySession, device: &CastDevice) -> anyhow::Re
     info["tokenType"],
     info["version"]
   );
-  let client_id = info["clientID"]
-    .as_str()
-    .ok_or_else(|| anyhow!("no clientID in getInfoResponse"))?;
+  let client_id = info["clientID"].as_str().ok_or_else(|| {
+    anyhow!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .cast_client_id_missing
+      .to_string()))
+  })?;
   let token = device_token(session, client_id, &device_id).await?;
 
   let reply = channel
@@ -337,7 +366,10 @@ pub async fn log_in(session: &SpotifySession, device: &CastDevice) -> anyhow::Re
     )
     .await?;
   if reply["type"] == "addUserError" {
-    bail!("the speaker refused the login: {}", reply["payload"]);
+    bail!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .cast_login_refused(&reply["payload"].to_string())));
   }
   Ok(())
 }
@@ -359,7 +391,13 @@ async fn device_token(
   reply["accessToken"]
     .as_str()
     .map(str::to_owned)
-    .ok_or_else(|| anyhow!("no accessToken in the device-auth reply"))
+    .ok_or_else(|| {
+      anyhow!(LocalizedMessage::new(|s| s
+        .status
+        .infra
+        .cast_access_token_missing
+        .to_string()))
+    })
 }
 
 #[cfg(test)]

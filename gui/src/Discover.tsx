@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { memo, useEffect, useRef } from "react";
 import type { Action } from "./bindings/Action";
 import type { DiscoverPayload } from "./bindings/DiscoverPayload";
@@ -9,12 +10,14 @@ import { Card, Shelf } from "./ui";
 
 /** Discover: the shelves of Spotify's Made For You page. */
 export const Discover = memo(function Discover({
+  s = EN,
   discover,
   connected,
   active,
   open,
   send,
 }: {
+  s?: GuiStrings;
   discover: DiscoverPayload | null;
   connected: boolean;
   active: boolean;
@@ -34,32 +37,29 @@ export const Discover = memo(function Discover({
   const available = discover?.available ?? false;
   const shelves = discover?.shelves ?? [];
   const notice =
-    shelves.length > 0
-      ? null
-      : discover?.loading
-        ? "Loading…"
-        : "Nothing here yet.";
+    shelves.length > 0 ? null : discover?.loading ? s.loading : s.nothing_here;
   return (
     <section className="discover" tabIndex={-1} data-focus>
       <div className="discover-head">
-        <h1>Discover</h1>
-        <span>Made For You, from Spotify.</span>
+        <h1>{s.discover}</h1>
+        <span>{s.discover_intro}</span>
       </div>
       {!available ? (
-        <p className="empty">Discover needs a Spotify session.</p>
+        <p className="empty">{s.discover_needs_spotify}</p>
       ) : (
         <>
           <p className={notice ? "empty" : "sr-only"} role="status">
             {notice}
           </p>
           {shelves.map((shelf, index) => (
-            <Shelf key={`${index}-${shelf.title}`} title={shelf.title}>
+            <Shelf s={s} key={`${index}-${shelf.title}`} title={shelf.title}>
               {shelf.playlists.map((playlist) => (
                 <Card
+                  s={s}
                   key={playlist.uri}
                   image={playlist.image_url}
                   title={playlist.name}
-                  subtitle={playlist.description ?? "By Spotify"}
+                  subtitle={playlist.description ?? s.by_spotify}
                   onOpen={() => open(discoverView(playlist))}
                   onPlay={() =>
                     send({ PlayContext: { uri: playlist.uri, offset: null } })

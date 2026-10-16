@@ -7,6 +7,7 @@ use super::shared::HttpResponseData;
 
 fn track(uri: &str, name: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri.to_string()),
     name: name.to_string(),
     artists: vec!["Artist".to_string()],
@@ -1704,6 +1705,7 @@ mod data_read_tests {
 
   fn playlist(name: &str) -> PlaylistInfo {
     PlaylistInfo {
+      generated_name: None,
       uri: format!("spotify:playlist:{name}"),
       name: name.to_string(),
       owner: "owner".to_string(),

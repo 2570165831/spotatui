@@ -12,8 +12,8 @@ use super::{SyncClient, SyncClients};
 use crate::core::app::App;
 use crate::core::playlist_sync::store;
 use crate::core::playlist_sync::{
-  pick_candidate, plan, Endpoint, Link, LinkOutcome, LinkReport, Mirror, MirrorRun, SyncReport,
-  SyncTrack, UnmatchReason, Unmatched,
+  pick_candidate, plan, Endpoint, Link, LinkOutcome, LinkReport, Mirror, MirrorRun, SyncReason,
+  SyncReport, SyncTrack, UnmatchReason, Unmatched,
 };
 use crate::core::source::Source;
 use crate::infra::network::requests;
@@ -216,14 +216,14 @@ async fn sync_link<C: SyncClients>(
 ) -> LinkReport {
   let mut report = LinkReport::new(&link.id, &link.master.name);
   if link.mirrors.is_empty() {
-    report.note(LinkOutcome::Skipped("no mirrors".to_string()));
+    report.note(LinkOutcome::Skipped(SyncReason::NoMirrors));
     return report;
   }
 
   let client = match clients.open(&link.master).await {
     Ok(client) => client,
     Err(e) => {
-      report.note(LinkOutcome::Skipped(format!("{e:#}")));
+      report.note(LinkOutcome::Skipped(SyncReason::from_error(&e)));
       return report;
     }
   };
@@ -239,7 +239,7 @@ async fn sync_link<C: SyncClients>(
     let mirror_client = match clients.open(&link.mirrors[index].endpoint).await {
       Ok(client) => client,
       Err(e) => {
-        report.note(LinkOutcome::Skipped(format!("{e:#}")));
+        report.note(LinkOutcome::Skipped(SyncReason::from_error(&e)));
         continue;
       }
     };
@@ -385,10 +385,15 @@ async fn sync_mirror<C: SyncClient>(
     if done % BATCH != 0 || done == total {
       continue;
     }
-    state.app.lock().await.set_status_message(
-      format!("Playlist sync: {} {done}/{total}", endpoint.name),
-      8,
-    );
+    {
+      let mut app = state.app.lock().await;
+      let message = app
+        .strings()
+        .status
+        .infra
+        .sync_progress(&endpoint.name, done, total);
+      app.set_status_message(message, 8);
+    }
     if state.dry_run {
       continue;
     }
@@ -542,12 +547,15 @@ fn classify(source: Source, e: &anyhow::Error, stop: &mut Option<String>) -> Lin
   if requests::is_rate_limited_error(e) {
     let text = format!("{e:#}");
     *stop = Some(text.clone());
-    return LinkOutcome::Failed(text);
+    return LinkOutcome::Failed(text.into());
   }
   if requests::is_transient_network_error(e) {
-    return LinkOutcome::Skipped(format!("{} unreachable: {e}", source.label()));
+    return LinkOutcome::Skipped(SyncReason::Unreachable {
+      source,
+      error: e.to_string(),
+    });
   }
-  LinkOutcome::Failed(format!("{e:#}"))
+  LinkOutcome::Failed(SyncReason::from_error(e))
 }
 
 #[cfg(test)]
@@ -1382,11 +1390,11 @@ mod tests {
     let LinkOutcome::Skipped(missing) = &report.links[0].outcome else {
       panic!("a master that cannot be opened skips its link");
     };
-    assert!(missing.contains("not compiled into this build"));
+    assert!(missing.to_string().contains("not compiled into this build"));
     let LinkOutcome::Skipped(unreachable) = &report.links[1].outcome else {
       panic!("an unreachable mirror skips its link, never fails it");
     };
-    assert!(unreachable.contains("unreachable"));
+    assert!(unreachable.to_string().contains("unreachable"));
     assert_eq!(report.links[1].added, 1);
     assert!(!report.failed());
   }

@@ -670,6 +670,7 @@ fn listing_from_uri(uri: &str) -> Result<Listing> {
 
 fn favorites_playlist(track_count: u32) -> PlaylistInfo {
   PlaylistInfo {
+    generated_name: None,
     uri: FAVORITES_URI.to_string(),
     name: "Favorite tracks".to_string(),
     owner: String::new(),
@@ -684,6 +685,7 @@ fn favorites_playlist(track_count: u32) -> PlaylistInfo {
 
 fn playlist_to_playlist_info(p: &types::Playlist) -> PlaylistInfo {
   PlaylistInfo {
+    generated_name: None,
     uri: format!("{PLAYLIST_PREFIX}{}", p.id),
     name: p.name.clone(),
     owner: p.owner.as_ref().map(|o| o.name.clone()).unwrap_or_default(),
@@ -699,6 +701,7 @@ fn playlist_to_playlist_info(p: &types::Playlist) -> PlaylistInfo {
 fn album_to_playlist_info(a: &types::Album) -> PlaylistInfo {
   let artist = a.artist.as_ref().map(|n| n.name.as_str()).unwrap_or("");
   PlaylistInfo {
+    generated_name: None,
     uri: format!("{ALBUM_PREFIX}{}", a.id),
     name: if artist.is_empty() {
       a.title.clone()
@@ -736,6 +739,7 @@ fn track_to_track_info(t: &types::Track, parent: Option<&types::Album>) -> Track
     None => t.title.clone(),
   };
   TrackInfo {
+    generated_name: None,
     uri: Some(format!("{TRACK_PREFIX}{}", t.id)),
     name,
     artists: artist_refs.iter().map(|a| a.name.clone()).collect(),

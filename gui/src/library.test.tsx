@@ -1,3 +1,4 @@
+import { EN } from "./i18n";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Action } from "./bindings/Action";
@@ -374,4 +375,27 @@ describe("TrackTable", () => {
     expect(html.match(/class="explicit"/g)).toHaveLength(2);
     expect(html).toContain('<span class="sr-only">Explicit</span>');
   });
+});
+
+it("the explicit badge translates its title and accessible text while keeping its E glyph", () => {
+  const html = renderToStaticMarkup(
+    <TrackTable
+      s={{ ...EN, explicit: "alternate explicit label" }}
+      label="Songs"
+      idPrefix="explicit"
+      tracks={[{ ...track("Rude", "spotify:track:r"), explicit: true }]}
+      cursor={0}
+      playingUri={null}
+      onKeyDown={() => {}}
+      onPick={() => {}}
+      onPlay={() => {}}
+      open={() => {}}
+    />,
+  );
+  expect(html).toContain('title="alternate explicit label"');
+  expect(html).toContain(
+    '<span class="sr-only">alternate explicit label</span>',
+  );
+  expect(html).toContain('aria-hidden="true">E</span>');
+  expect(html).not.toContain('title="Explicit"');
 });

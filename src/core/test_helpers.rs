@@ -18,6 +18,7 @@ use std::collections::HashMap;
 #[cfg(feature = "streaming")]
 pub fn queued_track(uri: &str, name: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri.to_string()),
     name: name.to_string(),
     artists: vec!["Artist".to_string()],
@@ -71,6 +72,7 @@ pub fn user_info(id: &str) -> UserInfo {
 /// equals the owner id, matching `PlaylistInfo::from_simplified` on that fixture).
 pub fn playlist_info(id: &str, name: &str, owner_id: &str, collaborative: bool) -> PlaylistInfo {
   PlaylistInfo {
+    generated_name: None,
     uri: format!("spotify:playlist:{id}"),
     name: name.to_string(),
     owner: owner_id.to_string(),

@@ -89,14 +89,14 @@ pub(crate) fn title(app: &App) -> String {
     modes.push(label);
   }
   if app.dj.auto_queue {
-    modes.push("auto-queue on".to_string());
+    modes.push(app.strings().screens.dj_auto_queue.to_string());
   }
   if app.dj.avoid_library {
     modes.push(
       if app.dj.library_indexing {
-        "fresh only (indexing…)"
+        app.strings().screens.dj_fresh_indexing
       } else {
-        "fresh only"
+        app.strings().screens.dj_fresh
       }
       .to_string(),
     );
@@ -120,18 +120,21 @@ fn hint_lines(app: &App, width: usize) -> Vec<Line<'static>> {
   let keys = &app.user_config.keys;
   let mut parts: Vec<String> = Vec::new();
   for (key, action) in [
-    (keys.dj_toggle_auto_queue, "auto-queue"),
-    (keys.dj_vibe_shift, "vibe shift"),
-    (keys.dj_toggle_fresh_only, "fresh only"),
-    (keys.dj_pick_model, "AI/model"),
+    (
+      keys.dj_toggle_auto_queue,
+      app.strings().screens.dj_auto_queue_hint,
+    ),
+    (keys.dj_vibe_shift, app.strings().screens.dj_vibe_hint),
+    (keys.dj_toggle_fresh_only, app.strings().screens.dj_fresh),
+    (keys.dj_pick_model, app.strings().screens.dj_model_hint),
   ] {
     if !matches!(key, Key::Char(_)) {
       parts.push(format!("{key} {action}"));
     }
   }
-  parts.push("↑↓ scroll".to_string());
-  parts.push("Enter send".to_string());
-  parts.push("Esc clear/back".to_string());
+  parts.push(app.strings().screens.dj_scroll_hint.to_string());
+  parts.push(app.strings().screens.dj_send_hint.to_string());
+  parts.push(app.strings().screens.dj_clear_hint.to_string());
 
   // Wrapped rather than truncated, the same way the picker treats its footer: on
   // a narrow panel the tail is the half that would be lost. Packed by whole
@@ -215,16 +218,16 @@ fn empty_hint(app: &App) -> Vec<Line<'static>> {
   let theme = app.user_config.theme;
   let mut lines = vec![
     Line::from(Span::styled(
-      "Ask the DJ for something, or turn auto-queue on.",
+      app.strings().screens.dj_empty,
       Style::default().fg(theme.text.into()),
     )),
     Line::from(""),
     Line::from(Span::styled(
-      "\"something chill for focusing\"",
+      app.strings().screens.dj_example_focus,
       Style::default().fg(theme.inactive.into()),
     )),
     Line::from(Span::styled(
-      "\"more like this but slower\"",
+      app.strings().screens.dj_example_slower,
       Style::default().fg(theme.inactive.into()),
     )),
     Line::from(""),
@@ -236,15 +239,15 @@ fn empty_hint(app: &App) -> Vec<Line<'static>> {
   // these are rendered unwrapped.
   if let Some(label) = crate::infra::dj::setup::active_label(&app.user_config.behavior) {
     lines.push(Line::from(Span::styled(
-      format!("Using {label}."),
+      app.strings().screens.dj_using(&label),
       Style::default().fg(theme.inactive.into()),
     )));
   }
   lines.push(Line::from(Span::styled(
-    format!(
-      "{} to change which AI and model the DJ uses.",
-      app.user_config.keys.dj_pick_model
-    ),
+    app
+      .strings()
+      .screens
+      .dj_change_model(&app.user_config.keys.dj_pick_model.to_string()),
     Style::default().fg(theme.inactive.into()),
   )));
   lines
@@ -273,18 +276,21 @@ pub(crate) fn wrap_transcript(app: &App, width: usize) -> Vec<Line<'static>> {
 
   for line in &app.dj.transcript {
     let (prefix, style) = match line.speaker {
-      DjSpeaker::User => ("you  ", Style::default().fg(theme.active.into())),
+      DjSpeaker::User => (
+        app.strings().screens.dj_user_prefix,
+        Style::default().fg(theme.active.into()),
+      ),
       DjSpeaker::Dj => ("dj   ", Style::default().fg(theme.text.into())),
       DjSpeaker::System => ("     ", Style::default().fg(theme.inactive.into())),
     };
-    let body_width = width.saturating_sub(prefix.len()).max(1);
+    let body_width = width.saturating_sub(display_width(prefix)).max(1);
     for (index, chunk) in wrap_text(&line.text, body_width).into_iter().enumerate() {
       // Only the first row of a message carries the speaker label; continuation
       // rows are indented to line up under it.
       let label = if index == 0 {
         prefix.to_string()
       } else {
-        " ".repeat(prefix.len())
+        " ".repeat(display_width(prefix))
       };
       rows.push(Line::from(vec![
         Span::styled(label, Style::default().fg(theme.inactive.into())),
@@ -297,8 +303,11 @@ pub(crate) fn wrap_transcript(app: &App, width: usize) -> Vec<Line<'static>> {
     // The step counter is what tells a minutes-long agent-CLI turn apart from a
     // hang: each step there is a fresh subprocess.
     let label = match app.dj.step {
-      Some((step, of)) => format!("dj   …thinking ({step}/{of})"),
-      None => "dj   …thinking".to_string(),
+      Some((step, of)) => app
+        .strings()
+        .screens
+        .dj_thinking_step(&step.to_string(), &of.to_string()),
+      None => app.strings().screens.dj_thinking.to_string(),
     };
     rows.push(Line::from(Span::styled(
       label,
@@ -415,8 +424,9 @@ fn option_lines(
   let gutter = 2 + number.chars().count();
   let pad = NOTE_COLUMN.min(inner_width.saturating_sub(gutter + 1));
   let head = format!(
-    "{}{number}{label:<pad$} ",
-    if selected { "› " } else { "  " }
+    "{}{number}{} ",
+    if selected { "› " } else { "  " },
+    super::util::pad_to_width(label, pad)
   );
 
   if note.is_empty() {
@@ -466,25 +476,41 @@ fn draw_setup(f: &mut Frame, app: &App, layout_chunk: Rect) {
 
   let (title, entries, cursor) = match setup.step {
     DjSetupStep::Backend => (
-      "Set up the AI DJ",
+      app.strings().screens.dj_setup,
       setup
         .backends
         .iter()
-        .map(|row| (row.label.as_str(), row.note.as_str(), row.ready))
+        .map(|row| {
+          (
+            row.label_with(app.strings()),
+            row.note_with(app.strings()),
+            row.ready,
+          )
+        })
         .collect::<Vec<_>>(),
       setup.backend_index,
     ),
     DjSetupStep::Model => (
-      "Choose a model",
+      app.strings().screens.dj_choose_model,
       setup
         .models
         .iter()
-        .map(|row| (row.label.as_str(), row.note.as_str(), true))
+        .map(|row| {
+          if let Some(backend) = setup.selected_backend() {
+            (
+              row.label_with(backend, app.strings()),
+              row.note_with(backend, app.strings()),
+              true,
+            )
+          } else {
+            (row.label.clone(), row.note.clone(), true)
+          }
+        })
         .collect(),
       setup.model_index,
     ),
     // A typing surface, not a list: one row, and nothing to scroll through.
-    DjSetupStep::Custom => ("Model name", Vec::new(), 0),
+    DjSetupStep::Custom => (app.strings().screens.dj_model_name, Vec::new(), 0),
   };
 
   // Rows, plus where each one starts and ends. The viewport below scrolls by whole
@@ -520,9 +546,7 @@ fn draw_setup(f: &mut Frame, app: &App, layout_chunk: Rect) {
   let mut hints = vec![match setup.step {
     // Esc here keeps whatever is already configured, and says so: a modal whose
     // escape hatch silently rewrote config would be worse than no modal.
-    DjSetupStep::Backend => {
-      "↑↓ select · 1-9 jump · Enter choose · Esc keep the current brain".to_string()
-    }
+    DjSetupStep::Backend => app.strings().screens.dj_setup_backend_hint.to_string(),
     // Built from the rows rather than fixed, because the model step is not one
     // shape. A command spotatui does not own gets a single row and deliberately no
     // free-text row (`models_for`), so a hardcoded "last row types a name" would
@@ -530,16 +554,16 @@ fn draw_setup(f: &mut Frame, app: &App, layout_chunk: Rect) {
     DjSetupStep::Model => {
       let mut parts = Vec::new();
       if setup.models.len() > 1 {
-        parts.push("↑↓ select");
+        parts.push(app.strings().screens.dj_select_hint);
       }
-      parts.push("Enter choose");
-      parts.push("Esc back");
+      parts.push(app.strings().screens.dj_choose_hint);
+      parts.push(app.strings().screens.dj_back_hint);
       if setup.models.last().is_some_and(|model| model.custom) {
-        parts.push("last row types a name");
+        parts.push(app.strings().screens.dj_custom_hint);
       }
       parts.join(" · ")
     }
-    DjSetupStep::Custom => "Enter to use it · Esc back".to_string(),
+    DjSetupStep::Custom => app.strings().screens.dj_use_model_hint.to_string(),
   }];
   if setup.step == DjSetupStep::Custom {
     if let Some(row) = setup.selected_backend() {
@@ -549,11 +573,11 @@ fn draw_setup(f: &mut Frame, app: &App, layout_chunk: Rect) {
       hints.push(match (row.backend, row.agent) {
         // The picker deliberately does not edit the URL, so the one thing a
         // self-hosted user still has to do belongs on this screen.
-        ("openai_compat", _) => format!("for {name} · set behavior.dj_base_url for the endpoint"),
+        ("openai_compat", _) => app.strings().screens.dj_endpoint_hint(name),
         // The Custom… row carries this too, but that row is gone by the time
         // anyone is typing here, which is when the format actually matters.
-        (_, Some("opencode")) => format!("for {name} · as provider/model"),
-        _ => format!("for {name}"),
+        (_, Some("opencode")) => app.strings().screens.dj_provider_model_hint(name),
+        _ => app.strings().screens.dj_for_backend(name),
       });
     }
   }
@@ -620,9 +644,9 @@ fn draw_setup(f: &mut Frame, app: &App, layout_chunk: Rect) {
       0,
       Line::from(Span::styled(
         match (above, below) {
-          (0, below) => format!("… {below} more below"),
-          (above, 0) => format!("… {above} more above"),
-          (above, below) => format!("… {above} above, {below} below"),
+          (0, below) => app.strings().screens.more_below(below),
+          (above, 0) => app.strings().screens.more_above(above),
+          (above, below) => app.strings().screens.more_above_below(above, below),
         },
         hint_style,
       )),
@@ -655,7 +679,7 @@ fn draw_prompt(f: &mut Frame, app: &App, area: Rect) {
   let theme = app.user_config.theme;
   let block = Block::default()
     .title(Span::styled(
-      "Ask the DJ",
+      app.strings().screens.dj_ask,
       get_color((focused, false), theme),
     ))
     .borders(Borders::ALL)

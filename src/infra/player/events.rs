@@ -315,12 +315,14 @@ async fn handle_streaming_recovery(mut ctx: StreamingRecoveryContext) {
             app.dispatch(IoEvent::RestoreNativePlayback(generation));
           } else {
             warn!("recovery route: none - restore requested but the snapshot is gone");
-            app.set_status_message("Native streaming recovered.", 6);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.native_recovered, 6);
           }
         } else if request.restore_playback {
           // A handoff rebuild instead keeps the teardown's "moved to another
           // device" message.
-          app.set_status_message("Native streaming recovered.", 6);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.native_recovered, 6);
         }
         // A playlist refresh while parked had no session for the folders.
         if reacquired && app.playlist_folder_nodes().is_none() {
@@ -339,12 +341,17 @@ async fn handle_streaming_recovery(mut ctx: StreamingRecoveryContext) {
           app.native_is_playing = Some(false);
         }
         if app.pending_start_playback.take().is_some() {
+          let strings = app.strings();
           app.set_status_message(
-            format!("Native recovery failed; playback request dropped: {}", e),
+            strings.status.infra.native_recovery_dropped(&e.to_string()),
             8,
           );
         } else if app.native_should_drive() {
-          app.set_status_message(format!("Native recovery failed: {}", e), 8);
+          let strings = app.strings();
+          app.set_status_message(
+            strings.status.infra.native_recovery_failed(&e.to_string()),
+            8,
+          );
         }
       }
     }
@@ -469,7 +476,8 @@ async fn handle_player_events(
               .is_some_and(|current| Arc::ptr_eq(current, &player))
             {
               app.native_backend_pending = true;
-              app.set_status_message("Native streaming connection lost; reconnecting.", 6);
+              let strings = app.strings();
+              app.set_status_message(strings.status.infra.native_lost_reconnecting, 6);
             }
           }
           StreamingConnectionState::Connected { generation }
@@ -492,7 +500,8 @@ async fn handle_player_events(
               if app.native_load_watchdog.is_some() {
                 app.native_load_watchdog = Some(Instant::now());
               }
-              app.set_status_message("Native streaming connection recovered.", 5);
+              let strings = app.strings();
+              app.set_status_message(strings.status.infra.native_reconnected, 5);
             }
           }
           StreamingConnectionState::Connected { .. } => {}
@@ -511,7 +520,7 @@ async fn handle_player_events(
               &shared_position,
               &shared_is_playing,
               &recovery_tx,
-              "Native streaming connection lost; attempting recovery.",
+              crate::infra::app_strings(&app).await.status.infra.native_lost_recovering,
               pending_end_of_track.clone(),
             )
             .await;
@@ -553,7 +562,7 @@ async fn handle_player_events(
             &shared_position,
             &shared_is_playing,
             &recovery_tx,
-            "Native streaming stalled; attempting recovery.",
+            crate::infra::app_strings(&app).await.status.infra.native_stalled,
             pending_end_of_track.clone(),
           )
           .await;
@@ -699,7 +708,10 @@ async fn handle_player_events(
           app_lock.pending_start_playback = None;
           app_lock.native_backend_pending = false;
           if restore_confirmed {
-            app_lock.set_status_message("Native playback restored.", 5);
+            {
+              let strings = app_lock.strings();
+              app_lock.set_status_message(strings.status.infra.native_restored, 5)
+            };
           }
         }
 
@@ -763,7 +775,10 @@ async fn handle_player_events(
             app_lock.native_load_watchdog = None;
           }
           if restore_confirmed {
-            app_lock.set_status_message("Native playback restored in paused state.", 5);
+            {
+              let strings = app_lock.strings();
+              app_lock.set_status_message(strings.status.infra.native_restored_paused, 5)
+            };
           }
         }
 
@@ -1125,13 +1140,30 @@ async fn handle_player_events(
 
         let recovery = session_disconnect_recovery(reason);
         let (status_message, restore_playback) = match recovery {
-          SessionDisconnectRecovery::Stop => ("Native streaming stopped.", false),
-          SessionDisconnectRecovery::RebuildIdle => {
-            ("Playback moved to another Spotify device.", false)
-          }
-          SessionDisconnectRecovery::RestorePlayback => {
-            ("Native streaming disconnected; attempting recovery.", true)
-          }
+          SessionDisconnectRecovery::Stop => (
+            crate::infra::app_strings(&app)
+              .await
+              .status
+              .infra
+              .native_stopped,
+            false,
+          ),
+          SessionDisconnectRecovery::RebuildIdle => (
+            crate::infra::app_strings(&app)
+              .await
+              .status
+              .infra
+              .native_moved,
+            false,
+          ),
+          SessionDisconnectRecovery::RestorePlayback => (
+            crate::infra::app_strings(&app)
+              .await
+              .status
+              .infra
+              .native_disconnected,
+            true,
+          ),
         };
         if let Some(request) = disconnect_streaming_player(
           &app,
@@ -1210,16 +1242,12 @@ async fn handle_player_events(
         // same message on every auto-skip during an account-wide failure.
         if consecutive_unavailable == 1 {
           let mut app = app.lock().await;
-          app.set_status_message(
-            "Couldn't play this track natively (unavailable or blocked); skipping.",
-            6,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.native_skip_unavailable, 6);
         } else if consecutive_unavailable == UNAVAILABLE_ESCALATION_THRESHOLD {
           let mut app = app.lock().await;
-          app.set_status_message(
-            "Several tracks in a row couldn't be played natively, so playback was stopped. They may be unavailable on your account or region. Press 'd' to switch to an official Spotify Connect device.",
-            20,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.native_many_unavailable, 20);
         }
       }
       PlayerEvent::Loading {
@@ -1251,7 +1279,11 @@ async fn handle_player_events(
         &shared_position,
         &shared_is_playing,
         &recovery_tx,
-        "Native streaming connection lost; attempting recovery.",
+        crate::infra::app_strings(&app)
+          .await
+          .status
+          .infra
+          .native_lost_recovering,
         pending_end_of_track.clone(),
       )
       .await;
@@ -1272,7 +1304,11 @@ async fn handle_player_events(
     &shared_position,
     &shared_is_playing,
     &recovery_tx,
-    "Native streaming stopped; attempting recovery.",
+    crate::infra::app_strings(&app)
+      .await
+      .status
+      .infra
+      .native_stopped_recovering,
     pending_end_of_track,
   )
   .await;

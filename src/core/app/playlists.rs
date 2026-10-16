@@ -200,7 +200,7 @@ impl App {
 
   pub fn begin_add_track_to_playlist_flow(&mut self, track_id: Option<String>, track_name: String) {
     let Some(track_id) = track_id else {
-      self.set_status_message("Track cannot be added to playlist".to_string(), 4);
+      self.set_status_message(self.strings().status.app.track_cannot_add.to_string(), 4);
       return;
     };
 
@@ -213,7 +213,7 @@ impl App {
         // genuinely empty the user needs to create a playlist first.
         self.dispatch(IoEvent::GetYouTubePlaylists);
         self.set_status_message(
-          "No YouTube playlists yet — create one from the sidebar".to_string(),
+          self.strings().status.app.youtube_no_playlists.to_string(),
           4,
         );
         return;
@@ -240,12 +240,23 @@ impl App {
       requested_data = true;
     }
     if requested_data {
-      self.set_status_message("Playlist destinations loading, try again".to_string(), 4);
+      self.set_status_message(
+        self
+          .strings()
+          .status
+          .app
+          .playlist_destinations_loading
+          .to_string(),
+        4,
+      );
       return;
     }
 
     if self.editable_playlists().is_empty() {
-      self.set_status_message("No editable playlists available".to_string(), 4);
+      self.set_status_message(
+        self.strings().status.app.no_editable_playlists.to_string(),
+        4,
+      );
       return;
     }
 
@@ -307,7 +318,10 @@ impl App {
         self.begin_add_track_to_playlist_flow(track_id, name);
       }
       PlayingItem::Spotify(PlayableItem::Episode(_)) => {
-        self.set_status_message("Only tracks can be added to playlists".to_string(), 4);
+        self.set_status_message(
+          self.strings().status.app.playlist_tracks_only.to_string(),
+          4,
+        );
       }
       PlayingItem::Spotify(_) => {}
       PlayingItem::QueuedSpotify(track) => {
@@ -316,10 +330,10 @@ impl App {
         self.begin_add_track_to_playlist_flow(track_id, name);
       }
       PlayingItem::NotSpotify => {
-        self.set_status_message("Add to playlist needs a Spotify track playing", 4);
+        self.set_status_message(self.strings().status.app.playlist_needs_spotify, 4);
       }
       PlayingItem::Nothing => {
-        self.set_status_message("No track currently playing".to_string(), 4);
+        self.set_status_message(self.strings().status.app.no_current_track.to_string(), 4);
       }
     }
   }
@@ -333,7 +347,15 @@ impl App {
     // instead of the Spotify API. No snapshot position — removal is by video id.
     if self.track_table.context == Some(TrackTableContext::YouTubePlaylist) {
       let Some(playlist_uri) = self.youtube_open_playlist.clone() else {
-        self.set_status_message("No YouTube playlist is open".to_string(), 4);
+        self.set_status_message(
+          self
+            .strings()
+            .status
+            .app
+            .youtube_no_open_playlist
+            .to_string(),
+          4,
+        );
         return;
       };
       let playlist_name = self
@@ -341,12 +363,12 @@ impl App {
         .iter()
         .find(|p| p.uri == playlist_uri)
         .map(|p| p.name.clone())
-        .unwrap_or_else(|| "YouTube playlist".to_string());
+        .unwrap_or_else(|| self.strings().status.app.youtube_playlist.to_string());
       let Some(track) = self.track_table.tracks.get(self.view.track_table_index) else {
         return;
       };
       let Some(track_id) = track.id.clone() else {
-        self.set_status_message("Track cannot be edited in playlist".to_string(), 4);
+        self.set_status_message(self.strings().status.app.track_cannot_edit.to_string(), 4);
         return;
       };
       let track_name = track.name.clone();
@@ -369,7 +391,12 @@ impl App {
       Some(context) => context,
       None => {
         self.set_status_message(
-          "Remove only works in selected playlist views".to_string(),
+          self
+            .strings()
+            .status
+            .app
+            .remove_requires_playlist
+            .to_string(),
           4,
         );
         return;
@@ -384,7 +411,7 @@ impl App {
     let track_id = match track.id.clone() {
       Some(id) => id,
       None => {
-        self.set_status_message("Track cannot be edited in playlist".to_string(), 4);
+        self.set_status_message(self.strings().status.app.track_cannot_edit.to_string(), 4);
         return;
       }
     };
@@ -398,7 +425,15 @@ impl App {
     {
       Some(position) => position,
       None => {
-        self.set_status_message("Cannot resolve track position for removal".to_string(), 4);
+        self.set_status_message(
+          self
+            .strings()
+            .status
+            .app
+            .remove_position_unknown
+            .to_string(),
+          4,
+        );
         return;
       }
     };
@@ -649,6 +684,7 @@ mod tests {
     )];
     app.playlist_folder_items = vec![
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "Mixes".to_string(),
         current_id: 0,
         target_id: 1,
@@ -709,6 +745,7 @@ mod tests {
   #[test]
   fn playlist_track_matcher_matches_case_insensitively_across_fields() {
     let track = TrackInfo {
+      generated_name: None,
       name: "Never Gonna Give You Up".into(),
       artists: vec!["Rick Astley".into()],
       album: "Whenever You Need Somebody".into(),
@@ -759,6 +796,7 @@ mod tests {
 
     // Insert a complete page with 2 tracks (terminal page: next is None)
     let track1 = TrackInfo {
+      generated_name: None,
       name: "Never Gonna Give You Up".into(),
       artists: vec!["Rick Astley".into()],
       album: "Whenever You Need Somebody".into(),
@@ -776,6 +814,7 @@ mod tests {
     };
 
     let track2 = TrackInfo {
+      generated_name: None,
       name: "Together Forever".into(),
       artists: vec!["Rick Astley".into()],
       album: "Whenever You Need Somebody".into(),

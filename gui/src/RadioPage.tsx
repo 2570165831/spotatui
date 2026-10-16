@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { TrackInfo } from "./bindings/TrackInfo";
@@ -13,6 +14,7 @@ import { PageHeader, PlayButton } from "./ui";
 const NO_TRACKS: TrackInfo[] = [];
 
 export interface RadioPageProps {
+  s?: GuiStrings;
   /** The seed track id. */
   id: string;
   name: string;
@@ -31,6 +33,7 @@ export interface RadioPageProps {
 
 /** The tracks Spotify recommends from one song. */
 export function RadioPage({
+  s = EN,
   id,
   name,
   table,
@@ -68,26 +71,28 @@ export function RadioPage({
     else if (tracks[cursor] && !event.repeat)
       send({ QueueTrack: tracks[cursor] });
   };
-  const title = `${name} Radio`;
+  const title = fmt(s.song_radio_named, { name });
   const first = tracks.findIndex((track) => track.uri);
 
   return (
     <section className="radio-page" aria-label={title}>
       <PageHeader
-        kind="Song radio"
+        kind={s.song_radio}
         title={title}
         image={tracks[0]?.image_url}
         tone="playlist"
         meta={
           <>
-            <span>Based on {name}</span>
-            {rows && <span className="meta-dot">{songCount(rows.length)}</span>}
+            <span>{fmt(s.based_on, { name })}</span>
+            {rows && (
+              <span className="meta-dot">{songCount(rows.length, s)}</span>
+            )}
           </>
         }
       />
       <div className="page-actions">
         <PlayButton
-          label={`Play ${title}`}
+          label={fmt(s.play_named, { name: title })}
           large
           disabled={first < 0}
           onClick={() => play(first)}
@@ -96,15 +101,16 @@ export function RadioPage({
       {tracks.length === 0 ? (
         <p className="list-empty">
           {rows
-            ? `No songs like ${name} yet.`
+            ? fmt(s.no_similar_songs, { name })
             : !available
-              ? "Song radio needs a Spotify session."
+              ? s.song_radio_needs_spotify
               : failed
-                ? `Could not load ${title}. Choose it again to retry.`
-                : `Loading ${title}…`}
+                ? fmt(s.load_playlist_failed, { name: title })
+                : fmt(s.loading_playlist, { name: title })}
         </p>
       ) : (
         <TrackTable
+          s={s}
           label={title}
           idPrefix="radio"
           tracks={tracks}

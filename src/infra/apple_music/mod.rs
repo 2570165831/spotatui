@@ -196,6 +196,7 @@ fn milliseconds(seconds: f64) -> Result<u32> {
 impl WireTrack {
   fn into_track(self) -> Result<TrackInfo> {
     Ok(TrackInfo {
+      generated_name: None,
       uri: Some(format!("applemusic:{}", persistent_id(&self.id)?)),
       name: self.name,
       artists: if self.artist.is_empty() {
@@ -336,6 +337,7 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
     .into_iter()
     .map(|p| {
       Ok(PlaylistInfo {
+        generated_name: None,
         uri: format!("applemusic:playlist:{}", persistent_id(&p.id)?),
         name: p.name,
         owner: "Music".into(),

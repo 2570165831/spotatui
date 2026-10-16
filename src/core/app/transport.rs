@@ -155,7 +155,7 @@ impl App {
     // toggle, and the paused librespot underneath is not the player the user
     // means.
     if self.decoded_sink_claimed() {
-      self.set_status_message(NOTHING_PLAYING_STATUS, 4);
+      self.set_status_message(self.strings().status.app.nothing_playing, 4);
       return;
     }
 
@@ -503,7 +503,7 @@ impl App {
   /// source owns the sink.
   pub(crate) fn transfer_playback_to_device(&mut self, device_id: String, persist: bool) {
     if self.apple_music_owns_playback() || self.active_decoded_source() {
-      self.set_status_message("Another source owns playback", 4);
+      self.set_status_message(self.strings().status.app.another_source_playing, 4);
       return;
     }
     self.dispatch(IoEvent::TransferPlaybackToDevice(device_id, persist));
@@ -527,11 +527,21 @@ impl App {
           match track_id {
             Some(id) if !id.is_empty() => {
               if let Err(e) = clipboard.set_text(format!("https://open.spotify.com/track/{}", id)) {
-                self.handle_error(anyhow!("failed to set clipboard content: {}", e));
+                self.handle_error_with_message(
+                  anyhow!("failed to set clipboard content: {}", e),
+                  self
+                    .strings()
+                    .status
+                    .app
+                    .clipboard_set_failed(&e.to_string()),
+                );
               }
             }
             _ => {
-              self.handle_error(anyhow!("Track has no ID"));
+              self.handle_error_with_message(
+                anyhow!("Track has no ID"),
+                self.strings().status.app.track_no_id.to_string(),
+              );
             }
           }
         }
@@ -540,7 +550,14 @@ impl App {
           if let Err(e) =
             clipboard.set_text(format!("https://open.spotify.com/episode/{}", episode_id))
           {
-            self.handle_error(anyhow!("failed to set clipboard content: {}", e));
+            self.handle_error_with_message(
+              anyhow!("failed to set clipboard content: {}", e),
+              self
+                .strings()
+                .status
+                .app
+                .clipboard_set_failed(&e.to_string()),
+            );
           }
         }
         _ => {}
@@ -566,18 +583,35 @@ impl App {
           match album_id {
             Some(id) if !id.is_empty() => {
               if let Err(e) = clipboard.set_text(format!("https://open.spotify.com/album/{}", id)) {
-                self.handle_error(anyhow!("failed to set clipboard content: {}", e));
+                self.handle_error_with_message(
+                  anyhow!("failed to set clipboard content: {}", e),
+                  self
+                    .strings()
+                    .status
+                    .app
+                    .clipboard_set_failed(&e.to_string()),
+                );
               }
             }
             _ => {
-              self.handle_error(anyhow!("Album has no ID"));
+              self.handle_error_with_message(
+                anyhow!("Album has no ID"),
+                self.strings().status.app.album_no_id.to_string(),
+              );
             }
           }
         }
         PlayableItem::Episode(episode) => {
           let show_id = episode.show.id.id().to_string();
           if let Err(e) = clipboard.set_text(format!("https://open.spotify.com/show/{}", show_id)) {
-            self.handle_error(anyhow!("failed to set clipboard content: {}", e));
+            self.handle_error_with_message(
+              anyhow!("failed to set clipboard content: {}", e),
+              self
+                .strings()
+                .status
+                .app
+                .clipboard_set_failed(&e.to_string()),
+            );
           }
         }
         _ => {}

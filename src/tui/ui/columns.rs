@@ -36,10 +36,11 @@ pub struct ResolvedColumn {
   pub column_id: ColumnId,
 }
 
-pub fn resolve_columns(
+pub fn resolve_columns_localized(
   table: TableColumnSet,
   layout_width: u16,
   configured: &[ColumnSpec],
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> Vec<ResolvedColumn> {
   let specs = if configured.is_empty() {
     default_specs(table)
@@ -56,7 +57,7 @@ pub fn resolve_columns(
         header: spec
           .header
           .clone()
-          .unwrap_or_else(|| def.header.to_string()),
+          .unwrap_or_else(|| localized_header(table, &def, strings).to_string()),
         width: spec.width.unwrap_or_else(|| {
           spec.width_percent.map_or_else(
             || resolve_width(layout_width, def.width),
@@ -67,6 +68,41 @@ pub fn resolve_columns(
       })
     })
     .collect()
+}
+
+#[cfg(test)]
+pub fn resolve_columns(
+  table: TableColumnSet,
+  width: u16,
+  configured: &[ColumnSpec],
+) -> Vec<ResolvedColumn> {
+  resolve_columns_localized(table, width, configured, &crate::core::i18n::screens::EN)
+}
+
+fn localized_header<'a>(
+  table: TableColumnSet,
+  def: &ColumnDef,
+  strings: &'a crate::core::i18n::screens::ScreenStrings,
+) -> &'a str {
+  match def.id {
+    "title" => match table {
+      TableColumnSet::Albums | TableColumnSet::Podcasts | TableColumnSet::Episodes => {
+        strings.column_name
+      }
+      TableColumnSet::Songs | TableColumnSet::AlbumTracks | TableColumnSet::RecentlyPlayed => {
+        strings.column_title
+      }
+    },
+    "artist" => strings.column_artist,
+    "album" => strings.column_album,
+    "length" => strings.column_length,
+    "year" => strings.column_year,
+    "date" if table == TableColumnSet::Albums => strings.column_release_date,
+    "date" => strings.column_date,
+    "duration" => strings.column_duration,
+    "publisher" => strings.column_publisher,
+    _ => def.header,
+  }
 }
 
 fn default_specs(table: TableColumnSet) -> Vec<ColumnSpec> {
@@ -323,5 +359,21 @@ mod tests {
     assert_eq!(columns[1].id, "title");
     assert_eq!(columns[1].width, 40);
     assert_eq!(columns[1].column_id, ColumnId::Title);
+  }
+  #[test]
+  fn chinese_column_defaults_leave_explicit_english_headers_untouched() {
+    use crate::core::i18n::screens::{ZH_HANS, ZH_HANT};
+    for strings in [&ZH_HANS, &ZH_HANT] {
+      let columns = resolve_columns_localized(TableColumnSet::Songs, 80, &[], strings);
+      assert_eq!(columns[1].header, strings.column_title);
+      assert_eq!(columns[2].header, strings.column_artist);
+      let configured = [ColumnSpec {
+        id: "title".into(),
+        header: Some("Title".into()),
+        ..Default::default()
+      }];
+      let custom = resolve_columns_localized(TableColumnSet::Songs, 80, &configured, strings);
+      assert_eq!(custom[0].header, "Title");
+    }
   }
 }

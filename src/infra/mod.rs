@@ -39,3 +39,10 @@ pub mod spotify;
 pub mod subsonic;
 #[cfg(feature = "youtube")]
 pub mod youtube;
+
+/// Read the active language without keeping the app lock alive across a caller's await.
+pub(crate) async fn app_strings(
+  app: &std::sync::Arc<tokio::sync::Mutex<crate::core::app::App>>,
+) -> &'static crate::core::i18n::Strings {
+  app.lock().await.strings()
+}

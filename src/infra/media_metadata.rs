@@ -58,6 +58,19 @@ impl PlaybackSnapshot {
 }
 
 pub fn current_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
+  playback_snapshot_with(app, Some(app.strings()))
+}
+
+/// History and track-change detection use stored metadata, so changing the
+/// interface language cannot start another listen or restart a lyrics lookup.
+pub fn tracking_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
+  playback_snapshot_with(app, None)
+}
+
+fn playback_snapshot_with(
+  app: &App,
+  _strings: Option<&crate::core::i18n::Strings>,
+) -> Option<PlaybackSnapshot> {
   if app.apple_music_owns_playback() {
     let snapshot = app.apple_music_state().snapshot.as_ref()?;
     let track = snapshot.track.as_ref()?;
@@ -89,7 +102,7 @@ pub fn current_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
   // track. Progress and play-state are read live from the owning source's
   // player, so they stay correct regardless of librespot's frozen position.
   #[cfg(feature = "audio-decode")]
-  if let Some(snapshot) = source_playback_snapshot(app) {
+  if let Some(snapshot) = source_playback_snapshot(app, _strings) {
     return Some(snapshot);
   }
   // A decoded source owns the sink with no session to describe yet.
@@ -192,19 +205,39 @@ pub fn current_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
   })
 }
 
+#[cfg(any(feature = "audio-decode", test))]
+fn snapshot_track_title(
+  stored_name: &str,
+  generated_name: Option<crate::core::plugin_api::GeneratedTrackName>,
+  strings: Option<&crate::core::i18n::Strings>,
+) -> String {
+  match strings {
+    Some(strings) => crate::core::plugin_api::GeneratedTrackName::display_name(
+      stored_name,
+      generated_name,
+      strings,
+    ),
+    None => stored_name,
+  }
+  .to_owned()
+}
+
 /// Build a [`PlaybackSnapshot`] for whichever non-Spotify decoded source
 /// currently owns playback (at most one `*_playback` is `Some`). Metadata comes
 /// from the source's stored track info; progress and play-state are read live
 /// from its player. Returns `None` when no such source is active.
 #[cfg(feature = "audio-decode")]
-fn source_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
+fn source_playback_snapshot(
+  app: &App,
+  strings: Option<&crate::core::i18n::Strings>,
+) -> Option<PlaybackSnapshot> {
   // The native queue slot playing a decoded track wins over every per-source
   // context: it is what is actually audible, and it drives the playbar / MPRIS /
   // cover art / lyrics via the shared track-change detector.
   #[cfg(feature = "audio-decode-queue")]
   if let Some(crate::infra::queue::QueueNowPlaying::Decoded(d)) = app.queue_now.as_ref() {
     let mut snapshot = source_snapshot(
-      d.track.name.clone(),
+      snapshot_track_title(&d.track.name, d.track.generated_name, strings),
       d.track.artists.clone(),
       d.track.album.clone(),
       d.track.duration_ms as u32,
@@ -235,7 +268,7 @@ fn source_playback_snapshot(app: &App) -> Option<PlaybackSnapshot> {
   #[cfg(feature = "local-files")]
   if let Some(local) = app.local_playback.as_ref() {
     return Some(source_snapshot(
-      local.name.clone(),
+      snapshot_track_title(&local.name, local.generated_name, strings),
       vec![local.artists.clone()],
       local.album.clone(),
       local.duration_ms as u32,
@@ -499,6 +532,23 @@ pub fn select_media_metadata(
 
 #[cfg(test)]
 pub(crate) mod tests {
+  #[test]
+  fn generated_display_titles_change_without_changing_tracking_metadata() {
+    use crate::core::i18n::EN;
+    use crate::core::plugin_api::GeneratedTrackName;
+    let mut alternate = EN;
+    alternate.status.infra.local_unknown_track = "Alternate unknown title";
+    let generated = Some(GeneratedTrackName::LocalUnknown);
+    let stored = EN.status.infra.local_unknown_track;
+    assert_eq!(snapshot_track_title(stored, generated, Some(&EN)), stored);
+    assert_eq!(
+      snapshot_track_title(stored, generated, Some(&alternate)),
+      "Alternate unknown title"
+    );
+    assert_eq!(snapshot_track_title(stored, generated, None), stored);
+    assert_eq!(snapshot_track_title(stored, None, Some(&alternate)), stored);
+  }
+
   use super::*;
   use crate::core::app::{NativePlaybackOrigin, NativeTrackInfo, NativeTrackKind};
   use chrono::{Duration, Utc};

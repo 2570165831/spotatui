@@ -22,7 +22,7 @@ pub fn draw_friends(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .border_type(BorderType::Rounded)
     .border_style(get_color(highlight_state, app.user_config.theme))
     .title(Span::styled(
-      " Friends ",
+      app.strings().screens.friends_title,
       get_color(highlight_state, app.user_config.theme)
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
     ));
@@ -62,23 +62,26 @@ fn draw_no_token_prompt(f: &mut Frame<'_>, app: &App, area: Rect) {
     Line::default(),
     Line::default(),
     Line::from(Span::styled(
-      "Account Required",
+      app.strings().screens.account_required,
       Style::default()
         .fg(theme.banner.into())
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
     )),
     Line::default(),
     Line::from(Span::styled(
-      "Friends require a spotatui web account to sync your",
+      app.strings().screens.friends_account_line1,
       Style::default().fg(theme.text.into()),
     )),
     Line::from(Span::styled(
-      "listening data and connect with other users.",
+      app.strings().screens.friends_account_line2,
       Style::default().fg(theme.text.into()),
     )),
     Line::default(),
     Line::from(vec![
-      Span::styled("  Sign up at: ", Style::default().fg(theme.inactive.into())),
+      Span::styled(
+        app.strings().screens.sign_up_at,
+        Style::default().fg(theme.inactive.into()),
+      ),
       Span::styled(
         "https://spotatui.com",
         Style::default()
@@ -88,16 +91,16 @@ fn draw_no_token_prompt(f: &mut Frame<'_>, app: &App, area: Rect) {
     ]),
     Line::default(),
     Line::from(Span::styled(
-      "After signing up, copy your sync token from the dashboard",
+      app.strings().screens.sync_token_line1,
       Style::default().fg(theme.inactive.into()),
     )),
     Line::from(Span::styled(
-      "and paste it into Settings → Behavior → sync_token",
+      app.strings().screens.sync_token_line2,
       Style::default().fg(theme.inactive.into()),
     )),
     Line::default(),
     Line::from(Span::styled(
-      "Press Esc to go back",
+      app.strings().screens.esc_back,
       Style::default().fg(theme.hint.into()),
     )),
   ];
@@ -111,13 +114,16 @@ fn draw_no_token_prompt(f: &mut Frame<'_>, app: &App, area: Rect) {
 fn draw_friend_code_card(f: &mut Frame<'_>, app: &App, area: Rect) {
   let theme = app.user_config.theme;
 
-  let code_text = app.friend_code.as_deref().unwrap_or("Loading...");
+  let code_text = app
+    .friend_code
+    .as_deref()
+    .unwrap_or(app.strings().screens.loading);
 
-  let hint = "  c — copy";
+  let hint = app.strings().screens.copy_code_short;
 
   let line = Line::from(vec![
     Span::styled(
-      " YOUR CODE  ",
+      app.strings().screens.your_code,
       Style::default()
         .fg(theme.inactive.into())
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
@@ -161,13 +167,13 @@ fn draw_friends_body(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   if filtered.is_empty() {
     let msg = if !app.view.friend_search_input.is_empty() {
-      "No friends match your search"
+      app.strings().screens.friends_no_match
     } else if app.friends_loading {
-      "Loading friends..."
+      app.strings().screens.friends_loading
     } else if app.friends.is_empty() {
-      "No friends yet — press 'a' to add one!"
+      app.strings().screens.friends_empty
     } else {
-      "No friends online right now"
+      app.strings().screens.friends_no_online
     };
     let para = Paragraph::new(Span::styled(
       msg,
@@ -210,19 +216,25 @@ fn draw_filter_tabs(f: &mut Frame<'_>, app: &App, area: Rect) {
   // Build search preview (inline: any unbound key types into the filter)
   let search_str: String = app.view.friend_search_input.iter().collect();
   let search_hint = if search_str.is_empty() {
-    "search…".to_string()
+    app.strings().screens.search_placeholder.to_string()
   } else {
     format!("/{}/", search_str)
   };
 
   let line = Line::from(vec![
-    Span::styled(format!(" All ({}) ", all_count), all_style),
+    Span::styled(app.strings().screens.friends_all(all_count), all_style),
     Span::styled(" │ ", Style::default().fg(theme.inactive.into())),
-    Span::styled(format!(" Online ({}) ", online_count), online_style),
+    Span::styled(
+      app.strings().screens.friends_online(online_count),
+      online_style,
+    ),
     Span::styled("    ", Style::default()),
     Span::styled(search_hint, Style::default().fg(theme.inactive.into())),
     Span::styled("    ", Style::default()),
-    Span::styled("+ Add Friend", Style::default().fg(theme.active.into())),
+    Span::styled(
+      app.strings().screens.add_friend_short,
+      Style::default().fg(theme.active.into()),
+    ),
     Span::raw(" "),
   ]);
 
@@ -255,7 +267,7 @@ fn draw_friend_list(f: &mut Frame<'_>, app: &App, area: Rect, friends: &[&Friend
         Style::default().fg(theme.text.into())
       };
       let name_span = Span::styled(
-        format!("{:<20}", truncate_text(&friend.name, 20)),
+        super::util::pad_to_width(&truncate_text(&friend.name, 20), 20),
         name_style,
       );
 
@@ -274,12 +286,12 @@ fn draw_friend_list(f: &mut Frame<'_>, app: &App, area: Rect, friends: &[&Friend
         ]
       } else if friend.is_online {
         vec![Span::styled(
-          "idle",
+          app.strings().screens.idle,
           Style::default().fg(theme.inactive.into()),
         )]
       } else {
         vec![Span::styled(
-          "offline",
+          app.strings().screens.offline,
           Style::default().fg(theme.inactive.into()),
         )]
       };
@@ -317,21 +329,39 @@ fn draw_help_bar(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let line = Line::from(vec![
     hint_span("↑/↓", theme),
-    Span::styled(" Navigate  ", Style::default().fg(theme.inactive.into())),
-    hint_span("c", theme),
-    Span::styled(" Copy code  ", Style::default().fg(theme.inactive.into())),
-    hint_span("a", theme),
-    Span::styled(" Add friend  ", Style::default().fg(theme.inactive.into())),
-    hint_span("u", theme),
-    Span::styled(" Unfollow  ", Style::default().fg(theme.inactive.into())),
-    hint_span("Tab", theme),
-    Span::styled(" Filter  ", Style::default().fg(theme.inactive.into())),
     Span::styled(
-      "type to search  ",
+      app.strings().screens.navigate_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
+    hint_span("c", theme),
+    Span::styled(
+      app.strings().screens.copy_code_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
+    hint_span("a", theme),
+    Span::styled(
+      app.strings().screens.add_friend_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
+    hint_span("u", theme),
+    Span::styled(
+      app.strings().screens.unfollow_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
+    hint_span("Tab", theme),
+    Span::styled(
+      app.strings().screens.filter_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
+    Span::styled(
+      app.strings().screens.type_search_hint,
       Style::default().fg(theme.inactive.into()),
     ),
     hint_span("Esc", theme),
-    Span::styled(" Back", Style::default().fg(theme.inactive.into())),
+    Span::styled(
+      app.strings().screens.back_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
   ]);
 
   f.render_widget(Paragraph::new(line), area);
@@ -356,7 +386,7 @@ fn draw_add_friend_dialog(f: &mut Frame<'_>, app: &App, parent: Rect) {
     .border_type(BorderType::Rounded)
     .border_style(Style::default().fg(theme.active.into()))
     .title(Span::styled(
-      " Add Friend ",
+      app.strings().screens.add_friend_title,
       Style::default()
         .fg(theme.active.into())
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
@@ -394,9 +424,9 @@ fn draw_add_friend_dialog(f: &mut Frame<'_>, app: &App, parent: Rect) {
     Style::default().fg(theme.inactive.into())
   };
   let tabs_line = Line::from(vec![
-    Span::styled(" By Friend Code ", code_style),
+    Span::styled(app.strings().screens.friend_code_tab, code_style),
     Span::styled(" │ ", Style::default().fg(theme.inactive.into())),
-    Span::styled(" Search by Name ", search_style),
+    Span::styled(app.strings().screens.friend_name_tab, search_style),
   ]);
   f.render_widget(Paragraph::new(tabs_line), tabs_area);
 
@@ -408,11 +438,20 @@ fn draw_add_friend_dialog(f: &mut Frame<'_>, app: &App, parent: Rect) {
   // Footer hints
   let footer_line = Line::from(vec![
     hint_span("Tab", theme),
-    Span::styled(" Switch  ", Style::default().fg(theme.inactive.into())),
+    Span::styled(
+      app.strings().screens.switch_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
     hint_span("Enter", theme),
-    Span::styled(" Add  ", Style::default().fg(theme.inactive.into())),
+    Span::styled(
+      app.strings().screens.add_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
     hint_span("Esc", theme),
-    Span::styled(" Cancel", Style::default().fg(theme.inactive.into())),
+    Span::styled(
+      app.strings().screens.cancel_hint,
+      Style::default().fg(theme.inactive.into()),
+    ),
   ]);
   f.render_widget(Paragraph::new(footer_line), help_area);
 }
@@ -422,7 +461,7 @@ fn draw_add_by_code(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let input: String = app.view.friend_add_input.iter().collect();
   let display = if input.is_empty() {
-    "Enter friend code...".to_string()
+    app.strings().screens.friend_code_placeholder.to_string()
   } else {
     input.clone()
   };
@@ -452,7 +491,7 @@ fn draw_add_by_code(f: &mut Frame<'_>, app: &App, area: Rect) {
   f.render_widget(input_widget, input_row);
 
   let hint = Paragraph::new(Span::styled(
-    "Type code then press Enter",
+    app.strings().screens.friend_code_enter,
     Style::default().fg(theme.inactive.into()),
   ))
   .alignment(ratatui::layout::Alignment::Center);
@@ -470,7 +509,7 @@ fn draw_add_by_search(f: &mut Frame<'_>, app: &App, area: Rect) {
   // Search input field
   let search_str: String = app.view.friend_user_search_input.iter().collect();
   let search_display = if search_str.is_empty() {
-    "Type a username or code...".to_string()
+    app.strings().screens.friend_search_placeholder.to_string()
   } else {
     search_str
   };
@@ -492,7 +531,7 @@ fn draw_add_by_search(f: &mut Frame<'_>, app: &App, area: Rect) {
     let msg = if app.view.friend_user_search_input.is_empty() {
       ""
     } else {
-      "No users found"
+      app.strings().screens.users_empty
     };
     f.render_widget(
       Paragraph::new(Span::styled(
@@ -519,7 +558,11 @@ fn draw_add_by_search(f: &mut Frame<'_>, app: &App, area: Rect) {
       } else {
         Style::default().fg(theme.text.into())
       };
-      let following_tag = if r.is_following { " [following]" } else { "" };
+      let following_tag = if r.is_following {
+        app.strings().screens.following_tag
+      } else {
+        ""
+      };
       ListItem::new(Line::from(vec![
         Span::styled(prefix, Style::default().fg(theme.selected.into())),
         Span::styled(format!("{}{}", r.name, following_tag), style),
@@ -556,4 +599,61 @@ pub fn filtered_friends(app: &App) -> Vec<&FriendEntry> {
       passes_filter && passes_search
     })
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::core::i18n::Language;
+  use ratatui::{backend::TestBackend, Terminal};
+  use unicode_width::UnicodeWidthChar;
+
+  #[test]
+  fn friend_status_columns_align_for_ascii_and_chinese_names() {
+    let friends: Vec<FriendEntry> = [
+      "Alice",
+      "中文",
+      "Alice中文",
+      "這個好友名稱超過二十個終端儲存格",
+      "na\u{0301}me",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, name)| FriendEntry {
+      id: index.to_string(),
+      name: name.into(),
+      name_lower: name.to_lowercase(),
+      is_online: true,
+      now_playing: None,
+      listening_ms: 0,
+      total_listens: 0,
+    })
+    .collect();
+    let rows: Vec<&FriendEntry> = friends.iter().collect();
+
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let mut app = App::default();
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let mut terminal = Terminal::new(TestBackend::new(64, rows.len() as u16)).unwrap();
+      terminal
+        .draw(|frame| draw_friend_list(frame, &app, frame.area(), &rows))
+        .unwrap();
+      let buffer = terminal.backend().buffer();
+
+      for (y, friend) in rows.iter().enumerate() {
+        // Selection marker (2), online marker (2), name (20), gap (2).
+        let mut x = 26;
+        for character in app.strings().screens.idle.chars() {
+          assert_eq!(
+            buffer.cell((x, y as u16)).unwrap().symbol(),
+            character.to_string(),
+            "{language:?}: status column shifted for {:?}",
+            friend.name,
+          );
+          x += character.width().unwrap_or(0) as u16;
+        }
+      }
+    }
+  }
 }

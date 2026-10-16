@@ -57,426 +57,458 @@ const PLAYLIST_WRITE: Requirement = Requirement::Capability(Capability::Playlist
 const SEARCH: Requirement = Requirement::Capability(Capability::Search);
 const PLAYLIST_SYNC: Requirement = Requirement::Capability(Capability::PlaylistSync);
 
-/// Every help row in display order, before the availability filter.
-pub fn help_entries() -> Vec<HelpEntry> {
+/// Every help row using the selected language, before the availability filter.
+pub fn help_entries_for(strings: &crate::core::i18n::Strings) -> Vec<HelpEntry> {
+  let help = &strings.help;
   use HelpKey::{Binding, Custom, Literal};
   vec![
     row(
-      "Scroll down to next result page",
+      help.next_page,
       Binding(|k| k.next_page),
-      "Pagination",
+      help.context_pagination,
     ),
     row(
-      "Scroll up to previous result page",
+      help.previous_page,
       Binding(|k| k.previous_page),
-      "Pagination",
+      help.context_pagination,
     ),
     row(
-      "Jump to start of playlist",
+      help.playlist_start,
       Binding(|k| k.jump_to_start),
-      "Pagination",
+      help.context_pagination,
     ),
     row(
-      "Jump to end of playlist",
+      help.playlist_end,
       Binding(|k| k.jump_to_end),
-      "Pagination",
+      help.context_pagination,
     ),
     row(
-      "Jump to currently playing album",
+      help.current_album,
       Binding(|k| k.jump_to_album),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
     row(
-      "Jump to currently playing artist's album list",
+      help.current_artist_albums,
       Binding(|k| k.jump_to_artist_album),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
     row(
-      "Jump to current play context",
+      help.current_context,
       Binding(|k| k.jump_to_context),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
     row(
-      "Increase volume by 10%",
+      help.volume_up,
       Binding(|k| k.increase_volume),
-      "General",
+      help.context_general,
     ),
     row(
-      "Decrease volume by 10%",
+      help.volume_down,
       Binding(|k| k.decrease_volume),
-      "General",
+      help.context_general,
     ),
-    row("Skip to next track", Binding(|k| k.next_track), "General"),
     row(
-      "Skip to previous track",
+      help.next_track,
+      Binding(|k| k.next_track),
+      help.context_general,
+    ),
+    row(
+      help.previous_track,
       Binding(|k| k.previous_track),
-      "General",
+      help.context_general,
     ),
     row(
-      "Force skip to previous track",
+      help.force_previous_track,
       Binding(|k| k.force_previous_track),
-      "General",
+      help.context_general,
     ),
     row(
-      "Seek backwards 5 seconds",
+      help.seek_backward,
       Binding(|k| k.seek_backwards),
-      "General",
+      help.context_general,
     ),
     row(
-      "Seek forwards 5 seconds",
+      help.seek_forward,
       Binding(|k| k.seek_forwards),
-      "General",
+      help.context_general,
     ),
-    row("Toggle shuffle", Binding(|k| k.shuffle), "General"),
     row(
-      "Copy url to currently playing song/episode",
+      help.toggle_shuffle,
+      Binding(|k| k.shuffle),
+      help.context_general,
+    ),
+    row(
+      help.copy_song_url,
       Binding(|k| k.copy_song_url),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
     row(
-      "Copy url to currently playing album/show",
+      help.copy_album_url,
       Binding(|k| k.copy_album_url),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
-    row("Cycle repeat mode", Binding(|k| k.repeat), "General"),
     row(
-      "Move selection left",
+      help.cycle_repeat,
+      Binding(|k| k.repeat),
+      help.context_general,
+    ),
+    row(
+      help.move_left,
       Custom(|app| {
         format!(
-          "{} | <Left Arrow Key> | <Ctrl+b>",
-          app.user_config.keys.move_left
+          "{} | <{}> | <Ctrl+b>",
+          app.user_config.keys.move_left,
+          app.strings().help.arrow_key("Left")
         )
       }),
-      "General",
+      help.context_general,
     ),
     row(
-      "Move selection down",
+      help.move_down,
       Custom(|app| {
         format!(
-          "{} | <Down Arrow Key> | <Ctrl+n>",
-          app.user_config.keys.move_down
+          "{} | <{}> | <Ctrl+n>",
+          app.user_config.keys.move_down,
+          app.strings().help.arrow_key("Down")
         )
       }),
-      "General",
+      help.context_general,
     ),
     row(
-      "Move selection up",
-      Custom(|app| format!("{} | <Up Arrow Key>", app.user_config.keys.move_up)),
-      "General",
-    ),
-    row(
-      "Move selection right",
+      help.move_up,
       Custom(|app| {
         format!(
-          "{} | <Right Arrow Key> | <Ctrl+f>",
-          app.user_config.keys.move_right
+          "{} | <{}>",
+          app.user_config.keys.move_up,
+          app.strings().help.arrow_key("Up")
         )
       }),
-      "General (Ctrl+f searches inside playlist track tables)",
+      help.context_general,
     ),
-    row("Move selection to top of list", Literal("H"), "General"),
-    row("Move selection to middle of list", Literal("M"), "General"),
-    row("Move selection to bottom of list", Literal("L"), "General"),
-    row("Enter input for search", Binding(|k| k.search), "General").needs(SEARCH),
-    row("Filter help rows", Binding(|k| k.search), "Help menu"),
-    row("Filter settings rows", Binding(|k| k.search), "Settings"),
     row(
-      "Pause/Resume playback",
+      help.move_right,
+      Custom(|app| {
+        format!(
+          "{} | <{}> | <Ctrl+f>",
+          app.user_config.keys.move_right,
+          app.strings().help.arrow_key("Right")
+        )
+      }),
+      help.context_general_playlist_search,
+    ),
+    row(help.list_top, Literal("H"), help.context_general),
+    row(help.list_middle, Literal("M"), help.context_general),
+    row(help.list_bottom, Literal("L"), help.context_general),
+    row(help.search, Binding(|k| k.search), help.context_general).needs(SEARCH),
+    row(help.filter_help, Binding(|k| k.search), help.context_help),
+    row(
+      help.filter_settings,
+      Binding(|k| k.search),
+      help.context_settings,
+    ),
+    row(
+      help.toggle_playback,
       Binding(|k| k.toggle_playback),
-      "General",
+      help.context_general,
     ),
-    row("Enter active mode", Literal("<Enter>"), "General"),
+    row(help.active_mode, Literal("<Enter>"), help.context_general),
     row(
-      "Go to audio analysis screen",
+      help.audio_analysis,
       Binding(|k| k.audio_analysis),
-      "General",
+      help.context_general,
+    ),
+    row(help.visualizer_style, Literal("V"), help.context_general),
+    row(
+      help.lyrics_view,
+      Binding(|k| k.lyrics_view),
+      help.context_general,
     ),
     row(
-      "Cycle visualizer style (in audio analysis)",
-      Literal("V"),
-      "General",
-    ),
-    row("Go to lyrics view", Binding(|k| k.lyrics_view), "General"),
-    row(
-      "Scroll lyrics (pauses auto-follow)",
+      help.lyrics_scroll,
       Custom(|app| {
         format!(
           "{}/{} | <Up>/<Down> | <Ctrl+n>",
           app.user_config.keys.move_up, app.user_config.keys.move_down
         )
       }),
-      "Lyrics view",
+      help.context_lyrics,
     ),
     row(
-      "Resume following the current lyric line",
-      Literal("f or <Esc>"),
-      "Lyrics view",
+      help.lyrics_follow,
+      Custom(|app| app.strings().help.key_alternative("f", "<Esc>")),
+      help.context_lyrics,
     ),
     row(
-      "Nudge lyric timing earlier/later",
+      help.lyrics_timing,
       Custom(|app| {
         format!(
           "{}/{} | <Right>/<Left> | <Ctrl+f>/<Ctrl+b>",
           app.user_config.keys.move_right, app.user_config.keys.move_left
         )
       }),
-      "Lyrics view",
+      help.context_lyrics,
     ),
     row(
-      "Toggle miniplayer view",
+      help.miniplayer,
       Binding(|k| k.miniplayer_view),
-      "General",
+      help.context_general,
     ),
     #[cfg(feature = "cover-art")]
     row(
-      "Go to cover art view",
+      help.cover_art,
       Binding(|k| k.cover_art_view),
-      "General",
+      help.context_general,
     ),
+    row(help.back, Binding(|k| k.back), help.context_general),
     row(
-      "Go back or exit when nowhere left to back to",
-      Binding(|k| k.back),
-      "General",
-    ),
-    row(
-      "Switch music source / select playback device",
+      help.source_device,
       Binding(|k| k.manage_devices),
-      "General",
+      help.context_general,
     ),
     row(
-      "Open settings",
+      help.settings_open,
       Custom(|app| app.effective_open_settings_key().to_string()),
-      "General",
+      help.context_general,
     ),
     row(
-      "Save settings",
+      help.settings_save,
       Custom(|app| app.effective_save_settings_key().to_string()),
-      "Settings",
-    ),
-    row("Enter hover mode", Literal("<Esc>"), "Selected block"),
-    row(
-      "Save track in list or table",
-      Literal("s"),
-      "Selected block",
-    )
-    .needs(LIKE),
-    row(
-      "Add selected track to playlist",
-      Literal("w"),
-      "Track table / search songs / artist top tracks / recently played",
-    )
-    .needs(PLAYLIST_WRITE),
-    row(
-      "Add currently playing track to playlist",
-      Literal("w"),
-      "Playbar",
-    )
-    .needs(SESSION),
-    row(
-      "Quick-add currently playing track to playlist",
-      Literal("W"),
-      "Global",
-    )
-    .needs(SESSION),
-    row("Decrease sidebar width", Literal("{"), "Layout"),
-    row("Increase sidebar width", Literal("}"), "Layout"),
-    row("Decrease playbar or library height", Literal("("), "Layout"),
-    row("Increase playbar or library height", Literal(")"), "Layout"),
-    row("Reset layout to defaults", Literal("|"), "Layout"),
-    row(
-      "Remove selected track from current playlist",
-      Literal("x"),
-      "Track table (playlist views)",
-    )
-    .needs(PLAYLIST_WRITE),
-    row(
-      "Search tracks in current playlist",
-      Literal("<Ctrl+f>"),
-      "Track table (playlist views)",
-    )
-    .needs(SPOTIFY),
-    row(
-      "Clear playlist track search filter",
-      Binding(|k| k.back),
-      "Track table (filtered playlist views)",
-    )
-    .needs(SPOTIFY),
-    row(
-      "Start playback or enter album/artist/playlist",
-      Binding(|k| k.submit),
-      "Selected block",
+      help.context_settings,
     ),
     row(
-      "Play recommendations for song/artist",
-      Literal("r"),
-      "Selected block",
-    )
-    .needs(SPOTIFY),
-    row(
-      "Play all tracks for artist",
-      Literal("e"),
-      "Library -> Artists",
-    )
-    .needs(SPOTIFY),
-    row("Search with input text", Literal("<Enter>"), "Search input").needs(SEARCH),
-    row(
-      "Move cursor one space left",
-      Literal("<Left Arrow Key>"),
-      "Search input",
-    ),
-    row(
-      "Move cursor one space right",
-      Literal("<Right Arrow Key>"),
-      "Search input",
-    ),
-    row("Delete entire input", Literal("<Ctrl+l>"), "Search input"),
-    row(
-      "Delete text from cursor to start of input",
-      Literal("<Ctrl+u>"),
-      "Search input",
-    ),
-    row(
-      "Delete text from cursor to end of input",
-      Literal("<Ctrl+k>"),
-      "Search input",
-    ),
-    row("Delete previous word", Literal("<Ctrl+w>"), "Search input"),
-    row(
-      "Jump to start of input",
-      Literal("<Ctrl+a>"),
-      "Search input",
-    ),
-    row("Jump to end of input", Literal("<Ctrl+e>"), "Search input"),
-    row(
-      "Escape from the input back to hovered block",
+      help.hover_mode,
       Literal("<Esc>"),
-      "Search input",
+      help.context_selected_block,
     ),
-    row("Delete saved album", Literal("D"), "Library -> Albums").needs(SPOTIFY),
+    row(help.save_track, Literal("s"), help.context_selected_block).needs(LIKE),
     row(
-      "Unfollow artist",
-      Literal("D"),
-      "Library -> Artists / Artist page -> Related artists / Search result",
-    )
-    .needs(SPOTIFY),
-    row("Remove saved show", Literal("D"), "Library -> Podcasts").needs(SPOTIFY),
-    row("Delete saved playlist", Literal("D"), "Playlist").needs(PLAYLIST_WRITE),
-    row(
-      "Mirror playlist onto another source",
-      Literal("m"),
-      "Playlist",
-    )
-    .needs(PLAYLIST_SYNC),
-    row("Remove favorite radio station", Literal("D"), "Radio").needs(RADIO),
-    row("Follow an artist/playlist", Literal("w"), "Search result").needs(SPOTIFY),
-    row(
-      "Save (like) album to library",
+      help.add_selected_to_playlist,
       Literal("w"),
-      "Search result / Album tracks / Artist page -> Albums",
+      help.context_add_track,
+    )
+    .needs(PLAYLIST_WRITE),
+    row(
+      help.add_playing_to_playlist,
+      Literal("w"),
+      help.context_playbar,
+    )
+    .needs(SESSION),
+    row(help.quick_add_playing, Literal("W"), help.context_global).needs(SESSION),
+    row(help.sidebar_narrower, Literal("{"), help.context_layout),
+    row(help.sidebar_wider, Literal("}"), help.context_layout),
+    row(help.panels_shorter, Literal("("), help.context_layout),
+    row(help.panels_taller, Literal(")"), help.context_layout),
+    row(help.layout_reset, Literal("|"), help.context_layout),
+    row(
+      help.remove_playlist_track,
+      Literal("x"),
+      help.context_playlist_tracks,
+    )
+    .needs(PLAYLIST_WRITE),
+    row(
+      help.search_playlist,
+      Literal("<Ctrl+f>"),
+      help.context_playlist_tracks,
     )
     .needs(SPOTIFY),
     row(
-      "Play random song in playlist",
-      Literal("S"),
-      "Selected Playlist",
-    ),
-    row(
-      "Toggle sort order of podcast episodes",
-      Literal("S"),
-      "Selected Show",
+      help.clear_playlist_filter,
+      Binding(|k| k.back),
+      help.context_filtered_playlist_tracks,
     )
     .needs(SPOTIFY),
-    row("Follow show", Literal("s"), "Selected Show").needs(SPOTIFY),
-    row("Unfollow show", Literal("D"), "Selected Show").needs(SPOTIFY),
     row(
-      "Add track to queue",
-      Binding(|k| k.add_item_to_queue),
-      "Hovered over track",
-    ),
-    row("Show queue", Binding(|k| k.show_queue), "General"),
-    row(
-      "Remove selected track from queue",
-      Binding(|k| k.remove_from_queue),
-      "Queue",
+      help.play_selection,
+      Binding(|k| k.submit),
+      help.context_selected_block,
     ),
     row(
-      "Move selected queue item down / up",
-      Literal("J / K"),
-      "Queue",
-    ),
+      help.recommendations,
+      Literal("r"),
+      help.context_selected_block,
+    )
+    .needs(SPOTIFY),
     row(
-      "Play selected queue item (skip ahead to it)",
+      help.artist_tracks,
+      Literal("e"),
+      help.context_library_artists,
+    )
+    .needs(SPOTIFY),
+    row(
+      help.search_submit,
       Literal("<Enter>"),
-      "Queue",
+      help.context_search_input,
+    )
+    .needs(SEARCH),
+    row(
+      help.cursor_left,
+      Custom(|app| format!("<{}>", app.strings().help.arrow_key("Left"))),
+      help.context_search_input,
     ),
     row(
-      "Toggle saved state for currently playing track/episode",
+      help.cursor_right,
+      Custom(|app| format!("<{}>", app.strings().help.arrow_key("Right"))),
+      help.context_search_input,
+    ),
+    row(
+      help.input_clear,
+      Literal("<Ctrl+l>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_delete_before,
+      Literal("<Ctrl+u>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_delete_after,
+      Literal("<Ctrl+k>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_delete_word,
+      Literal("<Ctrl+w>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_start,
+      Literal("<Ctrl+a>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_end,
+      Literal("<Ctrl+e>"),
+      help.context_search_input,
+    ),
+    row(
+      help.input_escape,
+      Literal("<Esc>"),
+      help.context_search_input,
+    ),
+    row(help.album_delete, Literal("D"), help.context_library_albums).needs(SPOTIFY),
+    row(
+      help.artist_unfollow,
+      Literal("D"),
+      help.context_artist_unfollow,
+    )
+    .needs(SPOTIFY),
+    row(
+      help.show_remove,
+      Literal("D"),
+      help.context_library_podcasts,
+    )
+    .needs(SPOTIFY),
+    row(help.playlist_delete, Literal("D"), help.context_playlist).needs(PLAYLIST_WRITE),
+    row(help.playlist_mirror, Literal("m"), help.context_playlist).needs(PLAYLIST_SYNC),
+    row(help.radio_remove, Literal("D"), help.context_radio).needs(RADIO),
+    row(
+      help.follow_artist_playlist,
+      Literal("w"),
+      help.context_search_results,
+    )
+    .needs(SPOTIFY),
+    row(help.album_save, Literal("w"), help.context_save_album).needs(SPOTIFY),
+    row(
+      help.playlist_random,
+      Literal("S"),
+      help.context_selected_playlist,
+    ),
+    row(help.episode_sort, Literal("S"), help.context_selected_show).needs(SPOTIFY),
+    row(help.show_follow, Literal("s"), help.context_selected_show).needs(SPOTIFY),
+    row(help.show_unfollow, Literal("D"), help.context_selected_show).needs(SPOTIFY),
+    row(
+      help.queue_add,
+      Binding(|k| k.add_item_to_queue),
+      help.context_hovered_track,
+    ),
+    row(
+      help.queue_show,
+      Binding(|k| k.show_queue),
+      help.context_general,
+    ),
+    row(
+      help.queue_remove,
+      Binding(|k| k.remove_from_queue),
+      help.context_queue,
+    ),
+    row(help.queue_move, Literal("J / K"), help.context_queue),
+    row(help.queue_play, Literal("<Enter>"), help.context_queue),
+    row(
+      help.toggle_saved,
       Binding(|k| k.like_track),
-      "General",
+      help.context_general,
     )
     .needs(LIKE),
     row(
-      "Favorite highlighted/playing radio station",
+      help.radio_favorite,
       Binding(|k| k.like_track),
-      "Radio",
+      help.context_radio,
     )
     .needs(RADIO),
     row(
-      "Generate listening recap card (selected period on Stats, 30 days elsewhere)",
+      help.listening_recap,
       Binding(|k| k.generate_recap),
-      "General",
-    ),
-    row("Open Stats screen", Literal("Library sidebar"), "Stats"),
-    row("Cycle stats period", Literal("[ / ]"), "Stats"),
-    row("Play selected top track", Literal("<Enter>"), "Stats").needs(SESSION),
-    row(
-      "Open Playlist sync screen",
-      Literal("Library sidebar"),
-      "Playlist sync",
+      help.context_general,
     ),
     row(
-      "Run every playlist-sync link now",
+      help.stats_open,
+      Literal(help.library_sidebar),
+      help.context_stats,
+    ),
+    row(help.stats_period, Literal("[ / ]"), help.context_stats),
+    row(help.stats_play, Literal("<Enter>"), help.context_stats).needs(SESSION),
+    row(
+      help.playlist_sync_open,
+      Literal(help.library_sidebar),
+      help.context_playlist_sync,
+    ),
+    row(
+      help.playlist_sync_run,
       Literal("s"),
-      "Playlist sync",
+      help.context_playlist_sync,
     ),
-    row("Remove selected link", Literal("D"), "Playlist sync"),
-    row("Open sort menu", Literal(","), "Track/Album/Artist list"),
     row(
-      "Open Listening Party menu",
+      help.playlist_sync_remove,
+      Literal("D"),
+      help.context_playlist_sync,
+    ),
+    row(help.sort_open, Literal(","), help.context_sortable_lists),
+    row(
+      help.party_open,
       Binding(|k| k.listening_party),
-      "General",
+      help.context_general,
     )
     .needs(SESSION),
     #[cfg(feature = "ai-dj")]
-    row("Open the AI DJ screen", Binding(|k| k.dj_open), "AI DJ"),
+    row(help.dj_open, Binding(|k| k.dj_open), help.context_ai_dj),
     #[cfg(feature = "ai-dj")]
     row(
-      "Toggle DJ auto-queue (keep the queue topped up)",
+      help.dj_auto_queue,
       Binding(|k| k.dj_toggle_auto_queue),
-      "AI DJ",
+      help.context_ai_dj,
     ),
     #[cfg(feature = "ai-dj")]
     row(
-      "Shift the vibe (drop the DJ's queued tracks and re-ask)",
+      help.dj_vibe,
       Binding(|k| k.dj_vibe_shift),
-      "AI DJ",
+      help.context_ai_dj,
     ),
     #[cfg(feature = "ai-dj")]
     row(
-      "Toggle \"only tracks I do not already have\"",
+      help.dj_fresh,
       Binding(|k| k.dj_toggle_fresh_only),
-      "AI DJ",
+      help.context_ai_dj,
     ),
     #[cfg(feature = "ai-dj")]
     row(
-      "Choose which AI and model the DJ uses",
+      help.dj_model,
       Binding(|k| k.dj_pick_model),
-      "AI DJ",
+      help.context_ai_dj,
     ),
   ]
 }
@@ -485,7 +517,7 @@ pub fn help_entries() -> Vec<HelpEntry> {
 /// an unmet rebindable row stays, marked with the reason.
 pub fn help_rows(app: &App) -> Vec<Vec<String>> {
   let keys = &app.user_config.keys;
-  help_entries()
+  help_entries_for(app.strings())
     .into_iter()
     .filter_map(|entry| {
       let availability = app.availability(entry.needs);
@@ -494,7 +526,10 @@ pub fn help_rows(app: &App) -> Vec<Vec<String>> {
       } else if matches!(entry.key, HelpKey::Literal(_)) {
         return None;
       } else {
-        format!("{} ({})", entry.description, availability.hint()?)
+        app.strings().help.unavailable_description(
+          entry.description,
+          &availability.localized_hint(app.strings())?,
+        )
       };
       let key = match entry.key {
         HelpKey::Binding(read) => read(keys).to_string(),
@@ -818,10 +853,166 @@ mod tests {
   }
 
   #[test]
+  fn every_english_help_event_and_description_matches_the_pre_localization_table() {
+    // Captured by running help_entries/help_rows at 5d66123b with cover-art + ai-dj.
+    // Keep all source/session views as well as rows hidden by availability.
+    let baseline: serde_json::Value =
+      serde_json::from_str(include_str!("help_english_5d66123b.json")).unwrap();
+    let mut entries: Vec<Vec<String>> =
+      serde_json::from_value(baseline["entries"].clone()).unwrap();
+    // The fixture was captured on macOS; Open settings defaults to Alt+, elsewhere.
+    let open_settings = crate::core::user_config::UserConfig::new()
+      .keys
+      .open_settings
+      .to_string();
+    for row in entries.iter_mut().filter(|row| row[0] == "Open settings") {
+      row[1] = open_settings.clone();
+    }
+    let enabled = |row: &Vec<String>| {
+      (cfg!(feature = "cover-art") || row[0] != "Go to cover art view")
+        && (cfg!(feature = "ai-dj") || row[2] != "AI DJ")
+    };
+    let app = App::default_connected();
+    let actual: Vec<Vec<String>> = help_entries_for(&crate::core::i18n::EN)
+      .into_iter()
+      .map(|entry| {
+        let event = match entry.key {
+          HelpKey::Binding(read) => read(&app.user_config.keys).to_string(),
+          HelpKey::Literal(text) => text.to_string(),
+          HelpKey::Custom(build) => build(&app),
+        };
+        vec![
+          entry.description.to_string(),
+          event,
+          entry.context.to_string(),
+        ]
+      })
+      .collect();
+    assert_eq!(
+      actual,
+      entries
+        .iter()
+        .filter(|row| enabled(row))
+        .cloned()
+        .collect::<Vec<_>>()
+    );
+    for view in baseline["views"].as_array().unwrap() {
+      let mut app = if view[1].as_bool().unwrap() {
+        App::default_connected()
+      } else {
+        App::default()
+      };
+      app.active_source = serde_json::from_value(view[0].clone()).unwrap();
+      let expected = view[2]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| {
+          let index = item.as_u64().unwrap_or_else(|| item[0].as_u64().unwrap()) as usize;
+          if !enabled(&entries[index]) {
+            return None;
+          }
+          let mut row = entries[index].clone();
+          if item.is_array() {
+            row[0] = item[1].as_str().unwrap().to_string();
+          }
+          Some(row)
+        })
+        .collect::<Vec<_>>();
+      assert_eq!(
+        help_rows(&app),
+        expected,
+        "{} connected={}",
+        view[0],
+        view[1]
+      );
+      use ratatui::{backend::TestBackend, Terminal};
+      let width = 600u16;
+      let height = expected.len() as u16 + 12;
+      app.view.size = crate::core::geometry::Viewport { width, height };
+      crate::tui::ui::popups::ensure_help_menu_model(&mut app);
+      let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+      terminal
+        .draw(|frame| crate::tui::ui::popups::draw_help_menu(frame, &app))
+        .unwrap();
+      let buffer = terminal.backend().buffer();
+      let description_width = ((width - 4) as f32 * 0.40) as u16;
+      let event_width = ((width - 4) as f32 * 0.30) as u16;
+      for (index, row) in expected.iter().enumerate() {
+        let y = index as u16 + 4;
+        let cell_text = |x, length| {
+          (x..x + length)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+        };
+        assert_eq!(
+          cell_text(3, description_width).trim_end(),
+          row[0],
+          "rendered description {index}"
+        );
+        assert_eq!(
+          cell_text(3 + description_width + 2, event_width).trim_end(),
+          row[1],
+          "rendered Event {index}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn help_events_translate_words_without_changing_literal_keys() {
+    use crate::core::i18n::Language;
+    let mut app = App::default();
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let help = &app.strings().help;
+      let rows = help_rows(&app);
+      let event = |description| rows.iter().find(|row| row[0] == description).unwrap()[1].clone();
+      assert_eq!(
+        event(help.move_left),
+        format!(
+          "{} | <{}> | <Ctrl+b>",
+          app.user_config.keys.move_left,
+          help.arrow_key("Left")
+        )
+      );
+      assert_eq!(
+        event(help.move_down),
+        format!(
+          "{} | <{}> | <Ctrl+n>",
+          app.user_config.keys.move_down,
+          help.arrow_key("Down")
+        )
+      );
+      assert_eq!(
+        event(help.move_up),
+        format!(
+          "{} | <{}>",
+          app.user_config.keys.move_up,
+          help.arrow_key("Up")
+        )
+      );
+      assert_eq!(
+        event(help.move_right),
+        format!(
+          "{} | <{}> | <Ctrl+f>",
+          app.user_config.keys.move_right,
+          help.arrow_key("Right")
+        )
+      );
+      assert_eq!(
+        event(help.lyrics_follow),
+        help.key_alternative("f", "<Esc>")
+      );
+    }
+  }
+
+  #[test]
   fn a_connected_spotify_session_lists_every_row_it_can_serve_unmarked() {
     let app = App::default_connected();
     let rows = descriptions(&app);
-    for entry in help_entries() {
+    for entry in help_entries_for(&crate::core::i18n::EN) {
       if app.availability(entry.needs).is_available() {
         assert!(
           rows.contains(&entry.description.to_string()),

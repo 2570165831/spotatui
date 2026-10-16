@@ -308,9 +308,7 @@ impl App {
         // `Added` promises the station was appended at `before_len`; if it is
         // not there, don't report success for a station that was never saved.
         self.runtime_state.radio_stations.truncate(before_len);
-        return Err(anyhow!(
-          "added radio station was not found at the expected position; not persisted"
-        ));
+        return Err(anyhow!(self.strings().status.app.radio_position_missing));
       };
       if let Err(error) = self.save_runtime_state(&PersistedRuntimeState::radio_station(station)) {
         self.runtime_state.radio_stations.truncate(before_len);
@@ -391,7 +389,7 @@ impl App {
   /// Favorite one radio station: persist it and mirror it into the sidebar.
   pub(crate) fn favorite_radio_station(&mut self, station: TrackInfo) {
     let Some(url) = station.uri.as_deref().and_then(radio_stream_url) else {
-      self.set_status_message("Radio station has no stream URL".to_string(), 4);
+      self.set_status_message(self.strings().status.app.radio_no_url.to_string(), 4);
       return;
     };
 
@@ -400,12 +398,19 @@ impl App {
     let url = url.to_string();
 
     let message = match self.add_radio_station(&name, &url) {
-      Ok(RadioStationAddOutcome::Added) => format!("Favorited radio station: {name}"),
+      Ok(RadioStationAddOutcome::Added) => self.strings().status.app.radio_favorited(&name),
       Ok(RadioStationAddOutcome::AlreadyExists) => {
-        format!("Radio station already favorited: {name}")
+        self.strings().status.app.radio_already_favorited(&name)
       }
       Err(error) => {
-        self.set_error_status_message(format!("Could not favorite radio station: {error}"), 6);
+        self.set_error_status_message(
+          self
+            .strings()
+            .status
+            .app
+            .radio_favorite_failed(&error.to_string()),
+          6,
+        );
         return;
       }
     };
@@ -418,7 +423,7 @@ impl App {
   /// reported, not removed.
   pub(crate) fn remove_saved_radio_station(&mut self, uri: String) {
     let Some(url) = radio_stream_url(&uri) else {
-      self.set_status_message("Radio station has no stream URL".to_string(), 4);
+      self.set_status_message(self.strings().status.app.radio_no_url.to_string(), 4);
       return;
     };
     let station_name = |app: &Self| {
@@ -432,10 +437,7 @@ impl App {
     let config_owned = self.is_config_owned_radio_station_url(url);
     if config_owned && !self.is_state_owned_radio_station_url(url) {
       let name = station_name(self);
-      self.set_status_message(
-        format!("Radio station is configured in config.yml: {name}"),
-        4,
-      );
+      self.set_status_message(self.strings().status.app.radio_configured(&name), 4);
       return;
     }
 
@@ -449,14 +451,21 @@ impl App {
         }
         // The saved copy's name, not the sidebar row's: a station configured in
         // config.yml keeps its configured name while its saved duplicate goes.
-        self.set_status_message(format!("Removed saved radio station: {}", removed.name), 4);
+        self.set_status_message(self.strings().status.app.radio_removed(&removed.name), 4);
       }
       Ok(None) => {
         let name = station_name(self);
-        self.set_status_message(format!("Radio station is not favorited: {name}"), 4);
+        self.set_status_message(self.strings().status.app.radio_not_favorited(&name), 4);
       }
       Err(error) => {
-        self.set_error_status_message(format!("Could not remove radio station: {error}"), 6);
+        self.set_error_status_message(
+          self
+            .strings()
+            .status
+            .app
+            .radio_remove_failed(&error.to_string()),
+          6,
+        );
       }
     }
   }
@@ -488,7 +497,10 @@ impl App {
           // every ordinary message for the rest of the session.
           if !self.state_save_error_reported {
             self.state_save_error_reported = true;
-            self.set_error_status_message(format!("Failed to save state: {}", e), 8);
+            self.set_error_status_message(
+              self.strings().status.app.state_save_failed(&e.to_string()),
+              8,
+            );
           }
         }
       }

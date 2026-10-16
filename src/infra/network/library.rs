@@ -44,6 +44,7 @@ const LIBRARY_CONTAINS_MAX_URIS: usize = 40;
 /// Contains batches in flight at once; the answers keep the order of the uris.
 const LIBRARY_CONTAINS_PARALLEL: usize = 4;
 
+#[cfg(test)]
 const EXTERNAL_PLAYLIST_UNAVAILABLE_STATUS: &str = concat!(
   "Spotify Development Mode blocks playlist contents owned by another user. ",
   "Only playlists you own or collaborate on are available."
@@ -595,6 +596,7 @@ fn librespot_track_info(track: &LibrespotTrack) -> Option<TrackInfo> {
   let release_date = (year > 0).then(|| format!("{year:04}"));
 
   Some(TrackInfo {
+    generated_name: None,
     uri,
     name: track.name.clone(),
     artists: artist_refs
@@ -794,7 +796,10 @@ pub async fn prefetch_playlist_tracks_page_task(
       Err(PlaylistPageError::UnsupportedExternal) => {
         let mut app_guard = app.lock().await;
         app_guard.playlist_tracks_prefetch_in_flight.remove(&offset);
-        app_guard.set_error_status_message(EXTERNAL_PLAYLIST_UNAVAILABLE_STATUS, 8);
+        {
+          let strings = app_guard.strings();
+          app_guard.set_error_status_message(strings.status.infra.playlist_external_unavailable, 8)
+        };
         return;
       }
       Err(PlaylistPageError::Request(_)) => {
@@ -1074,7 +1079,10 @@ async fn liked_lookup_worker_task(app: Arc<Mutex<App>>) {
         // stay pending and the next dispatch restarts the worker.
         guard.liked_lookup_pending.extend(batch);
         guard.liked_lookup_worker_running = false;
-        guard.set_status_message(format!("Could not check liked track state: {e}"), 5);
+        {
+          let strings = guard.strings();
+          guard.set_status_message(strings.status.infra.liked_check_failed(&e.to_string()), 5)
+        };
         return;
       }
     }
@@ -1133,14 +1141,20 @@ async fn search_playlist_tracks_task(search: PlaylistTrackSearch, terms: Vec<Str
         }
         match error {
           PlaylistPageError::UnsupportedExternal => {
-            app.set_error_status_message(EXTERNAL_PLAYLIST_UNAVAILABLE_STATUS, 8);
+            let strings = app.strings();
+            app.set_error_status_message(strings.status.infra.playlist_external_unavailable, 8);
           }
           // A rate limit is a wait, not a failure page: the pump shows it the
           // same way.
           PlaylistPageError::Request(error) if is_rate_limited_error(&error) => {
-            app.set_error_status_message(error.to_string(), 8);
+            let message = app
+              .strings()
+              .status
+              .infra
+              .network_rate_error(&error.to_string());
+            app.set_error_status_message(message, 8);
           }
-          PlaylistPageError::Request(error) => app.handle_error(error),
+          PlaylistPageError::Request(error) => super::report_request_error(&mut app, error),
         }
         return;
       }
@@ -1167,15 +1181,20 @@ async fn search_playlist_tracks_task(search: PlaylistTrackSearch, terms: Vec<Str
   let mut app = app.lock().await;
   if app.apply_playlist_track_search_results(&playlist_id, query.clone(), matches) {
     let scope = if capped {
-      format!(
-        " in the first {} tracks",
-        PLAYLIST_SEARCH_MAX_PAGES * PLAYLIST_SEARCH_PAGE_SIZE
-      )
+      app
+        .strings()
+        .status
+        .infra
+        .playlist_search_scope(PLAYLIST_SEARCH_MAX_PAGES * PLAYLIST_SEARCH_PAGE_SIZE)
     } else {
       String::new()
     };
+    let strings = app.strings();
     app.set_status_message(
-      format!("{match_count} playlist tracks match \"{query}\"{scope}"),
+      strings
+        .status
+        .infra
+        .playlist_search_matches(match_count, &query, &scope),
       3,
     );
   }
@@ -1210,7 +1229,8 @@ async fn fetch_all_playlist_tracks_and_sort_task(
         app
           .playlist_sort_fetch_in_flight
           .remove(&playlist_id_string);
-        app.set_error_status_message(EXTERNAL_PLAYLIST_UNAVAILABLE_STATUS, 8);
+        let strings = app.strings();
+        app.set_error_status_message(strings.status.infra.playlist_external_unavailable, 8);
         return;
       }
       Err(PlaylistPageError::Request(error)) => {
@@ -1218,7 +1238,7 @@ async fn fetch_all_playlist_tracks_and_sort_task(
         app
           .playlist_sort_fetch_in_flight
           .remove(&playlist_id_string);
-        app.handle_error(error);
+        super::report_request_error(&mut app, error);
         return;
       }
     };
@@ -1327,7 +1347,8 @@ async fn finish_playlists_fetch(
         original_selection.2,
       );
     }
-    app.set_status_message("Playlist refresh incomplete; kept the previous list.", 8);
+    let strings = app.strings();
+    app.set_status_message(strings.status.infra.playlist_refresh_partial, 8);
     return;
   }
 
@@ -1588,7 +1609,8 @@ impl LibraryNetwork for Network {
         if app.pending_playlist_open.as_deref() == Some(playlist_id.id()) {
           app.pending_playlist_open = None;
         }
-        app.set_error_status_message(EXTERNAL_PLAYLIST_UNAVAILABLE_STATUS, 8);
+        let strings = app.strings();
+        app.set_error_status_message(strings.status.infra.playlist_external_unavailable, 8);
       }
       Err(PlaylistPageError::Request(error)) => {
         let mut app = self.app.lock().await;
@@ -1890,8 +1912,8 @@ impl LibraryNetwork for Network {
           }
 
           playlist_name
-            .map(|name| format!("Added to {}", name))
-            .unwrap_or_else(|| "Added to playlist".to_string())
+            .map(|name| app.strings().status.infra.playlist_added_named(&name))
+            .unwrap_or_else(|| app.strings().status.infra.playlist_added.to_string())
         };
         self.show_status_message(status_message, 3).await;
       }
@@ -1930,7 +1952,16 @@ impl LibraryNetwork for Network {
           app.reload_playlist_tracks(playlist_id);
         }
         self
-          .show_status_message("Removed from playlist".to_string(), 3)
+          .show_status_message(
+            self
+              .strings()
+              .await
+              .status
+              .infra
+              .playlist_removed
+              .to_string(),
+            3,
+          )
           .await;
       }
       Err(e) => self.handle_error(anyhow!(e)).await,
@@ -2043,7 +2074,16 @@ impl LibraryNetwork for Network {
       Some(id) => id.to_string(),
       None => {
         self
-          .show_status_message("Playlist created but could not get its ID".to_string(), 4)
+          .show_status_message(
+            self
+              .strings()
+              .await
+              .status
+              .infra
+              .playlist_created_no_id
+              .to_string(),
+            4,
+          )
           .await;
         return;
       }
@@ -2071,7 +2111,7 @@ impl LibraryNetwork for Network {
       app.dispatch(IoEvent::GetPlaylists);
     }
 
-    let status = format!("Playlist \"{}\" created!", name);
+    let status = self.strings().await.status.infra.playlist_created(&name);
     self.show_status_message(status, 4).await;
   }
 }
@@ -2405,6 +2445,7 @@ mod tests {
         current_id: 0,
       },
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "A".to_string(),
         current_id: 0,
         target_id: 1,
@@ -2414,6 +2455,7 @@ mod tests {
         current_id: 0,
       },
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "B".to_string(),
         current_id: 0,
         target_id: 2,
@@ -2837,6 +2879,7 @@ fn rootlist_playlist_info(
     owner_username.to_string()
   };
   PlaylistInfo {
+    generated_name: None,
     uri: format!("spotify:playlist:{id}"),
     name: name.to_string(),
     owner,
@@ -3118,15 +3161,21 @@ fn structurize_playlist_folders(
           let folder_id = *next_folder_id;
           *next_folder_id += 1;
 
-          let name = node.name.as_deref().unwrap_or("Unnamed Folder").to_string();
+          let name = node
+            .name
+            .as_deref()
+            .unwrap_or(crate::core::i18n::EN.status.infra.unnamed_folder)
+            .to_string();
 
           items.push(PlaylistFolderItem::Folder(PlaylistFolder {
+            generated_name: node.name.is_none(),
             name: name.clone(),
             current_id: current_folder_id,
             target_id: folder_id,
           }));
 
           items.push(PlaylistFolderItem::Folder(PlaylistFolder {
+            generated_name: node.name.is_none(),
             name: format!("\u{2190} {}", name),
             current_id: folder_id,
             target_id: current_folder_id,
@@ -3178,6 +3227,57 @@ fn structurize_playlist_folders(
   }
 
   items
+}
+
+#[cfg(test)]
+mod folder_label_tests {
+  use super::*;
+  use crate::core::i18n::{EN, ZH_HANS, ZH_HANT};
+
+  #[test]
+  fn only_absent_folder_names_receive_the_localized_fallback() {
+    let folder = |name: Option<&str>, children| PlaylistFolderNode {
+      name: name.map(str::to_string),
+      node_type: PlaylistFolderNodeType::Folder,
+      uri: String::new(),
+      children,
+    };
+    let nodes = vec![
+      folder(None, vec![folder(None, Vec::new())]),
+      folder(Some("Unnamed Folder"), Vec::new()),
+      folder(Some(""), Vec::new()),
+    ];
+    let names = |items: &[PlaylistFolderItem], strings: &crate::core::i18n::Strings| {
+      items
+        .into_iter()
+        .filter_map(|item| match item {
+          PlaylistFolderItem::Folder(folder) => Some(folder.display_name(strings).into_owned()),
+          _ => None,
+        })
+        .collect::<Vec<_>>()
+    };
+
+    let cached = structurize_playlist_folders(&nodes, &[]);
+    for (strings, fallback) in [
+      (&EN, "Unnamed Folder"),
+      (&ZH_HANS, ZH_HANS.status.infra.unnamed_folder),
+      (&ZH_HANT, ZH_HANT.status.infra.unnamed_folder),
+    ] {
+      assert_eq!(
+        names(&cached, strings),
+        vec![
+          fallback.to_string(),
+          format!("← {fallback}"),
+          fallback.to_string(),
+          format!("← {fallback}"),
+          "Unnamed Folder".to_string(),
+          "← Unnamed Folder".to_string(),
+          String::new(),
+          "← ".to_string(),
+        ]
+      );
+    }
+  }
 }
 
 #[cfg(all(test, feature = "streaming"))]

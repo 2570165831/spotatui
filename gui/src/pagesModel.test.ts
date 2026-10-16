@@ -1,3 +1,4 @@
+import { EN } from "./i18n";
 import { describe, expect, it } from "vitest";
 import type { Action } from "./bindings/Action";
 import type { AlbumInfo } from "./bindings/AlbumInfo";
@@ -207,7 +208,7 @@ describe("copyLink", () => {
   it("writes the link and confirms it", async () => {
     const sent: Action[] = [];
     const written: string[] = [];
-    await copyLink(link, "Copied the album link.", (a) => sent.push(a), {
+    await copyLink(link, "copied_album_link", (a) => sent.push(a), {
       writeText: async (text) => {
         written.push(text);
       },
@@ -218,13 +219,57 @@ describe("copyLink", () => {
 
   it("reports an error when the write fails or there is no clipboard", async () => {
     const sent: Action[] = [];
-    await copyLink(link, "done", (a) => sent.push(a), {
+    await copyLink(link, "copied_album_link", (a) => sent.push(a), {
       writeText: () => Promise.reject(new Error("denied")),
     });
-    await copyLink(link, "done", (a) => sent.push(a), undefined);
+    await copyLink(link, "copied_album_link", (a) => sent.push(a), undefined);
     expect(sent).toEqual([
       { NotifyError: ["Could not copy the link.", 4] },
       { NotifyError: ["Could not copy the link.", 4] },
     ]);
   });
 });
+
+for (const key of [
+  "copied_album_link",
+  "copied_song_link",
+  "copied_show_link",
+  "copied_episode_link",
+  "copy_party_done",
+] as const) {
+  for (const failure of [false, true]) {
+    it(`${key} reads the current table when a pending clipboard write ${failure ? "fails" : "finishes"}`, async () => {
+      let current = EN;
+      let finish!: () => void;
+      let fail!: (error: Error) => void;
+      const deferred = new Promise<void>((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      });
+      const sent: Action[] = [];
+      const party = key === "copy_party_done";
+      const pending = copyLink(
+        "literal {url}",
+        key,
+        (action) => sent.push(action),
+        { writeText: () => deferred },
+        () => current,
+        party ? "copy_party_failed" : "copy_link_failed",
+      );
+      current = {
+        ...EN,
+        [key]: "new completion",
+        copy_link_failed: "new failure",
+        copy_party_failed: "new party failure",
+      };
+      if (failure) fail(new Error("raw error"));
+      else finish();
+      await pending;
+      expect(sent).toEqual([
+        failure
+          ? { NotifyError: [party ? "new party failure" : "new failure", 4] }
+          : { Notify: ["new completion", 3] },
+      ]);
+    });
+  }
+}

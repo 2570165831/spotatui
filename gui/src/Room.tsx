@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, sourceLabel, sourceBadge } from "./i18n";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { Action } from "./bindings/Action";
 import type { AlbumInfo } from "./bindings/AlbumInfo";
@@ -25,6 +26,7 @@ import { usePosition } from "./usePosition";
 
 /** The Listening Room: the playing album on paper, its sides or the lyrics, and the albums queued next. */
 export function Room({
+  s = EN,
   item,
   position,
   connected,
@@ -37,6 +39,7 @@ export function Room({
   send,
   onClose,
 }: {
+  s?: GuiStrings;
   item: NowPlaying | null;
   position: Position | null;
   connected: boolean;
@@ -81,10 +84,14 @@ export function Room({
   const source = sourceOf(item?.uri ?? null);
   const caption = [
     year(shown?.release_date ?? null),
-    tracks.length > 0 && `${tracks.length} songs`,
+    tracks.length > 0 && fmt(s.songs_count, { count: tracks.length }),
     tracks.length > 0 &&
-      `${minutes(tracks.reduce((sum, track) => sum + track.duration_ms, 0))} minutes`,
-    source && `plays from ${source}`,
+      fmt(s.minutes_count, {
+        count: minutes(
+          tracks.reduce((sum, track) => sum + track.duration_ms, 0),
+        ),
+      }),
+    source && fmt(s.plays_from, { source: sourceLabel(source, s) }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -94,7 +101,7 @@ export function Room({
       <button
         type="button"
         className="room-close"
-        aria-label="Exit full screen"
+        aria-label={s.exit_full_screen}
         onClick={onClose}
       >
         <Glyph name="close" size={20} />
@@ -111,16 +118,19 @@ export function Room({
         )}
         {caption && <figcaption>{caption}</figcaption>}
       </figure>
-      <section className="room-album" aria-label="Album">
+      <section className="room-album" aria-label={s.album}>
         <span className="room-state">
           {!item
-            ? "Full screen"
+            ? s.full_screen
             : inOrder
-              ? `Now playing · Song ${index + 1} of ${tracks.length}`
-              : "Now playing"}
+              ? fmt(s.now_playing_index, {
+                  index: index + 1,
+                  count: tracks.length,
+                })
+              : s.now_playing}
         </span>
         <div className="room-title">
-          <h1>{title || item?.title || "Nothing playing"}</h1>
+          <h1>{title || item?.title || s.nothing_playing}</h1>
           <div>
             <span className="room-artist">{artist}</span>
             {item && <em>{item.title}</em>}
@@ -148,10 +158,10 @@ export function Room({
               ))}
             </div>
             <div className="album-clock">
-              <span>{clock(whole.elapsed)} in</span>
+              <span>{fmt(s.elapsed_in, { time: clock(whole.elapsed) })}</span>
               <span>
-                {clock(whole.left)} left
-                {next[0] && ` · then ${next[0].title}`}
+                {fmt(s.time_left, { time: clock(whole.left) })}
+                {next[0] && fmt(s.then_album, { name: next[0].title })}
               </span>
             </div>
           </>
@@ -159,7 +169,7 @@ export function Room({
         <div className="room-transport">
           <button
             type="button"
-            aria-label="Previous song"
+            aria-label={s.previous_song}
             disabled={!connected}
             onClick={() => send("PreviousTrack")}
           >
@@ -168,7 +178,7 @@ export function Room({
           <button
             type="button"
             className="play"
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={playing ? s.pause : s.play}
             disabled={!connected}
             onClick={() => send("TogglePlayback")}
           >
@@ -176,7 +186,7 @@ export function Room({
           </button>
           <button
             type="button"
-            aria-label="Next song"
+            aria-label={s.next_song}
             disabled={!connected}
             onClick={() => send("NextTrack")}
           >
@@ -185,18 +195,25 @@ export function Room({
           {item && (
             <span className="room-time">
               {clock(duration ? Math.min(ms, duration) : ms)} /{" "}
-              {item.is_live ? "live" : clock(duration)}
+              {item.is_live ? s.live : clock(duration)}
             </span>
           )}
           <span className="room-keys">
-            <kbd>l</kbd> {showLyrics ? "tracklist" : "lyrics"} · <kbd>r</kbd>{" "}
-            leave
+            <kbd>l</kbd> {showLyrics ? s.tracklist : s.lyrics_hint} ·{" "}
+            <kbd>r</kbd> {s.leave_hint}
           </span>
         </div>
         {showLyrics ? (
-          <Lyrics lyrics={lyrics} ms={ms} connected={connected} send={send} />
+          <Lyrics
+            s={s}
+            lyrics={lyrics}
+            ms={ms}
+            connected={connected}
+            send={send}
+          />
         ) : tracks.length > 0 ? (
           <Sides
+            s={s}
             tracks={tracks}
             index={index}
             inOrder={inOrder}
@@ -206,18 +223,18 @@ export function Room({
         ) : (
           <p className="room-note">
             {!item
-              ? "Play an album and it opens here."
+              ? s.play_album_here
               : trackId
-                ? "The album of this song is not loaded."
-                : "The tracklist shows for Spotify albums."}
+                ? s.playing_album_not_loaded
+                : s.spotify_tracklist_only}
           </p>
         )}
       </section>
       {next.length > 0 && (
-        <section className="room-platter" aria-label="On the platter next">
+        <section className="room-platter" aria-label={s.on_platter_next}>
           <div className="room-head">
-            <span>On the platter next</span>
-            <kbd>from your queue</kbd>
+            <span>{s.on_platter_next}</span>
+            <kbd>{s.from_your_queue}</kbd>
           </div>
           <div className="platter">
             {next.map((entry, place) => {
@@ -234,7 +251,7 @@ export function Room({
                     <span>{entry.artist}</span>
                     {from && (
                       <span className="from">
-                        <SourceIcon source={from} /> {from.toUpperCase()}
+                        <SourceIcon source={from} /> {sourceBadge(from, s)}
                       </span>
                     )}
                   </span>
@@ -249,12 +266,14 @@ export function Room({
 }
 
 function Sides({
+  s = EN,
   tracks,
   index,
   inOrder,
   albumUri,
   send,
 }: {
+  s?: GuiStrings;
   tracks: TrackInfo[];
   index: number;
   /// Rows before the playing one count as played only when the album plays in order.
@@ -298,18 +317,20 @@ function Sides({
   );
   return (
     <div className="sides">
-      {side("Side A", sideA, 0)}
-      {side("Side B", sideB, sideA.length)}
+      {side(s.side_a, sideA, 0)}
+      {side(s.side_b, sideB, sideA.length)}
     </div>
   );
 }
 
 function Lyrics({
+  s = EN,
   lyrics,
   ms,
   connected,
   send,
 }: {
+  s?: GuiStrings;
   lyrics: LyricsPayload | null;
   ms: number;
   connected: boolean;
@@ -331,12 +352,12 @@ function Lyrics({
   }, [current]);
 
   if (!lyrics || lyrics.status === "loading" || lyrics.status === "not_started")
-    return <p className="room-note">Loading lyrics…</p>;
+    return <p className="room-note">{s.loading_lyrics}</p>;
   if (lyrics.status === "not_found" || lines.length === 0)
-    return <p className="room-note">No lyrics for this song.</p>;
+    return <p className="room-note">{s.no_lyrics_sentence}</p>;
   return (
     <div className="lyrics">
-      {!synced && <span className="label">Timing estimated</span>}
+      {!synced && <span className="label">{s.timing_estimated}</span>}
       <ol ref={panel}>
         {lines.map((line, row) => (
           <li

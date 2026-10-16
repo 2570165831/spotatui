@@ -20,12 +20,13 @@ impl SettingsCategory {
     ]
   }
 
-  pub fn name(&self) -> &'static str {
+  #[cfg(any(feature = "tui", test))]
+  pub fn localized_name(&self, strings: &crate::core::i18n::Strings) -> &'static str {
     match self {
-      SettingsCategory::Behavior => "Behavior",
-      SettingsCategory::Icons => "Icons",
-      SettingsCategory::Keybindings => "Keybindings",
-      SettingsCategory::Theme => "Theme",
+      SettingsCategory::Behavior => strings.settings.category_behavior,
+      SettingsCategory::Icons => strings.settings.category_icons,
+      SettingsCategory::Keybindings => strings.settings.category_keybindings,
+      SettingsCategory::Theme => strings.settings.category_theme,
     }
   }
 
@@ -196,755 +197,860 @@ pub struct SettingItem {
 }
 
 impl App {
+  /// Relabel both snapshots without changing staged edits or their dirty state.
+  pub(crate) fn refresh_settings_labels(&mut self) {
+    let strings = &self.strings().settings;
+    for item in self
+      .settings_items
+      .iter_mut()
+      .chain(self.settings_saved_items.iter_mut())
+    {
+      if let Some((name, description)) = strings.row_text(&item.id) {
+        item.name = name.to_string();
+        item.description = description.to_string();
+      }
+    }
+  }
+
   /// The Behavior rows, apart from the state of the Settings screen.
   pub(crate) fn behavior_setting_items(&self) -> Vec<SettingItem> {
+    let strings = &self.strings().settings;
     vec![
-        SettingItem {
-          id: "behavior.seek_milliseconds".to_string(),
-          name: "Seek Duration (ms)".to_string(),
-          description: "Milliseconds to skip when seeking".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.seek_milliseconds as i64),
-        },
-        SettingItem {
-          id: "behavior.volume_increment".to_string(),
-          name: "Volume Increment".to_string(),
-          description: "Volume change per keypress (0-100)".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.volume_increment as i64),
-        },
-        SettingItem {
-          id: "behavior.tick_rate_milliseconds".to_string(),
-          name: "Tick Rate (ms)".to_string(),
-          description: "UI refresh rate in milliseconds".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.tick_rate_milliseconds as i64),
-        },
-        SettingItem {
-          id: "behavior.animation_tick_rate_milliseconds".to_string(),
-          name: "Animation Tick Rate (ms)".to_string(),
-          description: "Refresh rate for animation-heavy views".to_string(),
-          value: SettingValue::Number(
-            self.user_config.behavior.animation_tick_rate_milliseconds as i64,
-          ),
-        },
-        SettingItem {
-          id: "behavior.status_message_ttl_percent".to_string(),
-          name: "Status TTL Percent".to_string(),
-          description: "Scale status message duration from 10% to 1000%".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.status_message_ttl_percent as i64),
-        },
-        #[cfg(feature = "qobuz")]
-        SettingItem {
-          id: "behavior.qobuz_quality".to_string(),
-          name: "Qobuz Quality".to_string(),
-          description: "Stream quality for Qobuz tracks (hi-res files are large)".to_string(),
-          value: SettingValue::Cycle(
-            crate::core::user_config::qobuz_quality_label(self.user_config.behavior.qobuz_quality)
-              .to_string(),
-            crate::core::user_config::QOBUZ_QUALITY_LABELS,
-          ),
-        },
-        #[cfg(feature = "subsonic")]
-        SettingItem {
-          id: "behavior.subsonic_url".to_string(),
-          name: "Subsonic Server".to_string(),
-          description: "Address of your Subsonic or Navidrome server".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .subsonic_url
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        #[cfg(feature = "subsonic")]
-        SettingItem {
-          id: "behavior.subsonic_username".to_string(),
-          name: "Subsonic Username".to_string(),
-          description: "Your user name on the Subsonic server".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .subsonic_username
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        #[cfg(feature = "subsonic")]
-        SettingItem {
-          id: "behavior.subsonic_password".to_string(),
-          name: "Subsonic Password".to_string(),
-          description: "Saved in config.yml; SPOTATUI_SUBSONIC_PASSWORD overrides it".to_string(),
-          value: SettingValue::Secret(
-            self
-              .user_config
-              .behavior
-              .subsonic_password
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        #[cfg(feature = "local-files")]
-        SettingItem {
-          id: "behavior.local_music_path".to_string(),
-          name: "Music Folder".to_string(),
-          description: "The folder Local Files reads".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .local_music_path
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        #[cfg(feature = "youtube")]
-        SettingItem {
-          id: "behavior.ytdlp_path".to_string(),
-          name: "yt-dlp Path".to_string(),
-          description: "The yt-dlp program YouTube runs; empty looks it up on PATH".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .ytdlp_path
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        SettingItem {
-          id: "behavior.playback_poll_seconds".to_string(),
-          name: "Playback Poll Seconds".to_string(),
-          description: "Seconds between regular playback refreshes".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.playback_poll_seconds as i64),
-        },
-        SettingItem {
-          id: "behavior.table_scroll_padding".to_string(),
-          name: "Table Scroll Padding".to_string(),
-          description: "Rows reserved while scrolling tables".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.table_scroll_padding as i64),
-        },
-        SettingItem {
-          id: "behavior.like_animation_frames".to_string(),
-          name: "Like Animation Frames".to_string(),
-          description: "Frames used by the playbar like animation".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.like_animation_frames as i64),
-        },
-        SettingItem {
-          id: "behavior.enable_text_emphasis".to_string(),
-          name: "Text Emphasis".to_string(),
-          description: "Enable bold/italic text styling".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_text_emphasis),
-        },
-        SettingItem {
-          id: "behavior.show_loading_indicator".to_string(),
-          name: "Loading Indicator".to_string(),
-          description: "Show loading status in UI".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.show_loading_indicator),
-        },
-        SettingItem {
-          id: "behavior.enforce_wide_search_bar".to_string(),
-          name: "Wide Search Bar".to_string(),
-          description: "Force search bar to take full width".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enforce_wide_search_bar),
-        },
-        SettingItem {
-          id: "behavior.group_folders_first".to_string(),
-          name: "Playlist Folders First".to_string(),
-          description: "List folders at the top of the Playlists tab".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.group_folders_first),
-        },
-        SettingItem {
-          id: "behavior.disable_mouse_inputs".to_string(),
-          name: "Disable Mouse Inputs".to_string(),
-          description: "Disable mouse inputs for keyboard-only navigation".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.disable_mouse_inputs),
-        },
-        SettingItem {
-          id: "behavior.set_window_title".to_string(),
-          name: "Set Window Title".to_string(),
-          description: "Update terminal window title with track info".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.set_window_title),
-        },
-        SettingItem {
-          id: "behavior.enable_discord_rpc".to_string(),
-          name: "Discord Rich Presence".to_string(),
-          description: "Show your current track in Discord".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_discord_rpc),
-        },
-        SettingItem {
-          id: "behavior.stop_after_current_track".to_string(),
-          name: "Stop After Current Track".to_string(),
-          description: "Pause playback when the current track finishes".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.stop_after_current_track),
-        },
-        SettingItem {
-          id: "behavior.keepawake_enabled".to_string(),
-          name: "Keep System Awake".to_string(),
-          description: "Prevent the system from sleeping while music is playing".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.keepawake_enabled),
-        },
-        SettingItem {
-          id: "behavior.enable_media_keys".to_string(),
-          name: "Media Key Controls".to_string(),
-          description:
-            "Let OS media keys, headphone buttons, and remote controls (playerctl, Now Playing) control playback"
-              .to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_media_keys),
-        },
-        #[cfg(feature = "streaming")]
-        SettingItem {
-          id: "behavior.enable_streaming".to_string(),
-          name: "Native Streaming".to_string(),
-          description: "Play Spotify in spotatui as a Connect device (applies on restart)".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_streaming),
-        },
-        #[cfg(feature = "streaming")]
-        SettingItem {
-          id: "behavior.streaming_device_name".to_string(),
-          name: "Streaming Device Name".to_string(),
-          description: "The Connect device name other Spotify apps show (applies on restart)"
+      SettingItem {
+        id: "behavior.language".to_string(),
+        name: strings.behavior_language_name.to_string(),
+        description: strings.behavior_language_description.to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.language.as_str().to_string(),
+          crate::core::i18n::Language::OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.seek_milliseconds".to_string(),
+        name: strings.behavior_seek_milliseconds_name.to_string(),
+        description: strings.behavior_seek_milliseconds_description.to_string(),
+        value: SettingValue::Number(self.user_config.behavior.seek_milliseconds as i64),
+      },
+      SettingItem {
+        id: "behavior.volume_increment".to_string(),
+        name: strings.behavior_volume_increment_name.to_string(),
+        description: strings.behavior_volume_increment_description.to_string(),
+        value: SettingValue::Number(self.user_config.behavior.volume_increment as i64),
+      },
+      SettingItem {
+        id: "behavior.tick_rate_milliseconds".to_string(),
+        name: strings.behavior_tick_rate_milliseconds_name.to_string(),
+        description: strings
+          .behavior_tick_rate_milliseconds_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.tick_rate_milliseconds as i64),
+      },
+      SettingItem {
+        id: "behavior.animation_tick_rate_milliseconds".to_string(),
+        name: strings
+          .behavior_animation_tick_rate_milliseconds_name
+          .to_string(),
+        description: strings
+          .behavior_animation_tick_rate_milliseconds_description
+          .to_string(),
+        value: SettingValue::Number(
+          self.user_config.behavior.animation_tick_rate_milliseconds as i64,
+        ),
+      },
+      SettingItem {
+        id: "behavior.status_message_ttl_percent".to_string(),
+        name: strings.behavior_status_message_ttl_percent_name.to_string(),
+        description: strings
+          .behavior_status_message_ttl_percent_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.status_message_ttl_percent as i64),
+      },
+      #[cfg(feature = "qobuz")]
+      SettingItem {
+        id: "behavior.qobuz_quality".to_string(),
+        name: strings.behavior_qobuz_quality_name.to_string(),
+        description: strings.behavior_qobuz_quality_description.to_string(),
+        value: SettingValue::Cycle(
+          crate::core::user_config::qobuz_quality_label(self.user_config.behavior.qobuz_quality)
             .to_string(),
-          value: SettingValue::String(self.user_config.behavior.streaming_device_name.clone()),
-        },
-        #[cfg(feature = "streaming")]
-        SettingItem {
-          id: "behavior.streaming_bitrate".to_string(),
-          name: "Streaming Bitrate".to_string(),
-          description: "Native streaming quality in kbps (applies on restart)".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.streaming_bitrate.to_string(),
-            crate::core::user_config::STREAMING_BITRATES,
-          ),
-        },
-        #[cfg(feature = "streaming")]
-        SettingItem {
-          id: "behavior.streaming_audio_cache".to_string(),
-          name: "Streaming Audio Cache".to_string(),
-          description: "Keep played audio in the cache directory (applies on restart)".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.streaming_audio_cache),
-        },
-        #[cfg(feature = "streaming")]
-        SettingItem {
-          id: "behavior.streaming_autoplay".to_string(),
-          name: "Autoplay".to_string(),
-          description: "Play related songs when a list ends (applies on restart)".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.streaming_autoplay),
-        },
-        SettingItem {
-          id: "behavior.startup_behavior".to_string(),
-          name: "Startup Behavior".to_string(),
-          description: "Playback state when spotatui starts. Continue resumes your last session (including a saved non-Spotify track) exactly as it was; Play always starts; Pause always pauses.".to_string(),
-          value: SettingValue::Cycle(
-            self
-              .user_config
-              .behavior
-              .startup_behavior
-              .name()
-              .to_string(),
-            crate::core::user_config::StartupBehavior::options(),
-          ),
-        },
-        SettingItem {
-          id: "behavior.startup_route".to_string(),
-          name: "Startup Route".to_string(),
-          description: "Screen shown when spotatui starts".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.startup_route.clone(),
-            self.startup_route_options(),
-          ),
-        },
-        SettingItem {
-          id: "behavior.default_sort_playlist_tracks".to_string(),
-          name: "Playlist Track Sort".to_string(),
-          description: "Default sort for playlist track tables".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.default_sort_playlist_tracks.clone(),
-            PLAYLIST_TRACK_SORT_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.default_sort_saved_albums".to_string(),
-          name: "Saved Album Sort".to_string(),
-          description: "Default sort for saved albums".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.default_sort_saved_albums.clone(),
-            SAVED_ALBUM_SORT_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.default_sort_saved_artists".to_string(),
-          name: "Saved Artist Sort".to_string(),
-          description: "Default sort for saved artists".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.default_sort_saved_artists.clone(),
-            SAVED_ARTIST_SORT_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.default_sort_recently_played".to_string(),
-          name: "Recently Played Sort".to_string(),
-          description: "Default sort for recently played tracks".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.default_sort_recently_played.clone(),
-            RECENTLY_PLAYED_SORT_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.sidebar_position".to_string(),
-          name: "Sidebar Position".to_string(),
-          description: "Place the sidebar left, right, or hide it".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.sidebar_position.clone(),
-            SIDEBAR_POSITION_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.playbar_position".to_string(),
-          name: "Playbar Position".to_string(),
-          description: "Place the playbar at the bottom or top".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.playbar_position.clone(),
-            PLAYBAR_POSITION_SETTING_OPTIONS,
-          ),
-        },
-        SettingItem {
-          id: "behavior.small_terminal_width".to_string(),
-          name: "Small Terminal Width".to_string(),
-          description: "Width below which compact layout is used".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.small_terminal_width as i64),
-        },
-        SettingItem {
-          id: "behavior.small_terminal_height".to_string(),
-          name: "Small Terminal Height".to_string(),
-          description: "Height below which compact margins are used".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.small_terminal_height as i64),
-        },
-        SettingItem {
-          id: "behavior.enable_announcements".to_string(),
-          name: "Remote Announcements".to_string(),
-          description: "Show one-time announcements from remote JSON feed".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_announcements),
-        },
-        SettingItem {
-          id: "behavior.enable_lyrics".to_string(),
-          name: "Lyrics".to_string(),
-          description: "Look up lyrics for each track: the title, artist and length go to LRCLIB, or to Spotify for Spotify tracks".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_lyrics),
-        },
-        SettingItem {
-          id: "behavior.enable_monthly_recap_prompt".to_string(),
-          name: "Monthly Recap Prompt".to_string(),
-          description: "Show a popup once a month when your listening recap is ready".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_monthly_recap_prompt),
-        },
-        SettingItem {
-          id: "behavior.pin_community_playlist".to_string(),
-          name: "Community Playlist Pin".to_string(),
-          description: "Pin the spotatui community playlist to the top of your Spotify playlists"
+          crate::core::user_config::QOBUZ_QUALITY_LABELS,
+        ),
+      },
+      #[cfg(feature = "subsonic")]
+      SettingItem {
+        id: "behavior.subsonic_url".to_string(),
+        name: strings.behavior_subsonic_url_name.to_string(),
+        description: strings.behavior_subsonic_url_description.to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .subsonic_url
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      #[cfg(feature = "subsonic")]
+      SettingItem {
+        id: "behavior.subsonic_username".to_string(),
+        name: strings.behavior_subsonic_username_name.to_string(),
+        description: strings.behavior_subsonic_username_description.to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .subsonic_username
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      #[cfg(feature = "subsonic")]
+      SettingItem {
+        id: "behavior.subsonic_password".to_string(),
+        name: strings.behavior_subsonic_password_name.to_string(),
+        description: strings.behavior_subsonic_password_description.to_string(),
+        value: SettingValue::Secret(
+          self
+            .user_config
+            .behavior
+            .subsonic_password
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      #[cfg(feature = "local-files")]
+      SettingItem {
+        id: "behavior.local_music_path".to_string(),
+        name: strings.behavior_local_music_path_name.to_string(),
+        description: strings.behavior_local_music_path_description.to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .local_music_path
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      #[cfg(feature = "youtube")]
+      SettingItem {
+        id: "behavior.ytdlp_path".to_string(),
+        name: strings.behavior_ytdlp_path_name.to_string(),
+        description: strings.behavior_ytdlp_path_description.to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .ytdlp_path
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      SettingItem {
+        id: "behavior.playback_poll_seconds".to_string(),
+        name: strings.behavior_playback_poll_seconds_name.to_string(),
+        description: strings
+          .behavior_playback_poll_seconds_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.playback_poll_seconds as i64),
+      },
+      SettingItem {
+        id: "behavior.table_scroll_padding".to_string(),
+        name: strings.behavior_table_scroll_padding_name.to_string(),
+        description: strings
+          .behavior_table_scroll_padding_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.table_scroll_padding as i64),
+      },
+      SettingItem {
+        id: "behavior.like_animation_frames".to_string(),
+        name: strings.behavior_like_animation_frames_name.to_string(),
+        description: strings
+          .behavior_like_animation_frames_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.like_animation_frames as i64),
+      },
+      SettingItem {
+        id: "behavior.enable_text_emphasis".to_string(),
+        name: strings.behavior_enable_text_emphasis_name.to_string(),
+        description: strings
+          .behavior_enable_text_emphasis_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_text_emphasis),
+      },
+      SettingItem {
+        id: "behavior.show_loading_indicator".to_string(),
+        name: strings.behavior_show_loading_indicator_name.to_string(),
+        description: strings
+          .behavior_show_loading_indicator_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.show_loading_indicator),
+      },
+      SettingItem {
+        id: "behavior.enforce_wide_search_bar".to_string(),
+        name: strings.behavior_enforce_wide_search_bar_name.to_string(),
+        description: strings
+          .behavior_enforce_wide_search_bar_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enforce_wide_search_bar),
+      },
+      SettingItem {
+        id: "behavior.group_folders_first".to_string(),
+        name: strings.behavior_group_folders_first_name.to_string(),
+        description: strings.behavior_group_folders_first_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.group_folders_first),
+      },
+      SettingItem {
+        id: "behavior.disable_mouse_inputs".to_string(),
+        name: strings.behavior_disable_mouse_inputs_name.to_string(),
+        description: strings
+          .behavior_disable_mouse_inputs_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.disable_mouse_inputs),
+      },
+      SettingItem {
+        id: "behavior.set_window_title".to_string(),
+        name: strings.behavior_set_window_title_name.to_string(),
+        description: strings.behavior_set_window_title_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.set_window_title),
+      },
+      SettingItem {
+        id: "behavior.enable_discord_rpc".to_string(),
+        name: strings.behavior_enable_discord_rpc_name.to_string(),
+        description: strings.behavior_enable_discord_rpc_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_discord_rpc),
+      },
+      SettingItem {
+        id: "behavior.stop_after_current_track".to_string(),
+        name: strings.behavior_stop_after_current_track_name.to_string(),
+        description: strings
+          .behavior_stop_after_current_track_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.stop_after_current_track),
+      },
+      SettingItem {
+        id: "behavior.keepawake_enabled".to_string(),
+        name: strings.behavior_keepawake_enabled_name.to_string(),
+        description: strings.behavior_keepawake_enabled_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.keepawake_enabled),
+      },
+      SettingItem {
+        id: "behavior.enable_media_keys".to_string(),
+        name: strings.behavior_enable_media_keys_name.to_string(),
+        description: strings.behavior_enable_media_keys_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_media_keys),
+      },
+      #[cfg(feature = "streaming")]
+      SettingItem {
+        id: "behavior.enable_streaming".to_string(),
+        name: strings.behavior_enable_streaming_name.to_string(),
+        description: strings.behavior_enable_streaming_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_streaming),
+      },
+      #[cfg(feature = "streaming")]
+      SettingItem {
+        id: "behavior.streaming_device_name".to_string(),
+        name: strings.behavior_streaming_device_name_name.to_string(),
+        description: strings
+          .behavior_streaming_device_name_description
+          .to_string(),
+        value: SettingValue::String(self.user_config.behavior.streaming_device_name.clone()),
+      },
+      #[cfg(feature = "streaming")]
+      SettingItem {
+        id: "behavior.streaming_bitrate".to_string(),
+        name: strings.behavior_streaming_bitrate_name.to_string(),
+        description: strings.behavior_streaming_bitrate_description.to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.streaming_bitrate.to_string(),
+          crate::core::user_config::STREAMING_BITRATES,
+        ),
+      },
+      #[cfg(feature = "streaming")]
+      SettingItem {
+        id: "behavior.streaming_audio_cache".to_string(),
+        name: strings.behavior_streaming_audio_cache_name.to_string(),
+        description: strings
+          .behavior_streaming_audio_cache_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.streaming_audio_cache),
+      },
+      #[cfg(feature = "streaming")]
+      SettingItem {
+        id: "behavior.streaming_autoplay".to_string(),
+        name: strings.behavior_streaming_autoplay_name.to_string(),
+        description: strings.behavior_streaming_autoplay_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.streaming_autoplay),
+      },
+      SettingItem {
+        id: "behavior.startup_behavior".to_string(),
+        name: strings.behavior_startup_behavior_name.to_string(),
+        description: strings.behavior_startup_behavior_description.to_string(),
+        value: SettingValue::Cycle(
+          self
+            .user_config
+            .behavior
+            .startup_behavior
+            .name()
             .to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.pin_community_playlist),
-        },
-        #[cfg(feature = "telemetry")]
-        SettingItem {
-          id: "behavior.enable_global_song_count".to_string(),
-          name: "Global Song Counter".to_string(),
-          description: "Contribute to the anonymous worldwide song counter. No personal info, song names, or history are sent; only a simple increment once a song has played for 30 seconds (one per 2.5 minutes of radio).".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.enable_global_song_count),
-        },
-        #[cfg(feature = "self-update")]
-        SettingItem {
-          id: "behavior.disable_auto_update".to_string(),
-          name: "Disable Auto-Update".to_string(),
-          description: "Skip the automatic update check on startup. Use the 'spotatui update' command to update manually.".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.disable_auto_update),
-        },
-        #[cfg(feature = "self-update")]
-        SettingItem {
-          id: "behavior.auto_update_delay".to_string(),
-          name: "Auto-Update Delay".to_string(),
-          description: "How long to wait before installing an available update. Use '0' for immediate, or e.g. '10m', '2h', '7d'. Only applies when auto-update is enabled.".to_string(),
-          value: SettingValue::String(self.user_config.behavior.auto_update_delay.clone()),
-        },
-        SettingItem {
-          id: "behavior.announcement_feed_url".to_string(),
-          name: "Announcements Feed URL".to_string(),
-          description: "Remote JSON feed URL (HTTPS)".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .announcement_feed_url
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        SettingItem {
-          id: "behavior.sync_token".to_string(),
-          name: "Sync Token".to_string(),
-          description: "API token from spotatui.com to sync listening history".to_string(),
-          value: SettingValue::String(
-            self
-              .user_config
-              .behavior
-              .sync_token
-              .clone()
-              .unwrap_or_default(),
-          ),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.draw_cover_art".to_string(),
-          name: "Draw Cover Art".to_string(),
-          description: "Enable rendering song/episode cover art".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.draw_cover_art),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.draw_cover_art_forced".to_string(),
-          name: "Force Draw Cover Art".to_string(),
-          description: "Force rendering of cover art despite terminal support".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.draw_cover_art_forced),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.playbar_cover_art_size_percent".to_string(),
-          name: "Cover Art Size".to_string(),
-          description: "Playbar cover art size as a percentage (25-200)".to_string(),
-          value: SettingValue::Number(
-            self.user_config.behavior.playbar_cover_art_size_percent as i64,
-          ),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.cover_art_dither".to_string(),
-          name: "Dither Cover Art".to_string(),
-          description: "Dither all cover-art sizes in two theme-aware colors".to_string(),
-          value: SettingValue::Bool(self.user_config.behavior.cover_art_dither),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.cover_art_dither_algorithm".to_string(),
-          name: "Cover Art Dither Algorithm".to_string(),
-          description: "Stucki, ordered Bayer, or Atkinson dithering".to_string(),
-          value: SettingValue::Cycle(
-            self.user_config.behavior.cover_art_dither_algorithm.clone(),
-            &["stucki", "bayer8x8", "atkinson"],
-          ),
-        },
-        #[cfg(feature = "cover-art")]
-        SettingItem {
-          id: "behavior.cover_art_dither_pixel_scale".to_string(),
-          name: "Cover Art Dither Pixel Scale".to_string(),
-          description: "Visual pixel size (1-3)".to_string(),
-          value: SettingValue::Number(self.user_config.behavior.cover_art_dither_pixel_scale as i64),
-        },
+          crate::core::user_config::StartupBehavior::options(),
+        ),
+      },
+      SettingItem {
+        id: "behavior.startup_route".to_string(),
+        name: strings.behavior_startup_route_name.to_string(),
+        description: strings.behavior_startup_route_description.to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.startup_route.clone(),
+          self.startup_route_options(),
+        ),
+      },
+      SettingItem {
+        id: "behavior.default_sort_playlist_tracks".to_string(),
+        name: strings
+          .behavior_default_sort_playlist_tracks_name
+          .to_string(),
+        description: strings
+          .behavior_default_sort_playlist_tracks_description
+          .to_string(),
+        value: SettingValue::Cycle(
+          self
+            .user_config
+            .behavior
+            .default_sort_playlist_tracks
+            .clone(),
+          PLAYLIST_TRACK_SORT_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.default_sort_saved_albums".to_string(),
+        name: strings.behavior_default_sort_saved_albums_name.to_string(),
+        description: strings
+          .behavior_default_sort_saved_albums_description
+          .to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.default_sort_saved_albums.clone(),
+          SAVED_ALBUM_SORT_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.default_sort_saved_artists".to_string(),
+        name: strings.behavior_default_sort_saved_artists_name.to_string(),
+        description: strings
+          .behavior_default_sort_saved_artists_description
+          .to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.default_sort_saved_artists.clone(),
+          SAVED_ARTIST_SORT_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.default_sort_recently_played".to_string(),
+        name: strings
+          .behavior_default_sort_recently_played_name
+          .to_string(),
+        description: strings
+          .behavior_default_sort_recently_played_description
+          .to_string(),
+        value: SettingValue::Cycle(
+          self
+            .user_config
+            .behavior
+            .default_sort_recently_played
+            .clone(),
+          RECENTLY_PLAYED_SORT_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.sidebar_position".to_string(),
+        name: strings.behavior_sidebar_position_name.to_string(),
+        description: strings.behavior_sidebar_position_description.to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.sidebar_position.clone(),
+          SIDEBAR_POSITION_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.playbar_position".to_string(),
+        name: strings.behavior_playbar_position_name.to_string(),
+        description: strings.behavior_playbar_position_description.to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.playbar_position.clone(),
+          PLAYBAR_POSITION_SETTING_OPTIONS,
+        ),
+      },
+      SettingItem {
+        id: "behavior.small_terminal_width".to_string(),
+        name: strings.behavior_small_terminal_width_name.to_string(),
+        description: strings
+          .behavior_small_terminal_width_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.small_terminal_width as i64),
+      },
+      SettingItem {
+        id: "behavior.small_terminal_height".to_string(),
+        name: strings.behavior_small_terminal_height_name.to_string(),
+        description: strings
+          .behavior_small_terminal_height_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.small_terminal_height as i64),
+      },
+      SettingItem {
+        id: "behavior.enable_announcements".to_string(),
+        name: strings.behavior_enable_announcements_name.to_string(),
+        description: strings
+          .behavior_enable_announcements_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_announcements),
+      },
+      SettingItem {
+        id: "behavior.enable_lyrics".to_string(),
+        name: strings.behavior_enable_lyrics_name.to_string(),
+        description: strings.behavior_enable_lyrics_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_lyrics),
+      },
+      SettingItem {
+        id: "behavior.enable_monthly_recap_prompt".to_string(),
+        name: strings
+          .behavior_enable_monthly_recap_prompt_name
+          .to_string(),
+        description: strings
+          .behavior_enable_monthly_recap_prompt_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_monthly_recap_prompt),
+      },
+      SettingItem {
+        id: "behavior.pin_community_playlist".to_string(),
+        name: strings.behavior_pin_community_playlist_name.to_string(),
+        description: strings
+          .behavior_pin_community_playlist_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.pin_community_playlist),
+      },
+      #[cfg(feature = "telemetry")]
+      SettingItem {
+        id: "behavior.enable_global_song_count".to_string(),
+        name: strings.behavior_enable_global_song_count_name.to_string(),
+        description: strings
+          .behavior_enable_global_song_count_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.enable_global_song_count),
+      },
+      #[cfg(feature = "self-update")]
+      SettingItem {
+        id: "behavior.disable_auto_update".to_string(),
+        name: strings.behavior_disable_auto_update_name.to_string(),
+        description: strings.behavior_disable_auto_update_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.disable_auto_update),
+      },
+      #[cfg(feature = "self-update")]
+      SettingItem {
+        id: "behavior.auto_update_delay".to_string(),
+        name: strings.behavior_auto_update_delay_name.to_string(),
+        description: strings.behavior_auto_update_delay_description.to_string(),
+        value: SettingValue::String(self.user_config.behavior.auto_update_delay.clone()),
+      },
+      SettingItem {
+        id: "behavior.announcement_feed_url".to_string(),
+        name: strings.behavior_announcement_feed_url_name.to_string(),
+        description: strings
+          .behavior_announcement_feed_url_description
+          .to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .announcement_feed_url
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      SettingItem {
+        id: "behavior.sync_token".to_string(),
+        name: strings.behavior_sync_token_name.to_string(),
+        description: strings.behavior_sync_token_description.to_string(),
+        value: SettingValue::String(
+          self
+            .user_config
+            .behavior
+            .sync_token
+            .clone()
+            .unwrap_or_default(),
+        ),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.draw_cover_art".to_string(),
+        name: strings.behavior_draw_cover_art_name.to_string(),
+        description: strings.behavior_draw_cover_art_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.draw_cover_art),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.draw_cover_art_forced".to_string(),
+        name: strings.behavior_draw_cover_art_forced_name.to_string(),
+        description: strings
+          .behavior_draw_cover_art_forced_description
+          .to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.draw_cover_art_forced),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.playbar_cover_art_size_percent".to_string(),
+        name: strings
+          .behavior_playbar_cover_art_size_percent_name
+          .to_string(),
+        description: strings
+          .behavior_playbar_cover_art_size_percent_description
+          .to_string(),
+        value: SettingValue::Number(
+          self.user_config.behavior.playbar_cover_art_size_percent as i64,
+        ),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.cover_art_dither".to_string(),
+        name: strings.behavior_cover_art_dither_name.to_string(),
+        description: strings.behavior_cover_art_dither_description.to_string(),
+        value: SettingValue::Bool(self.user_config.behavior.cover_art_dither),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.cover_art_dither_algorithm".to_string(),
+        name: strings.behavior_cover_art_dither_algorithm_name.to_string(),
+        description: strings
+          .behavior_cover_art_dither_algorithm_description
+          .to_string(),
+        value: SettingValue::Cycle(
+          self.user_config.behavior.cover_art_dither_algorithm.clone(),
+          &["stucki", "bayer8x8", "atkinson"],
+        ),
+      },
+      #[cfg(feature = "cover-art")]
+      SettingItem {
+        id: "behavior.cover_art_dither_pixel_scale".to_string(),
+        name: strings
+          .behavior_cover_art_dither_pixel_scale_name
+          .to_string(),
+        description: strings
+          .behavior_cover_art_dither_pixel_scale_description
+          .to_string(),
+        value: SettingValue::Number(self.user_config.behavior.cover_art_dither_pixel_scale as i64),
+      },
     ]
   }
 
   /// Load settings for the current category into settings_items
   pub fn load_settings_for_category(&mut self) {
+    let strings = &self.strings().settings;
     self.settings_items = match self.view.settings_category {
       SettingsCategory::Behavior => self.behavior_setting_items(),
       SettingsCategory::Icons => vec![
         SettingItem {
           id: "behavior.liked_icon".to_string(),
-          name: "Liked Icon".to_string(),
-          description: "Icon for liked songs".to_string(),
+          name: strings.behavior_liked_icon_name.to_string(),
+          description: strings.behavior_liked_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.liked_icon.clone()),
         },
         SettingItem {
           id: "behavior.shuffle_icon".to_string(),
-          name: "Shuffle Icon".to_string(),
-          description: "Icon for shuffle mode".to_string(),
+          name: strings.behavior_shuffle_icon_name.to_string(),
+          description: strings.behavior_shuffle_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.shuffle_icon.clone()),
         },
         SettingItem {
           id: "behavior.repeat_track_icon".to_string(),
-          name: "Repeat Track Icon".to_string(),
-          description: "Icon for repeating the current track".to_string(),
+          name: strings.behavior_repeat_track_icon_name.to_string(),
+          description: strings.behavior_repeat_track_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.repeat_track_icon.clone()),
         },
         SettingItem {
           id: "behavior.repeat_context_icon".to_string(),
-          name: "Repeat Context Icon".to_string(),
-          description: "Icon for repeating the playlist or album".to_string(),
+          name: strings.behavior_repeat_context_icon_name.to_string(),
+          description: strings.behavior_repeat_context_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.repeat_context_icon.clone()),
         },
         SettingItem {
           id: "behavior.playing_icon".to_string(),
-          name: "Playing Icon".to_string(),
-          description: "Single-cell icon for the playing row".to_string(),
+          name: strings.behavior_playing_icon_name.to_string(),
+          description: strings.behavior_playing_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.playing_icon.clone()),
         },
         SettingItem {
           id: "behavior.paused_icon".to_string(),
-          name: "Paused Icon".to_string(),
-          description: "Icon for paused state".to_string(),
+          name: strings.behavior_paused_icon_name.to_string(),
+          description: strings.behavior_paused_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.paused_icon.clone()),
         },
         SettingItem {
           id: "behavior.gauge_filled_icon".to_string(),
-          name: "Gauge Filled Icon".to_string(),
-          description: "Single-cell icon for filled gauge segments".to_string(),
+          name: strings.behavior_gauge_filled_icon_name.to_string(),
+          description: strings.behavior_gauge_filled_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.gauge_filled_icon.clone()),
         },
         SettingItem {
           id: "behavior.gauge_unfilled_icon".to_string(),
-          name: "Gauge Empty Icon".to_string(),
-          description: "Single-cell icon for empty gauge segments".to_string(),
+          name: strings.behavior_gauge_unfilled_icon_name.to_string(),
+          description: strings.behavior_gauge_unfilled_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.gauge_unfilled_icon.clone()),
         },
         SettingItem {
           id: "behavior.active_source_icon".to_string(),
-          name: "Active Source Icon".to_string(),
-          description: "Icon for the active playback source".to_string(),
+          name: strings.behavior_active_source_icon_name.to_string(),
+          description: strings.behavior_active_source_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.active_source_icon.clone()),
         },
         SettingItem {
           id: "behavior.episode_played_icon".to_string(),
-          name: "Episode Played Icon".to_string(),
-          description: "Single-cell icon for fully played episodes".to_string(),
+          name: strings.behavior_episode_played_icon_name.to_string(),
+          description: strings.behavior_episode_played_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.episode_played_icon.clone()),
         },
         SettingItem {
           id: "behavior.sort_ascending_icon".to_string(),
-          name: "Sort Ascending Icon".to_string(),
-          description: "Single-cell icon for ascending sort".to_string(),
+          name: strings.behavior_sort_ascending_icon_name.to_string(),
+          description: strings.behavior_sort_ascending_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.sort_ascending_icon.clone()),
         },
         SettingItem {
           id: "behavior.sort_descending_icon".to_string(),
-          name: "Sort Descending Icon".to_string(),
-          description: "Single-cell icon for descending sort".to_string(),
+          name: strings.behavior_sort_descending_icon_name.to_string(),
+          description: strings
+            .behavior_sort_descending_icon_description
+            .to_string(),
           value: SettingValue::String(self.user_config.behavior.sort_descending_icon.clone()),
         },
         SettingItem {
           id: "behavior.list_highlight_icon".to_string(),
-          name: "List Highlight Icon".to_string(),
-          description: "Icon shown next to highlighted list rows".to_string(),
+          name: strings.behavior_list_highlight_icon_name.to_string(),
+          description: strings.behavior_list_highlight_icon_description.to_string(),
           value: SettingValue::String(self.user_config.behavior.list_highlight_icon.clone()),
         },
       ],
       SettingsCategory::Keybindings => vec![
         SettingItem {
           id: "keys.back".to_string(),
-          name: "Back".to_string(),
-          description: "Go back / quit".to_string(),
+          name: strings.keys_back_name.to_string(),
+          description: strings.keys_back_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.back)),
         },
         SettingItem {
           id: "keys.move_up".to_string(),
-          name: "Move Up".to_string(),
-          description: "Move selection up".to_string(),
+          name: strings.keys_move_up_name.to_string(),
+          description: strings.keys_move_up_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.move_up)),
         },
         SettingItem {
           id: "keys.move_down".to_string(),
-          name: "Move Down".to_string(),
-          description: "Move selection down".to_string(),
+          name: strings.keys_move_down_name.to_string(),
+          description: strings.keys_move_down_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.move_down)),
         },
         SettingItem {
           id: "keys.move_left".to_string(),
-          name: "Move Left".to_string(),
-          description: "Move selection left".to_string(),
+          name: strings.keys_move_left_name.to_string(),
+          description: strings.keys_move_left_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.move_left)),
         },
         SettingItem {
           id: "keys.move_right".to_string(),
-          name: "Move Right".to_string(),
-          description: "Move selection right".to_string(),
+          name: strings.keys_move_right_name.to_string(),
+          description: strings.keys_move_right_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.move_right)),
         },
         SettingItem {
           id: "keys.next_page".to_string(),
-          name: "Next Page".to_string(),
-          description: "Navigate to next page".to_string(),
+          name: strings.keys_next_page_name.to_string(),
+          description: strings.keys_next_page_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.next_page)),
         },
         SettingItem {
           id: "keys.previous_page".to_string(),
-          name: "Previous Page".to_string(),
-          description: "Navigate to previous page".to_string(),
+          name: strings.keys_previous_page_name.to_string(),
+          description: strings.keys_previous_page_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.previous_page)),
         },
         SettingItem {
           id: "keys.toggle_playback".to_string(),
-          name: "Toggle Playback".to_string(),
-          description: "Play/pause".to_string(),
+          name: strings.keys_toggle_playback_name.to_string(),
+          description: strings.keys_toggle_playback_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.toggle_playback)),
         },
         SettingItem {
           id: "keys.seek_backwards".to_string(),
-          name: "Seek Backwards".to_string(),
-          description: "Seek backwards in track".to_string(),
+          name: strings.keys_seek_backwards_name.to_string(),
+          description: strings.keys_seek_backwards_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.seek_backwards)),
         },
         SettingItem {
           id: "keys.seek_forwards".to_string(),
-          name: "Seek Forwards".to_string(),
-          description: "Seek forwards in track".to_string(),
+          name: strings.keys_seek_forwards_name.to_string(),
+          description: strings.keys_seek_forwards_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.seek_forwards)),
         },
         SettingItem {
           id: "keys.next_track".to_string(),
-          name: "Next Track".to_string(),
-          description: "Skip to next track".to_string(),
+          name: strings.keys_next_track_name.to_string(),
+          description: strings.keys_next_track_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.next_track)),
         },
         SettingItem {
           id: "keys.previous_track".to_string(),
-          name: "Previous Track".to_string(),
-          description: "Go to previous track".to_string(),
+          name: strings.keys_previous_track_name.to_string(),
+          description: strings.keys_previous_track_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.previous_track)),
         },
         SettingItem {
           id: "keys.force_previous_track".to_string(),
-          name: "Force Previous Track".to_string(),
-          description: "Always skip to the previous track (ignoring playback position)".to_string(),
-          value: SettingValue::Key(key_to_config_string(&self.user_config.keys.force_previous_track)),
+          name: strings.keys_force_previous_track_name.to_string(),
+          description: strings.keys_force_previous_track_description.to_string(),
+          value: SettingValue::Key(key_to_config_string(
+            &self.user_config.keys.force_previous_track,
+          )),
         },
         SettingItem {
           id: "keys.shuffle".to_string(),
-          name: "Shuffle".to_string(),
-          description: "Toggle shuffle mode".to_string(),
+          name: strings.keys_shuffle_name.to_string(),
+          description: strings.keys_shuffle_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.shuffle)),
         },
         SettingItem {
           id: "keys.repeat".to_string(),
-          name: "Repeat".to_string(),
-          description: "Cycle repeat mode".to_string(),
+          name: strings.keys_repeat_name.to_string(),
+          description: strings.keys_repeat_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.repeat)),
         },
         SettingItem {
           id: "keys.search".to_string(),
-          name: "Search".to_string(),
-          description: "Open search".to_string(),
+          name: strings.keys_search_name.to_string(),
+          description: strings.keys_search_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.search)),
         },
         SettingItem {
           id: "keys.help".to_string(),
-          name: "Help".to_string(),
-          description: "Show help menu".to_string(),
+          name: strings.keys_help_name.to_string(),
+          description: strings.keys_help_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.help)),
         },
         SettingItem {
           id: "keys.open_settings".to_string(),
-          name: "Open Settings".to_string(),
-          description: "Open settings menu".to_string(),
+          name: strings.keys_open_settings_name.to_string(),
+          description: strings.keys_open_settings_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.open_settings)),
         },
         SettingItem {
           id: "keys.save_settings".to_string(),
-          name: "Save Settings".to_string(),
-          description: "Save settings to file".to_string(),
+          name: strings.keys_save_settings_name.to_string(),
+          description: strings.keys_save_settings_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.save_settings)),
         },
         SettingItem {
           id: "keys.jump_to_album".to_string(),
-          name: "Jump to Album".to_string(),
-          description: "Jump to currently playing album".to_string(),
+          name: strings.keys_jump_to_album_name.to_string(),
+          description: strings.keys_jump_to_album_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.jump_to_album)),
         },
         SettingItem {
           id: "keys.jump_to_artist_album".to_string(),
-          name: "Jump to Artist".to_string(),
-          description: "Jump to artist's albums".to_string(),
-          value: SettingValue::Key(key_to_config_string(&self.user_config.keys.jump_to_artist_album)),
+          name: strings.keys_jump_to_artist_album_name.to_string(),
+          description: strings.keys_jump_to_artist_album_description.to_string(),
+          value: SettingValue::Key(key_to_config_string(
+            &self.user_config.keys.jump_to_artist_album,
+          )),
         },
         SettingItem {
           id: "keys.jump_to_context".to_string(),
-          name: "Jump to Context".to_string(),
-          description: "Jump to current playback context".to_string(),
+          name: strings.keys_jump_to_context_name.to_string(),
+          description: strings.keys_jump_to_context_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.jump_to_context)),
         },
         SettingItem {
           id: "keys.manage_devices".to_string(),
-          name: "Switch Music Source".to_string(),
-          description: "Open the source and device picker".to_string(),
+          name: strings.keys_manage_devices_name.to_string(),
+          description: strings.keys_manage_devices_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.manage_devices)),
         },
         SettingItem {
           id: "keys.decrease_volume".to_string(),
-          name: "Decrease Volume".to_string(),
-          description: "Decrease playback volume".to_string(),
+          name: strings.keys_decrease_volume_name.to_string(),
+          description: strings.keys_decrease_volume_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.decrease_volume)),
         },
         SettingItem {
           id: "keys.increase_volume".to_string(),
-          name: "Increase Volume".to_string(),
-          description: "Increase playback volume".to_string(),
+          name: strings.keys_increase_volume_name.to_string(),
+          description: strings.keys_increase_volume_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.increase_volume)),
         },
         SettingItem {
           id: "keys.add_item_to_queue".to_string(),
-          name: "Add to Queue".to_string(),
-          description: "Add selected item to queue".to_string(),
-          value: SettingValue::Key(key_to_config_string(&self.user_config.keys.add_item_to_queue)),
+          name: strings.keys_add_item_to_queue_name.to_string(),
+          description: strings.keys_add_item_to_queue_description.to_string(),
+          value: SettingValue::Key(key_to_config_string(
+            &self.user_config.keys.add_item_to_queue,
+          )),
         },
         SettingItem {
           id: "keys.show_queue".to_string(),
-          name: "Show Queue".to_string(),
-          description: "Show playback queue".to_string(),
+          name: strings.keys_show_queue_name.to_string(),
+          description: strings.keys_show_queue_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.show_queue)),
         },
         SettingItem {
           id: "keys.remove_from_queue".to_string(),
-          name: "Remove from Queue".to_string(),
-          description: "Remove the selected track from the queue".to_string(),
-          value: SettingValue::Key(key_to_config_string(&self.user_config.keys.remove_from_queue)),
+          name: strings.keys_remove_from_queue_name.to_string(),
+          description: strings.keys_remove_from_queue_description.to_string(),
+          value: SettingValue::Key(key_to_config_string(
+            &self.user_config.keys.remove_from_queue,
+          )),
         },
         SettingItem {
           id: "keys.like_track".to_string(),
-          name: "Like Track".to_string(),
-          description: "Toggle saved state for the currently playing track or episode"
-            .to_string(),
+          name: strings.keys_like_track_name.to_string(),
+          description: strings.keys_like_track_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.like_track)),
         },
         SettingItem {
           id: "keys.generate_recap".to_string(),
-          name: "Generate Listening Recap".to_string(),
-          description:
-            "Generate and open the listening recap HTML card (uses the selected period on the Stats screen, 30 days elsewhere)"
-              .to_string(),
+          name: strings.keys_generate_recap_name.to_string(),
+          description: strings.keys_generate_recap_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.generate_recap)),
         },
         SettingItem {
           id: "keys.copy_song_url".to_string(),
-          name: "Copy Song URL".to_string(),
-          description: "Copy current song URL to clipboard".to_string(),
+          name: strings.keys_copy_song_url_name.to_string(),
+          description: strings.keys_copy_song_url_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.copy_song_url)),
         },
         SettingItem {
           id: "keys.copy_album_url".to_string(),
-          name: "Copy Album URL".to_string(),
-          description: "Copy current album URL to clipboard".to_string(),
+          name: strings.keys_copy_album_url_name.to_string(),
+          description: strings.keys_copy_album_url_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.copy_album_url)),
         },
         SettingItem {
           id: "keys.audio_analysis".to_string(),
-          name: "Audio Analysis".to_string(),
-          description: "Open audio analysis view".to_string(),
+          name: strings.keys_audio_analysis_name.to_string(),
+          description: strings.keys_audio_analysis_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.audio_analysis)),
         },
         SettingItem {
           id: "keys.lyrics_view".to_string(),
-          name: "Lyrics View".to_string(),
-          description: "Open lyrics view".to_string(),
+          name: strings.keys_lyrics_view_name.to_string(),
+          description: strings.keys_lyrics_view_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.lyrics_view)),
         },
         SettingItem {
           id: "keys.miniplayer_view".to_string(),
-          name: "Miniplayer View".to_string(),
-          description: "Toggle full-screen playbar view".to_string(),
+          name: strings.keys_miniplayer_view_name.to_string(),
+          description: strings.keys_miniplayer_view_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.miniplayer_view)),
         },
         #[cfg(feature = "cover-art")]
         SettingItem {
           id: "keys.cover_art_view".to_string(),
-          name: "Cover Art View".to_string(),
-          description: "Open full-screen cover art view".to_string(),
+          name: strings.keys_cover_art_view_name.to_string(),
+          description: strings.keys_cover_art_view_description.to_string(),
           value: SettingValue::Key(key_to_config_string(&self.user_config.keys.cover_art_view)),
         },
       ],
@@ -956,128 +1062,130 @@ impl App {
         vec![
           SettingItem {
             id: "theme.preset".to_string(),
-            name: "Theme Preset".to_string(),
-            description: "Choose a preset theme or customize below".to_string(),
+            name: strings.theme_preset_name.to_string(),
+            description: strings.theme_preset_description.to_string(),
             value: SettingValue::Preset(self.user_config.current_preset.name().to_string()),
           },
           SettingItem {
             id: "theme.active".to_string(),
-            name: "Active Color".to_string(),
-            description: "Color for active elements".to_string(),
+            name: strings.theme_active_name.to_string(),
+            description: strings.theme_active_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.active)),
           },
           SettingItem {
             id: "theme.banner".to_string(),
-            name: "Banner Color".to_string(),
-            description: "Color for banner text".to_string(),
+            name: strings.theme_banner_name.to_string(),
+            description: strings.theme_banner_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.banner)),
           },
           SettingItem {
             id: "behavior.banner_gradient".to_string(),
-            name: "Banner Gradient".to_string(),
-            description: "Animated RGB gradient on the home banner; off uses the Banner Color"
-              .to_string(),
+            name: strings.behavior_banner_gradient_name.to_string(),
+            description: strings.behavior_banner_gradient_description.to_string(),
             value: SettingValue::Bool(self.user_config.behavior.banner_gradient),
           },
           #[cfg(feature = "art-decode")]
           SettingItem {
             id: "behavior.cover_art_theme".to_string(),
-            name: "Adaptive Theme".to_string(),
-            description: "Recolor UI accents from the current cover art, fading on track change"
-              .to_string(),
+            name: strings.behavior_cover_art_theme_name.to_string(),
+            description: strings.behavior_cover_art_theme_description.to_string(),
             value: SettingValue::Bool(self.user_config.behavior.cover_art_theme),
           },
           SettingItem {
             id: "theme.hint".to_string(),
-            name: "Hint Color".to_string(),
-            description: "Color for hints".to_string(),
+            name: strings.theme_hint_name.to_string(),
+            description: strings.theme_hint_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.hint)),
           },
           SettingItem {
             id: "theme.hovered".to_string(),
-            name: "Hovered Color".to_string(),
-            description: "Color for hovered elements".to_string(),
+            name: strings.theme_hovered_name.to_string(),
+            description: strings.theme_hovered_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.hovered)),
           },
           SettingItem {
             id: "theme.selected".to_string(),
-            name: "Selected Color".to_string(),
-            description: "Color for selected items".to_string(),
+            name: strings.theme_selected_name.to_string(),
+            description: strings.theme_selected_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.selected)),
           },
           SettingItem {
             id: "theme.inactive".to_string(),
-            name: "Inactive Color".to_string(),
-            description: "Color for inactive elements".to_string(),
+            name: strings.theme_inactive_name.to_string(),
+            description: strings.theme_inactive_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.inactive)),
           },
           SettingItem {
             id: "theme.text".to_string(),
-            name: "Text Color".to_string(),
-            description: "Default text color".to_string(),
+            name: strings.theme_text_name.to_string(),
+            description: strings.theme_text_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.text)),
           },
           SettingItem {
             id: "theme.error_text".to_string(),
-            name: "Error Text Color".to_string(),
-            description: "Color for error messages".to_string(),
+            name: strings.theme_error_text_name.to_string(),
+            description: strings.theme_error_text_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.error_text)),
           },
           SettingItem {
             id: "theme.error_border".to_string(),
-            name: "Error Border Color".to_string(),
-            description: "Border color for error messages".to_string(),
+            name: strings.theme_error_border_name.to_string(),
+            description: strings.theme_error_border_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.error_border)),
           },
           SettingItem {
             id: "theme.playbar_background".to_string(),
-            name: "Playbar Background".to_string(),
-            description: "Background color for playbar".to_string(),
+            name: strings.theme_playbar_background_name.to_string(),
+            description: strings.theme_playbar_background_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.playbar_background)),
           },
           SettingItem {
             id: "theme.playbar_progress".to_string(),
-            name: "Playbar Progress".to_string(),
-            description: "Color for playbar progress".to_string(),
+            name: strings.theme_playbar_progress_name.to_string(),
+            description: strings.theme_playbar_progress_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.playbar_progress)),
           },
           #[cfg(feature = "cover-art")]
           SettingItem {
             id: "theme.cover_art_dither_color".to_string(),
-            name: "Cover Art Dither Color".to_string(),
-            description: "Accent color for dithered art; auto follows live playbar progress".to_string(),
+            name: strings.theme_cover_art_dither_color_name.to_string(),
+            description: strings.theme_cover_art_dither_color_description.to_string(),
             value: SettingValue::Color(
-              self.user_config.cover_art_dither_color.map(color_to_string).unwrap_or_else(|| "auto".to_string()),
+              self
+                .user_config
+                .cover_art_dither_color
+                .map(color_to_string)
+                .unwrap_or_else(|| "auto".to_string()),
             ),
           },
           SettingItem {
             id: "theme.playbar_progress_text".to_string(),
-            name: "Playbar Progress Text".to_string(),
-            description: "Color for playbar progress text".to_string(),
+            name: strings.theme_playbar_progress_text_name.to_string(),
+            description: strings.theme_playbar_progress_text_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.playbar_progress_text)),
           },
           SettingItem {
             id: "theme.playbar_text".to_string(),
-            name: "Playbar Text".to_string(),
-            description: "Color for playbar text".to_string(),
+            name: strings.theme_playbar_text_name.to_string(),
+            description: strings.theme_playbar_text_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.playbar_text)),
           },
           SettingItem {
             id: "theme.highlighted_lyrics".to_string(),
-            name: "Lyrics Highlight".to_string(),
-            description: "Color for current lyrics line".to_string(),
+            name: strings.theme_highlighted_lyrics_name.to_string(),
+            description: strings.theme_highlighted_lyrics_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.highlighted_lyrics)),
           },
           SettingItem {
             id: "theme.background".to_string(),
-            name: "Background".to_string(),
-            description: "Color for the background".to_string(),
+            name: strings.theme_background_name.to_string(),
+            description: strings.theme_background_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.background)),
           },
           SettingItem {
             id: "theme.header".to_string(),
-            name: "Header".to_string(),
-            description: "Color for the header".to_string(),
+            name: strings.theme_header_name.to_string(),
+            description: strings.theme_header_description.to_string(),
             value: SettingValue::Color(color_to_string(user_theme.header)),
           },
         ]
@@ -1146,6 +1254,69 @@ impl App {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn applying_language_relabels_settings_without_discarding_staged_values() {
+    use crate::core::i18n::Language;
+    let mut app = App::default();
+    app.load_settings_for_category();
+    for item in &mut app.settings_items {
+      match item.id.as_str() {
+        "behavior.language" => {
+          item.value = SettingValue::Cycle("zh-Hant".to_string(), Language::OPTIONS);
+        }
+        "behavior.volume_increment" => item.value = SettingValue::Number(9),
+        _ => {}
+      }
+    }
+    let selected = app.view.settings_selected_index;
+    app.apply_settings_changes();
+
+    assert_eq!(app.user_config.behavior.language, Language::ZhHant);
+    assert_eq!(app.user_config.behavior.volume_increment, 9);
+    assert_eq!(app.view.settings_selected_index, selected);
+    assert!(app.has_unsaved_settings_changes());
+    for items in [&app.settings_items, &app.settings_saved_items] {
+      let row = items
+        .iter()
+        .find(|item| item.id == "behavior.language")
+        .unwrap();
+      assert_eq!(row.name, app.strings().settings.behavior_language_name);
+      assert_eq!(
+        row.description,
+        app.strings().settings.behavior_language_description
+      );
+    }
+    let language = app
+      .settings_items
+      .iter()
+      .find(|item| item.id == "behavior.language")
+      .unwrap();
+    assert_eq!(
+      language.value,
+      SettingValue::Cycle("zh-Hant".to_string(), Language::OPTIONS)
+    );
+  }
+
+  #[test]
+  fn relabeling_settings_keeps_the_clean_snapshot_clean() {
+    let mut app = App::default();
+    for category in SettingsCategory::all() {
+      app.view.settings_category = *category;
+      app.load_settings_for_category();
+      app.user_config.behavior.language = crate::core::i18n::Language::ZhHans;
+      app.refresh_language();
+      app.refresh_settings_labels();
+      assert!(!app.has_unsaved_settings_changes());
+      for row in &app.settings_items {
+        let (name, description) = app.strings().settings.row_text(&row.id).unwrap();
+        assert_eq!(row.name, name);
+        assert_eq!(row.description, description);
+      }
+      app.user_config.behavior.language = crate::core::i18n::Language::En;
+      app.refresh_language();
+    }
+  }
 
   #[test]
   fn every_sort_field_a_context_offers_is_selectable_in_settings() {

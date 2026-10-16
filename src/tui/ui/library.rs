@@ -17,13 +17,13 @@ pub fn draw_library_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let rows: Vec<&str> = app
     .library_rows()
     .iter()
-    .map(|target| target.name())
+    .map(|target| target.localized_name(app.strings()))
     .collect();
   draw_selectable_list(
     f,
     app,
     layout_chunk,
-    "Library",
+    app.strings().sidebar.library,
     &rows,
     highlight_state,
     Some(app.library_cursor()),
@@ -32,11 +32,12 @@ pub fn draw_library_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 }
 
 /// Sidebar label for the pinned community playlist.
-fn community_pin_label() -> String {
-  "\u{1F4CC} spotatui community".to_string()
+fn community_pin_label(app: &App) -> String {
+  app.strings().sidebar.community_pin.to_string()
 }
 
 pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
+  let strings = &app.strings().sidebar;
   let highlight_state = {
     let current_route = app.get_current_route();
     (
@@ -49,22 +50,19 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // active source instead of Spotify playlists (no write, so no "Add Playlist").
   if app.active_source == Source::Local {
     let items: Vec<String> = if app.local_playlists().is_empty() {
-      vec![format!(
-        "(no folders \u{2014} set music dir, then press `{}`)",
-        app.user_config.keys.manage_devices
-      )]
+      vec![strings.empty_local(&app.user_config.keys.manage_devices.to_string())]
     } else {
       app
         .local_playlists()
         .iter()
-        .map(|p| format!("\u{1F4C1} {}", p.name))
+        .map(|p| format!("\u{1F4C1} {}", p.display_name(app.strings())))
         .collect()
     };
     draw_selectable_list(
       f,
       app,
       layout_chunk,
-      "Local Files",
+      strings.local_files,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -77,22 +75,24 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // the shared track table. Read-only, so no "Add Playlist".
   if app.active_source == Source::AppleMusic {
     let items: Vec<String> = if app.apple_music_playlists().is_empty() {
-      vec![format!(
-        "(press `{}`, pick Apple Music to load your library)",
-        app.user_config.keys.manage_devices
-      )]
+      vec![strings.empty_apple_music(&app.user_config.keys.manage_devices.to_string())]
     } else {
       app
         .apple_music_playlists()
         .iter()
-        .map(|p| format!("\u{1F3B5} {}", p.name))
+        .map(|p| {
+          format!(
+            "\u{1F3B5} {}",
+            strings.playlist_label(Source::AppleMusic, &p.uri, &p.name)
+          )
+        })
         .collect()
     };
     draw_selectable_list(
       f,
       app,
       layout_chunk,
-      "Apple Music",
+      strings.apple_music,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -105,10 +105,7 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // local-write support, so no "Add Playlist").
   if app.active_source == Source::Subsonic {
     let items: Vec<String> = if app.subsonic_playlists().is_empty() {
-      vec![format!(
-        "(no playlists \u{2014} configure server, then press `{}`)",
-        app.user_config.keys.manage_devices
-      )]
+      vec![strings.empty_subsonic(&app.user_config.keys.manage_devices.to_string())]
     } else {
       app
         .subsonic_playlists()
@@ -120,7 +117,7 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      "Subsonic",
+      strings.subsonic,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -133,22 +130,23 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // playlists, and the favorite albums, each opening the shared track table.
   if app.active_source == Source::Qobuz {
     let items: Vec<String> = if app.qobuz_playlists().is_empty() {
-      vec![format!(
-        "(not logged in \u{2014} press `{}`, pick Qobuz)",
-        app.user_config.keys.manage_devices
-      )]
+      vec![strings.empty_qobuz(&app.user_config.keys.manage_devices.to_string())]
     } else {
       app
         .qobuz_playlists()
         .iter()
-        .map(|p| p.name.clone())
+        .map(|p| {
+          strings
+            .playlist_label(Source::Qobuz, &p.uri, &p.name)
+            .to_string()
+        })
         .collect()
     };
     draw_selectable_list(
       f,
       app,
       layout_chunk,
-      "Qobuz",
+      strings.qobuz,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -161,7 +159,7 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // A station is a leaf — Enter plays it directly instead of drilling in.
   if app.active_source == Source::Radio {
     let items: Vec<String> = if app.radio_stations().is_empty() {
-      vec!["(no saved stations \u{2014} search to add)".to_string()]
+      vec![strings.empty_radio.to_string()]
     } else {
       app
         .radio_stations()
@@ -174,7 +172,7 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      "Radio Stations",
+      strings.radio_stations,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -192,12 +190,12 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .iter()
       .map(|p| format!("\u{1F4FC} {} ({})", p.name, p.track_count))
       .collect();
-    items.push("+ New Playlist".to_string());
+    items.push(strings.new_playlist.to_string());
     draw_selectable_list(
       f,
       app,
       layout_chunk,
-      "YouTube Playlists",
+      strings.youtube_playlists,
       &items,
       highlight_state,
       app.view.selected_playlist_index,
@@ -214,7 +212,7 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     // (which injects the pin) and the Enter/click index math.
     let mut names: Vec<String> = Vec::new();
     if app.community_pin_visible() {
-      names.push(community_pin_label());
+      names.push(community_pin_label(app));
     }
     if let Some(p) = app.playlists() {
       names.extend(p.items.iter().map(|item| item.name.to_owned()));
@@ -225,32 +223,33 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .iter()
       .map(|item| match item {
         crate::core::app::PlaylistFolderItem::Folder(folder) => {
-          if folder.name.starts_with('\u{2190}') {
+          let name = folder.display_name(app.strings());
+          if name.starts_with('\u{2190}') {
             // Back entry (already has arrow prefix)
-            folder.name.clone()
+            name.into_owned()
           } else {
-            format!("\u{1F4C1} {}", folder.name)
+            format!("\u{1F4C1} {}", name)
           }
         }
         crate::core::app::PlaylistFolderItem::Playlist { index, .. } => app
           .all_playlists()
           .get(*index)
           .map(|p| p.name.clone())
-          .unwrap_or_else(|| "Unknown".to_string()),
-        crate::core::app::PlaylistFolderItem::CommunityPin => community_pin_label(),
+          .unwrap_or_else(|| strings.unknown.to_string()),
+        crate::core::app::PlaylistFolderItem::CommunityPin => community_pin_label(app),
       })
       .collect()
   };
 
   // "+ Add Playlist" is the leading row (row 0), above the display items.
-  let mut display_list = vec!["+ Add Playlist".to_string()];
+  let mut display_list = vec![strings.add_playlist.to_string()];
   display_list.extend(playlist_items);
 
   draw_selectable_list(
     f,
     app,
     layout_chunk,
-    "Playlists",
+    strings.playlists,
     &display_list,
     highlight_state,
     app.view.selected_playlist_index,
@@ -299,6 +298,7 @@ mod tests {
 
   fn folder(name: &str) -> PlaylistInfo {
     PlaylistInfo {
+      generated_name: None,
       uri: format!("file:///music/{name}"),
       name: name.to_string(),
       owner: "local".to_string(),

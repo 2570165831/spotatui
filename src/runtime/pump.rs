@@ -1,6 +1,7 @@
 //! The serial IoEvent pump: source routing by URI scheme, the service lane,
 //! and the party-relay drain. Every frontend drives `App` through this.
 
+#[cfg(test)]
 use crate::core::app::SPOTIFY_NOT_CONNECTED_STATUS;
 use crate::core::queue::{
   missing_source_feature, queue_item_source, source_available, QueueItemSource,
@@ -48,11 +49,11 @@ fn start_playback_has_taker(event: &IoEvent, spotify_session: bool) -> bool {
 /// Why the gate dropped a start: the source feature this build lacks, else
 /// the missing Spotify session.
 #[cfg_attr(not(feature = "tui"), allow(dead_code))]
-fn dropped_start_status(event: &IoEvent) -> String {
+fn dropped_start_status(event: &IoEvent, strings: &crate::core::i18n::Strings) -> String {
   if start_playback_uri(event).is_some_and(|uri| uri.starts_with("applemusic:"))
     && !cfg!(target_os = "macos")
   {
-    return "Apple Music playback needs macOS".to_string();
+    return strings.status.runtime.apple_music_needs_macos.to_string();
   }
   let missing_feature = match start_playback_uri(event) {
     Some(uri) if uri.starts_with("radio:") => {
@@ -62,10 +63,8 @@ fn dropped_start_status(event: &IoEvent) -> String {
     None => None,
   };
   match missing_feature {
-    Some(feature) => {
-      format!("This spotatui was built without the `{feature}` feature, so nothing can play that.")
-    }
-    None => SPOTIFY_NOT_CONNECTED_STATUS.to_string(),
+    Some(feature) => strings.status.runtime.feature_missing(feature),
+    None => strings.status.app.spotify_not_connected.to_string(),
   }
 }
 
@@ -160,7 +159,8 @@ pub(super) async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, netwo
     {
       if !start_playback_has_taker(&io_event, network.spotify.is_some()) {
         let mut app = network.app.lock().await;
-        app.set_status_message(dropped_start_status(&io_event), 6);
+        let message = dropped_start_status(&io_event, app.strings());
+        app.set_status_message(message, 6);
         app.is_loading = false;
         continue;
       }
@@ -179,7 +179,8 @@ pub(super) async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, netwo
         };
         if !start_playback_has_taker(&io_event, network.spotify.is_some()) {
           let mut app = network.app.lock().await;
-          app.set_status_message(dropped_start_status(&io_event), 6);
+          let message = dropped_start_status(&io_event, app.strings());
+          app.set_status_message(message, 6);
           app.is_loading = false;
           continue;
         }
@@ -320,7 +321,7 @@ mod tests {
     let start = IoEvent::StartPlayback(None, Some(vec!["file:///a.mp3".to_string()]), Some(0));
 
     assert!(!start_playback_has_taker(&start, true));
-    assert!(dropped_start_status(&start).contains("`local-files`"));
+    assert!(dropped_start_status(&start, &crate::core::i18n::EN).contains("`local-files`"));
   }
 
   #[test]
@@ -336,11 +337,11 @@ mod tests {
     assert_eq!(start_playback_has_taker(&start, true), available);
     if !cfg!(target_os = "macos") {
       assert_eq!(
-        dropped_start_status(&start),
+        dropped_start_status(&start, &crate::core::i18n::EN),
         "Apple Music playback needs macOS"
       );
     } else if !available {
-      assert!(dropped_start_status(&start).contains("`apple-music`"));
+      assert!(dropped_start_status(&start, &crate::core::i18n::EN).contains("`apple-music`"));
     }
   }
 
@@ -348,7 +349,10 @@ mod tests {
   fn a_spotify_start_without_a_session_reports_the_missing_session() {
     let start = IoEvent::StartPlayback(None, Some(vec!["spotify:track:x".to_string()]), Some(0));
 
-    assert_eq!(dropped_start_status(&start), SPOTIFY_NOT_CONNECTED_STATUS);
+    assert_eq!(
+      dropped_start_status(&start, &crate::core::i18n::EN),
+      SPOTIFY_NOT_CONNECTED_STATUS
+    );
   }
 
   #[test]
@@ -368,7 +372,6 @@ mod tests {
     let app = App::new(app_tx, UserConfig::new(), None);
     let before = app.display_revisions();
     let app = Arc::new(Mutex::new(app));
-    let dir = tempfile::tempdir().unwrap();
     let mut network = Network::new(None, &app);
     let (pump_tx, pump_rx) = std::sync::mpsc::channel();
     pump_tx
@@ -383,7 +386,10 @@ mod tests {
     start_tokio(pump_rx, &mut network).await;
 
     let app = app.lock().await;
-    let status = crate::gui::protocol::pushed(&crate::gui::protocol::diff(&before, &app), "status");
+    let status = crate::gui::protocol::pushed(
+      &crate::gui::protocol::diff(&before, &app, crate::core::i18n::Language::En),
+      "status",
+    );
     assert_eq!(status["payload"]["message"], SPOTIFY_NOT_CONNECTED_STATUS);
     assert_eq!(status["payload"]["is_error"], false);
   }
@@ -490,8 +496,10 @@ mod tests {
     );
     #[cfg(feature = "gui")]
     {
-      let playback =
-        crate::gui::protocol::pushed(&crate::gui::protocol::diff(&before, &app), "playback");
+      let playback = crate::gui::protocol::pushed(
+        &crate::gui::protocol::diff(&before, &app, crate::core::i18n::Language::En),
+        "playback",
+      );
       assert_eq!(playback["payload"]["item"]["title"], "Suspended");
     }
   }

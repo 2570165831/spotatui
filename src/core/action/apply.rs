@@ -114,7 +114,7 @@ impl App {
       },
       Action::SearchPlaylistTracks { playlist_id, query } => {
         self.pending_playlist_track_search = Some(query.clone());
-        self.set_status_message(format!("Searching playlist for \"{query}\"..."), 60);
+        self.set_status_message(self.strings().status.app.playlist_searching(&query), 60);
         self.dispatch(IoEvent::SearchPlaylistTracks(playlist_id, query));
       }
       Action::CreatePlaylist { name, track_uris } => {
@@ -149,7 +149,12 @@ impl App {
           self.dispatch(IoEvent::UserUnfollowPlaylist(user_id, playlist_id));
         } else {
           self.set_error_status_message(
-            "Cannot unfollow: user profile not loaded yet".to_string(),
+            self
+              .strings()
+              .status
+              .app
+              .unfollow_profile_loading
+              .to_string(),
             4,
           );
         }

@@ -231,6 +231,7 @@ impl RateLimitGate {
 pub struct SpotifyApiError {
   pub status: reqwest::StatusCode,
   pub(crate) body: String,
+  pub(crate) localized_body: Option<crate::core::i18n::LocalizedMessage>,
   pub(crate) detail: Option<String>,
   /// `METHOD /path?query`, redacted. Issue #566: a bare
   /// `Spotify API 403 Forbidden failed: …` never said which call broke.
@@ -264,6 +265,35 @@ impl std::fmt::Display for SpotifyApiError {
 }
 
 impl std::error::Error for SpotifyApiError {}
+
+/// Render known application errors without changing their diagnostic text or classification.
+pub(super) fn error_text(error: &anyhow::Error, language: crate::core::i18n::Language) -> String {
+  if language == crate::core::i18n::Language::En {
+    return error.to_string();
+  }
+  if let Some(api) = error.downcast_ref::<SpotifyApiError>() {
+    if let Some(body) = &api.localized_body {
+      let mut text = language
+        .strings()
+        .status
+        .infra
+        .spotify_api_error(&api.status.to_string(), body.text(language));
+      if let Some(detail) = &api.detail {
+        text.push_str(&format!(" ({detail})"));
+      }
+      if let Some(endpoint) = &api.endpoint {
+        text.push_str(&format!(" [{endpoint}]"));
+      }
+      return text;
+    }
+  }
+  error
+    .downcast_ref::<crate::core::i18n::LocalizedMessage>()
+    .map_or_else(
+      || error.to_string(),
+      |message| message.text(language).to_string(),
+    )
+}
 
 /// The process-wide gate every Spotify request goes through.
 pub(crate) fn shared_rate_gate() -> &'static RateLimitGate {
@@ -400,6 +430,7 @@ fn rate_limited_error(left: Duration, endpoint: String) -> anyhow::Error {
       "rate limited by Spotify, retry in {}s",
       left.as_secs().max(1)
     ),
+    localized_body: None,
     detail: None,
     endpoint: Some(endpoint),
   }
@@ -482,6 +513,7 @@ pub(crate) mod fake {
         SpotifyApiError {
           status,
           body: text,
+          localized_body: None,
           detail: None,
           endpoint: None,
         }
@@ -686,6 +718,23 @@ pub fn is_transient_network_error(e: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod transient_classification_tests {
   use super::*;
+  #[test]
+  fn english_request_errors_keep_the_outer_diagnostic_context() {
+    let error = anyhow::Error::new(SpotifyApiError {
+      status: reqwest::StatusCode::BAD_GATEWAY,
+      body: "upstream {body}".into(),
+      localized_body: Some(crate::core::i18n::LocalizedMessage::new(|_| {
+        "upstream {body}".into()
+      })),
+      detail: None,
+      endpoint: None,
+    })
+    .context("literal outer context");
+    assert_eq!(
+      error_text(&error, crate::core::i18n::Language::En),
+      error.to_string()
+    );
+  }
 
   /// reqwest writes "error sending request for url (…)"; dropping the URL to
   /// keep the search box out of the log must not stop the retry paths from
@@ -726,6 +775,62 @@ pub async fn spotify_get_typed_for<T: DeserializeOwned>(
 }
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn localized_speaker_errors_keep_their_english_diagnostics_and_http_classification() {
+    use crate::core::i18n::{Language, LocalizedMessage};
+    let message = LocalizedMessage::new(|s| s.status.infra.speaker_not_joined("客廳 {body}"));
+    let error: anyhow::Error = SpotifyApiError {
+      status: StatusCode::GATEWAY_TIMEOUT,
+      body: message.to_string(),
+      localized_body: Some(message),
+      detail: Some("raw {status}".to_string()),
+      endpoint: Some("PUT /v1/me/player?device_id=客廳".to_string()),
+    }
+    .into();
+    let english = "Spotify API 504 Gateway Timeout failed: 客廳 {body} did not join after its login (raw {status}) [PUT /v1/me/player?device_id=客廳]";
+    assert_eq!(error.to_string(), english);
+    assert_eq!(error_text(&error, Language::En), english);
+    assert!(!is_transient_network_error(&error));
+    assert_eq!(
+      error.downcast_ref::<SpotifyApiError>().unwrap().status,
+      StatusCode::GATEWAY_TIMEOUT
+    );
+    assert!(!is_rate_limited_error(&error));
+    for language in [Language::ZhHans, Language::ZhHant] {
+      let text = error_text(&error, language);
+      assert!(text.contains("客廳 {body}"));
+      assert!(text.contains("raw {status}"));
+      assert!(text.ends_with("[PUT /v1/me/player?device_id=客廳]"));
+
+      assert_eq!(error.to_string(), english);
+    }
+  }
+
+  #[test]
+  fn stale_playlist_errors_translate_without_parsing_or_changing_raw_provider_errors() {
+    use crate::core::i18n::{Language, LocalizedMessage};
+    let error = anyhow::Error::new(LocalizedMessage::new(|s| {
+      s.status.infra.playlist_changed.to_string()
+    }));
+    assert_eq!(
+      error.to_string(),
+      "The playlist changed since it loaded; open it again and retry"
+    );
+    assert_eq!(
+      error_text(&error, Language::ZhHans),
+      crate::core::i18n::ZH_HANS.status.infra.playlist_changed
+    );
+    assert_eq!(
+      error_text(&error, Language::ZhHant),
+      crate::core::i18n::ZH_HANT.status.infra.playlist_changed
+    );
+    let raw = anyhow!("unknown speaker reply {name}", name = "{type}");
+    assert_eq!(
+      error_text(&raw, Language::ZhHant),
+      "unknown speaker reply {type}"
+    );
+  }
   use super::*;
 
   /// The call sites are the part a unit test cannot otherwise reach: the
@@ -1016,6 +1121,7 @@ mod tests {
     let error = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::FORBIDDEN,
       body: "Player command failed".to_string(),
+      localized_body: None,
       detail: None,
       endpoint: Some("PUT /v1/me/player/play?device_id=abc".to_string()),
     });
@@ -1031,6 +1137,7 @@ mod tests {
     let error = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::UNAUTHORIZED,
       body: "expired".to_string(),
+      localized_body: None,
       detail: Some("token refresh failed: no network".to_string()),
       endpoint: Some("GET /v1/me".to_string()),
     });
@@ -1050,6 +1157,7 @@ mod tests {
     let error = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::NOT_FOUND,
       body: "not found".to_string(),
+      localized_body: None,
       detail: None,
       endpoint: Some("GET /v1/playlists/3dns429xTimedOut/tracks?q=connection+reset".to_string()),
     });
@@ -1064,6 +1172,7 @@ mod tests {
     let error = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::TOO_MANY_REQUESTS,
       body: "rate limited by Spotify, retry in 17s".to_string(),
+      localized_body: None,
       detail: None,
       endpoint: Some("GET /v1/me/player".to_string()),
     });
@@ -1076,6 +1185,7 @@ mod tests {
     let error = anyhow::Error::new(SpotifyApiError {
       status: reqwest::StatusCode::FORBIDDEN,
       body: "playlist contents unavailable".to_string(),
+      localized_body: None,
       detail: None,
       endpoint: None,
     });
@@ -1091,12 +1201,14 @@ mod tests {
     let not_found = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::NOT_FOUND,
       body: String::new(),
+      localized_body: None,
       detail: None,
       endpoint: None,
     });
     let rate_limited = anyhow::Error::from(SpotifyApiError {
       status: reqwest::StatusCode::TOO_MANY_REQUESTS,
       body: String::new(),
+      localized_body: None,
       detail: None,
       endpoint: None,
     });

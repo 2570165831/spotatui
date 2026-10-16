@@ -54,13 +54,21 @@ impl Availability {
     self == Availability::Available
   }
 
-  /// The suffix a row keeps when it stays visible although unmet.
-  pub fn hint(self) -> Option<String> {
+  /// The suffix in the selected language, including the localized source name.
+  pub fn localized_hint(self, strings: &crate::core::i18n::Strings) -> Option<String> {
     match self {
       Availability::Available => None,
-      Availability::NeedsSpotify => Some("needs Spotify".to_string()),
-      Availability::NotForSource(source) => Some(format!("not for {}", source.label())),
-      Availability::OnlyForSource(source) => Some(format!("{} only", source.label())),
+      Availability::NeedsSpotify => Some(strings.help.needs_spotify.to_string()),
+      Availability::NotForSource(source) => Some(
+        strings
+          .help
+          .not_for_source(strings.sidebar.source_label(source)),
+      ),
+      Availability::OnlyForSource(source) => Some(
+        strings
+          .help
+          .only_for_source(strings.sidebar.source_label(source)),
+      ),
     }
   }
 }
@@ -231,17 +239,26 @@ mod tests {
 
   #[test]
   fn hints_name_the_source_or_spotify() {
-    assert_eq!(Availability::Available.hint(), None);
     assert_eq!(
-      Availability::NeedsSpotify.hint().as_deref(),
+      Availability::Available.localized_hint(&crate::core::i18n::EN),
+      None
+    );
+    assert_eq!(
+      Availability::NeedsSpotify
+        .localized_hint(&crate::core::i18n::EN)
+        .as_deref(),
       Some("needs Spotify")
     );
     assert_eq!(
-      Availability::NotForSource(Source::Local).hint().as_deref(),
+      Availability::NotForSource(Source::Local)
+        .localized_hint(&crate::core::i18n::EN)
+        .as_deref(),
       Some("not for Local Files")
     );
     assert_eq!(
-      Availability::OnlyForSource(Source::Radio).hint().as_deref(),
+      Availability::OnlyForSource(Source::Radio)
+        .localized_hint(&crate::core::i18n::EN)
+        .as_deref(),
       Some("Internet Radio only")
     );
   }

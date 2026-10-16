@@ -100,7 +100,7 @@ fn play_radio_station(app: &mut App) {
 
 fn remove_radio_station(app: &mut App) {
   let Some(idx) = app.view.selected_playlist_index else {
-    app.set_status_message("No radio station selected".to_string(), 4);
+    app.set_status_message(app.strings().status.app.no_radio_selected.to_string(), 4);
     return;
   };
   let Some(uri) = app
@@ -108,11 +108,11 @@ fn remove_radio_station(app: &mut App) {
     .get(idx)
     .map(|station| station.uri.clone())
   else {
-    app.set_status_message("No radio station selected".to_string(), 4);
+    app.set_status_message(app.strings().status.app.no_radio_selected.to_string(), 4);
     return;
   };
   let Some(uri) = uri else {
-    app.set_status_message("Radio station has no stream URL".to_string(), 4);
+    app.set_status_message(app.strings().status.app.radio_no_url.to_string(), 4);
     return;
   };
   app.apply(Action::RemoveRadioStation(uri));
@@ -296,6 +296,7 @@ mod tests {
 
   fn radio_station_row(name: &str, url: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(format!("radio:{url}")),
       name: name.to_string(),
       artists: vec![],
@@ -439,6 +440,7 @@ mod tests {
     let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
     app.active_source = Source::Local;
     *app.local_playlists_mut() = vec![PlaylistInfo {
+      generated_name: None,
       uri: "file:///music/Jazz".to_string(),
       name: "Jazz".to_string(),
       owner: "local".to_string(),
@@ -483,6 +485,7 @@ mod tests {
     app.active_source = Source::Radio;
     *app.radio_stations_mut() = vec![
       TrackInfo {
+        generated_name: None,
         uri: Some("radio:https://ice1.somafm.com/groovesalad-128-mp3".to_string()),
         name: "Groove Salad".to_string(),
         artists: vec![],
@@ -499,6 +502,7 @@ mod tests {
         release_date: None,
       },
       TrackInfo {
+        generated_name: None,
         uri: Some("radio:https://ice1.somafm.com/secretagent-128-mp3".to_string()),
         name: "Secret Agent".to_string(),
         artists: vec![],
@@ -609,6 +613,7 @@ mod tests {
     let mut app =
       App::new(tx, UserConfig::new(), Some(SystemTime::now())).under_source(Source::Qobuz);
     app.qobuz_playlists_mut().push(PlaylistInfo {
+      generated_name: None,
       uri: "qobuz:playlist:9".to_string(),
       name: "Mine".to_string(),
       owner: "qobuz".to_string(),
