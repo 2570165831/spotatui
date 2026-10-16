@@ -1299,11 +1299,8 @@ mod tests {
         .iter()
         .find(|item| item.id == "behavior.language")
         .unwrap();
-      assert_eq!(row.name, app.strings().settings.behavior_language_name);
-      assert_eq!(
-        row.description,
-        app.strings().settings.behavior_language_description
-      );
+      assert_eq!(row.name, "語言");
+      assert_eq!(row.description, "介面語言（自動跟隨系統語言）");
     }
     let language = app
       .settings_items

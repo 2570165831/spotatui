@@ -1068,7 +1068,18 @@ mod tests {
       );
     }
     assert_eq!(EN.option_label("behavior.language", "zh-Hant"), "繁體中文");
-
+    assert_eq!(
+      ZH_HANS.option_label("behavior.language", "auto"),
+      "自动（跟随系统）"
+    );
+    assert_eq!(
+      ZH_HANT.option_label("behavior.language", "auto"),
+      "自動（跟隨系統）"
+    );
+    assert_eq!(
+      ZH_HANT.option_label("behavior.default_sort_playlist_tracks", "date_added:desc"),
+      "加入日期（遞減）"
+    );
     assert_eq!(
       ZH_HANS.option_label("behavior.streaming_device_name", "default"),
       "default"
@@ -1089,6 +1100,14 @@ mod tests {
     assert_eq!(
       EN.key_conflict("{action}", "{key}"),
       "Key {action} is already assigned to {key}"
+    );
+    assert_eq!(
+      ZH_HANS.key_conflict("{action}", "{key}"),
+      "按键 {action} 已分配给{key}"
+    );
+    assert_eq!(
+      ZH_HANT.color_unknown("\"{value}\""),
+      "未知顏色 \"{value}\"：請使用 LightBlue 等名稱或 \"r, g, b\""
     );
   }
 }
