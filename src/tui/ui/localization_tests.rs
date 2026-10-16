@@ -1,7 +1,7 @@
 //! Rendering regressions shared by the sidebar/help and main-screen migrations.
 
 use super::{help::padded_help_cell, library, popups};
-use crate::core::app::App;
+use crate::core::app::{ActiveBlock, App, RouteId};
 use crate::core::geometry::Viewport;
 use crate::core::i18n::Language;
 use crate::core::input::Key;
@@ -304,6 +304,69 @@ fn chinese_sidebar_and_help_render_in_tiny_and_practical_viewports() {
         }
         let buffer = render_help(&mut app, width, height);
         assert_eq!(*buffer.area(), Rect::new(0, 0, width, height));
+      }
+    }
+  }
+}
+
+#[test]
+fn chinese_main_routes_render_in_tiny_and_practical_viewports() {
+  let routes = [
+    (RouteId::Home, ActiveBlock::Home),
+    (RouteId::TrackTable, ActiveBlock::TrackTable),
+    (RouteId::AlbumList, ActiveBlock::AlbumList),
+    (RouteId::RecentlyPlayed, ActiveBlock::RecentlyPlayed),
+    (RouteId::Artists, ActiveBlock::Artists),
+    (RouteId::Podcasts, ActiveBlock::Podcasts),
+    (RouteId::Stats, ActiveBlock::Stats),
+    (RouteId::PlaylistSync, ActiveBlock::PlaylistSync),
+    (RouteId::Friends, ActiveBlock::Friends),
+    (RouteId::Discover, ActiveBlock::Discover),
+    (RouteId::Search, ActiveBlock::SearchResultBlock),
+    (RouteId::LocalBrowser, ActiveBlock::LocalBrowser),
+  ];
+  for language in [Language::ZhHans, Language::ZhHant] {
+    for width in [1, 2, 24, 40] {
+      for (route, block) in &routes {
+        let mut app = localized_app(language, false);
+        app.view.size = Viewport { width, height: 24 };
+        app.push_navigation_stack(route.clone(), *block);
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+        terminal
+          .draw(|frame| super::draw_main_layout(frame, &app))
+          .unwrap();
+        assert_eq!(
+          *terminal.backend().buffer().area(),
+          Rect::new(0, 0, width, 24)
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn chinese_empty_main_tables_show_translated_titles_at_narrow_widths() {
+  let renderers: &[(AreaRenderer, &str)] = &[
+    (super::tables::draw_song_table, "Songs"),
+    (super::tables::draw_album_list, "Albums"),
+    (super::tables::draw_artist_table, "Artists"),
+    (super::tables::draw_recently_played_table, "Recently Played"),
+  ];
+  for language in [Language::ZhHans, Language::ZhHant] {
+    for width in [24, 40] {
+      let app = localized_app(language, false);
+      for (draw, english_title) in renderers {
+        let text = buffer_text(&render_area(&app, width, 8, *draw));
+        assert!(
+          !text.contains(english_title),
+          "{language:?}/{width}: {text}"
+        );
+        assert!(
+          text
+            .chars()
+            .any(|ch| ('\u{3400}'..='\u{9fff}').contains(&ch)),
+          "no translated title for {english_title}, {language:?}/{width}: {text}"
+        );
       }
     }
   }

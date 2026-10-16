@@ -2569,7 +2569,8 @@ mod tests {
     app.user_config.behavior.language = Language::ZhHant;
     app.refresh_language();
     let title = render_playbar_template(&app, false, &values);
-
+    assert!(title.contains("隨機播放"));
+    assert!(title.contains("音量：50%"));
     assert!(title.contains("Desk {volume}"));
     app.user_config.format.playbar_status =
       crate::core::format::Template::parse("Volume: {volume}% / {device}", FORMAT_KEYS).unwrap();
