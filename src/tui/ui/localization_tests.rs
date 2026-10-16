@@ -4,6 +4,7 @@ use super::{help::padded_help_cell, library, popups};
 use crate::core::app::App;
 use crate::core::geometry::Viewport;
 use crate::core::i18n::Language;
+use crate::core::input::Key;
 use crate::core::source::Source;
 use crate::core::test_helpers::playlist_info;
 use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, Frame, Terminal};
@@ -54,6 +55,64 @@ fn buffer_text(buffer: &Buffer) -> String {
     text.push('\n');
   }
   text
+}
+
+#[test]
+fn chinese_sidebar_labels_fit_practical_narrow_widths_and_keep_source_gates() {
+  for (language, title, liked, sync) in [
+    (Language::ZhHans, "音乐库", "喜欢的歌曲", "播放列表同步"),
+    (Language::ZhHant, "音樂庫", "喜歡的歌曲", "播放清單同步"),
+  ] {
+    for width in [24, 40] {
+      let mut app = localized_app(language, true);
+      let text = buffer_text(&render_area(&app, width, 15, library::draw_library_block));
+      for expected in [title, liked, sync] {
+        assert!(text.contains(expected), "{language:?}/{width}: {text}");
+      }
+      assert!(!text.contains("Liked Songs"), "{text}");
+      app.active_source = Source::Local;
+      let text = buffer_text(&render_area(&app, width, 15, library::draw_library_block));
+      assert!(text.contains(title), "{text}");
+      assert!(text.contains(sync), "{text}");
+      assert!(!text.contains(liked), "Spotify-only row leaked: {text}");
+    }
+  }
+}
+
+#[test]
+fn chinese_sidebar_empty_sources_name_the_rebound_key_and_keep_products() {
+  for language in [Language::ZhHans, Language::ZhHant] {
+    let mut app = localized_app(language, false);
+    app.user_config.keys.manage_devices = Key::Char('Z');
+    for source in [
+      Source::Local,
+      Source::AppleMusic,
+      Source::Subsonic,
+      Source::Qobuz,
+    ] {
+      app.active_source = source;
+      let text = buffer_text(&render_area(&app, 80, 6, library::draw_playlist_block));
+      assert!(text.contains("`Z`"), "{language:?}/{source:?}: {text}");
+      assert!(
+        !text.contains("press `"),
+        "untranslated empty state: {text}"
+      );
+      assert!(
+        text.contains(app.strings().sidebar.source_label(source)),
+        "{text}"
+      );
+    }
+    app.active_source = Source::Radio;
+    let text = buffer_text(&render_area(&app, 40, 6, library::draw_playlist_block));
+    assert!(text.contains(app.strings().sidebar.empty_radio), "{text}");
+    app.active_source = Source::YouTube;
+    let text = buffer_text(&render_area(&app, 40, 6, library::draw_playlist_block));
+    assert!(
+      text.contains(app.strings().sidebar.youtube_playlists),
+      "{text}"
+    );
+    assert!(text.contains(app.strings().sidebar.new_playlist), "{text}");
+  }
 }
 
 #[test]
@@ -112,6 +171,51 @@ fn synthetic_source_rows_follow_live_language_changes_without_renaming_user_play
 }
 
 #[test]
+fn chinese_help_filter_keeps_shortcuts_aligned_on_narrow_terminals() {
+  for language in [Language::ZhHans, Language::ZhHant] {
+    for width in [24, 40] {
+      let mut app = localized_app(language, false);
+      app.view.help_filter = "音量".to_string();
+      let text = buffer_text(&render_help(&mut app, width, 12));
+      let model = app.view.help_menu_model.as_ref().unwrap();
+      assert_eq!(model.rows.len(), 2, "{language:?}/{width}: {text}");
+      assert!(text.contains(app.strings().help.title), "{text}");
+      assert!(text.contains("音量"), "{text}");
+      let key = app.user_config.keys.increase_volume.to_string();
+      let position = model.rows[0].find(&key).unwrap();
+      let description_width = (model.width as f32 * 0.40) as usize;
+      assert_eq!(model.rows[0][..position].width(), description_width + 2);
+      assert!(text.contains(&key), "shortcut disappeared: {text}");
+      assert!(!text.contains("Increase volume"), "{text}");
+      for &(start, end) in &model.match_ranges[0] {
+        assert_eq!(&model.rows[0][start..end], "音量");
+      }
+    }
+  }
+}
+
+#[test]
+fn chinese_help_availability_hints_follow_the_source_and_keep_fixed_keys_hidden() {
+  for (language, missing, unavailable) in [
+    (Language::ZhHans, "需要 Spotify", "本地文件 不支持"),
+    (Language::ZhHant, "需要 Spotify", "本機檔案 不支援"),
+  ] {
+    let mut app = localized_app(language, false);
+    let rows = crate::tui::keymap::help_rows(&app);
+    assert!(rows.iter().any(|row| row[0].contains(missing)));
+    app.active_source = Source::Local;
+    let rows = crate::tui::keymap::help_rows(&app);
+    assert!(rows.iter().any(|row| row[0].contains(unavailable)));
+    assert!(!rows
+      .iter()
+      .any(|row| row[0] == app.strings().help.search_submit));
+    assert!(!rows
+      .iter()
+      .any(|row| row[0].contains("not for Local Files")));
+  }
+}
+
+#[test]
 fn switching_language_rebuilds_the_help_cache_without_changing_keys() {
   let mut app = localized_app(Language::En, false);
   render_help(&mut app, 80, 15);
@@ -136,7 +240,32 @@ fn switching_language_rebuilds_the_help_cache_without_changing_keys() {
         app.view.help_menu_model.as_ref().unwrap().header,
         english_header
       );
+    } else {
+      assert_ne!(
+        app.view.help_menu_model.as_ref().unwrap().header,
+        english_header
+      );
     }
+  }
+}
+
+#[test]
+fn chinese_help_no_matches_keeps_literal_filter_content() {
+  for language in [Language::ZhHans, Language::ZhHant] {
+    let mut app = localized_app(language, false);
+    app.view.help_filter = "不存在{count}".to_string();
+    app.view.help_menu_offset = u32::MAX;
+    let text = buffer_text(&render_help(&mut app, 80, 12));
+    assert!(
+      text.contains(&app.strings().help.no_matches("不存在{count}")),
+      "{text}"
+    );
+    assert!(
+      text.contains("{count}"),
+      "filter text was reinterpreted: {text}"
+    );
+    assert!(!text.contains("No help rows match"), "{text}");
+    assert_eq!(app.view.help_docs_size, 0);
   }
 }
 
@@ -160,6 +289,24 @@ fn help_cell_truncation_preserves_english_and_counts_chinese_display_columns() {
   assert_eq!(padded_help_cell("音量增加", 1), "…");
   assert_eq!(padded_help_cell("音量增加", 2), "… ");
   assert_eq!(padded_help_cell("音量增加", 4), "音… ");
+}
+
+#[test]
+fn chinese_sidebar_and_help_render_in_tiny_and_practical_viewports() {
+  for language in [Language::ZhHans, Language::ZhHant] {
+    for width in [1, 2, 24, 40] {
+      for height in [1, 2, 16] {
+        let mut app = localized_app(language, false);
+        for source in Source::ALL {
+          app.active_source = source;
+          let buffer = render_area(&app, width, height, library::draw_user_block);
+          assert_eq!(*buffer.area(), Rect::new(0, 0, width, height));
+        }
+        let buffer = render_help(&mut app, width, height);
+        assert_eq!(*buffer.area(), Rect::new(0, 0, width, height));
+      }
+    }
+  }
 }
 
 #[test]

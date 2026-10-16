@@ -74,8 +74,64 @@ pub const EN: SidebarStrings = SidebarStrings {
   apple_music: "Apple Music",
 };
 
-pub const ZH_HANS: SidebarStrings = SidebarStrings { ..EN };
-pub const ZH_HANT: SidebarStrings = SidebarStrings { ..EN };
+pub const ZH_HANS: SidebarStrings = SidebarStrings {
+  library: "音乐库",
+  discover: "发现",
+  recently_played: "最近播放",
+  friends: "好友",
+  stats: "统计",
+  playlist_sync: "播放列表同步",
+  liked_songs: "喜欢的歌曲",
+  albums: "专辑",
+  artists: "艺人",
+  podcasts: "播客",
+  local_files: "本地文件",
+  community_pin: "📌 spotatui 社区",
+  empty_local_template: "（无文件夹：设置音乐目录后按 `{key}`）",
+  empty_apple_music_template: "（按 `{key}` 选择 Apple Music 以载入音乐库）",
+  empty_subsonic_template: "（无播放列表：配置服务器后按 `{key}`）",
+  empty_qobuz_template: "（未登录：按 `{key}` 选择 Qobuz）",
+  empty_radio: "（无收藏的电台：搜索后添加）",
+  radio_stations: "电台",
+  new_playlist: "+ 新建播放列表",
+  youtube_playlists: "YouTube 播放列表",
+  unknown: "未知",
+  add_playlist: "+ 添加播放列表",
+  playlists: "播放列表",
+  all_songs: "全部歌曲",
+  favorite_tracks: "收藏的歌曲",
+  internet_radio: "网络电台",
+  ..EN
+};
+pub const ZH_HANT: SidebarStrings = SidebarStrings {
+  library: "音樂庫",
+  discover: "探索",
+  recently_played: "最近播放",
+  friends: "好友",
+  stats: "統計",
+  playlist_sync: "播放清單同步",
+  liked_songs: "喜歡的歌曲",
+  albums: "專輯",
+  artists: "藝人",
+  podcasts: "Podcast",
+  local_files: "本機檔案",
+  community_pin: "📌 spotatui 社群",
+  empty_local_template: "（無資料夾：設定音樂目錄後按 `{key}`）",
+  empty_apple_music_template: "（按 `{key}` 選擇 Apple Music 以載入音樂庫）",
+  empty_subsonic_template: "（無播放清單：設定伺服器後按 `{key}`）",
+  empty_qobuz_template: "（尚未登入：按 `{key}` 選擇 Qobuz）",
+  empty_radio: "（無收藏的電台：搜尋後加入）",
+  radio_stations: "電台",
+  new_playlist: "+ 新增播放清單",
+  youtube_playlists: "YouTube 播放清單",
+  unknown: "未知",
+  add_playlist: "+ 新增播放清單",
+  playlists: "播放清單",
+  all_songs: "所有歌曲",
+  favorite_tracks: "收藏的歌曲",
+  internet_radio: "網路電台",
+  ..EN
+};
 
 impl SidebarStrings {
   /// Resolve only reserved synthetic rows; a user playlist with the same name
