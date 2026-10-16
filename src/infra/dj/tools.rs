@@ -1200,7 +1200,7 @@ async fn now_playing_outcome(app: &Arc<Mutex<App>>) -> ToolOutcome {
   // One snapshot for both the label and the transport state: it is the
   // source-agnostic view (Spotify, local, Subsonic, YouTube, radio), so this
   // works whatever is actually producing sound.
-  match crate::infra::media_metadata::current_playback_snapshot(&app) {
+  match crate::infra::media_metadata::tracking_playback_snapshot(&app) {
     Some(snapshot) => {
       let label = format!(
         "{} — {}",

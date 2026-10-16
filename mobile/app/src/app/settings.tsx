@@ -16,7 +16,7 @@ type Send = (action: Action) => void;
 
 /** The settings the core offers a phone, grouped as on the browser's Settings page. */
 export default function SettingsScreen() {
-  const rows = useChannel('settings') ?? null;
+  const rows = useChannel('settings')?.rows ?? null;
   const send = useSend();
   const insets = useSafeAreaInsets();
   return (

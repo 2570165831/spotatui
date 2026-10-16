@@ -15,7 +15,7 @@ impl App {
       .iter()
       .map(|track| dedupe_key(&track.name, &track.artists.join(", ")))
       .collect();
-    if let Some(snapshot) = crate::infra::media_metadata::current_playback_snapshot(self) {
+    if let Some(snapshot) = crate::infra::media_metadata::tracking_playback_snapshot(self) {
       keys.insert(dedupe_key(
         &snapshot.metadata.title,
         &snapshot.primary_artist(),

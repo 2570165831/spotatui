@@ -72,7 +72,7 @@ pub trait PlaybackNetwork {
   async fn ensure_playback_continues(&mut self, previous_track_id: String);
   /// Resume a native-Spotify context suspended under the native queue, targeting
   /// the resume track via an offset URI. Falls back to playing just the track
-  /// when there is no context, and to a app.strings().status.infra.queue_finished status when neither is
+  /// when there is no context, and to a "Queue finished" status when neither is
   /// known.
   async fn resume_spotify_context(
     &mut self,

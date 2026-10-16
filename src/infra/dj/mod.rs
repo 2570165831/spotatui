@@ -93,7 +93,7 @@ impl DjLibrary {
 /// Lives here rather than in [`tools`] because it is needed with or without a
 /// front door compiled in.
 pub fn current_track_label(app: &crate::core::app::App) -> Option<String> {
-  let snapshot = crate::infra::media_metadata::current_playback_snapshot(app)?;
+  let snapshot = crate::infra::media_metadata::tracking_playback_snapshot(app)?;
   Some(format!(
     "{} — {}",
     snapshot.metadata.title,
