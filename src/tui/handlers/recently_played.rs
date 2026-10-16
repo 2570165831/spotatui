@@ -108,6 +108,7 @@ mod tests {
 
   fn recent(uri: Option<&str>, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: uri.map(|u| u.to_string()),
       name: name.to_string(),
       artists: vec!["Artist".to_string()],

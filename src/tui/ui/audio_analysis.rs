@@ -1,4 +1,4 @@
-use crate::core::app::{key_label, section_at, AnalysisState, App, PITCH_NAMES};
+use crate::core::app::{section_at, AnalysisState, App, PITCH_NAMES};
 use crate::core::user_config::{normalize_tick_rate_milliseconds, VisualizerStyle};
 use crate::tui::layout::main_layout_margin;
 use ratatui::{
@@ -12,8 +12,6 @@ use ratatui::{
 use std::time::Instant;
 
 use tui_bar_graph::{BarGraph, BarStyle, ColorMode};
-
-const STYLE_HINT: &str = "Press 'V' to cycle visualizer style";
 
 /// The analysis screen's two rows: the info strip and the visualizer block.
 fn analysis_areas(root: Rect, margin: u16) -> [Rect; 2] {
@@ -52,23 +50,32 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
   let visualizer_style = app.user_config.behavior.visualizer_style;
   let pitch_view = app.pitch_view_shows();
   let (style_name, chart_name) = if pitch_view {
-    ("Spotify Pitch", "Pitches")
+    (
+      app.strings().screens.spotify_pitch,
+      app.strings().screens.pitches,
+    )
   } else {
-    (visualizer_style.name(), "Spectrum")
+    (
+      match visualizer_style {
+        VisualizerStyle::Cava => "Cava",
+        VisualizerStyle::BarGraph => app.strings().screens.bar_graph,
+      },
+      app.strings().screens.spectrum,
+    )
   };
 
   let info_block = Block::default()
     .title(Span::styled(
-      format!("Audio Visualization ({style_name})"),
+      app.strings().screens.visualization_title(style_name),
       Style::default().fg(app.user_config.theme.inactive.into()),
     ))
     .borders(Borders::ALL)
     .border_style(Style::default().fg(app.user_config.theme.inactive.into()));
 
-  let bar_chart_title = &format!(
-    "{chart_name} | {} FPS | Press {} to exit",
-    1000 / tick_rate,
-    app.user_config.keys.back
+  let bar_chart_title = &app.strings().screens.chart_title(
+    chart_name,
+    &(1000 / tick_rate).to_string(),
+    &app.user_config.keys.back.to_string(),
   );
 
   let bar_chart_block = visualizer_block()
@@ -92,13 +99,13 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
     // Info panel with status
     // Use ASCII-safe symbols instead of emojis for Windows compatibility
     let status_text = if app.audio_capture_active {
-      "[>] Capturing audio"
+      app.strings().screens.capturing_audio
     } else {
-      "[||] Paused"
+      app.strings().screens.capture_paused
     };
 
     let peak = spectrum.bands.iter().copied().fold(0.0f32, f32::max);
-    let peak_text = format!("Peak: {:.0}%", peak * 100.0);
+    let peak_text = app.strings().screens.peak(&format!("{:.0}", peak * 100.0));
 
     let texts = vec![Line::from(vec![
       Span::styled(
@@ -112,7 +119,7 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
       ),
       Span::raw("  |  "),
       Span::styled(
-        STYLE_HINT,
+        app.strings().screens.visualizer_style_hint,
         Style::default().fg(app.user_config.theme.hint.into()),
       ),
     ])];
@@ -139,16 +146,16 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
   } else {
     // No audio capture available
     let no_capture_text = vec![
-      Line::from("No audio capture available"),
+      Line::from(app.strings().screens.no_capture),
       Line::from(""),
       #[cfg(target_os = "linux")]
-      Line::from("Hint: Ensure PipeWire or PulseAudio is running with a monitor device"),
+      Line::from(app.strings().screens.capture_hint_linux),
       #[cfg(target_os = "windows")]
-      Line::from("Hint: Audio loopback should work automatically on Windows"),
+      Line::from(app.strings().screens.capture_hint_windows),
       #[cfg(target_os = "macos")]
-      Line::from("Hint: macOS requires a virtual audio device like BlackHole"),
+      Line::from(app.strings().screens.capture_hint_macos),
       #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-      Line::from("Hint: Audio capture may not be supported on this platform"),
+      Line::from(app.strings().screens.capture_hint_other),
     ];
 
     let p = Paragraph::new(no_capture_text)
@@ -157,7 +164,7 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
     f.render_widget(p, info_area);
 
     // Empty bar chart
-    let empty_p = Paragraph::new("Waiting for audio input...")
+    let empty_p = Paragraph::new(app.strings().screens.audio_waiting)
       .block(bar_chart_block)
       .style(Style::default().fg(app.user_config.theme.text.into()));
     f.render_widget(empty_p, visualizer_area);
@@ -175,12 +182,15 @@ fn draw_pitch(
 ) {
   let theme = &app.user_config.theme;
   let text = Style::default().fg(theme.text.into());
-  let hint = Span::styled(STYLE_HINT, Style::default().fg(theme.hint.into()));
+  let hint = Span::styled(
+    app.strings().screens.visualizer_style_hint,
+    Style::default().fg(theme.hint.into()),
+  );
   let AnalysisState::Ready(_, analysis) = app.audio_analysis() else {
     let message = match app.audio_analysis() {
-      AnalysisState::Unavailable(_) => "Spotify has no pitch analysis for this track",
-      AnalysisState::Failed(..) => "Could not load the pitch analysis; trying again soon",
-      _ => "Loading the pitch analysis...",
+      AnalysisState::Unavailable(_) => app.strings().screens.pitch_unavailable,
+      AnalysisState::Failed(..) => app.strings().screens.pitch_failed,
+      _ => app.strings().screens.pitch_loading,
     };
     f.render_widget(
       Paragraph::new(Line::from(hint)).block(info_block),
@@ -201,7 +211,7 @@ fn draw_pitch(
         "{:.0} BPM ({:.0}%)  {} ({:.0}%)  {}/4 ({:.0}%)",
         section.tempo,
         section.tempo_confidence * 100.0,
-        key_label(section.key, section.minor),
+        localized_key_label(app, section.key, section.minor),
         section.key_confidence * 100.0,
         section.time_signature,
         section.time_signature_confidence * 100.0
@@ -235,6 +245,17 @@ fn draw_pitch(
 }
 
 /// The note names under the pitch bars, each under the bar that carries its pitch class.
+fn localized_key_label(app: &App, key: Option<u8>, minor: Option<bool>) -> String {
+  let Some(name) = key.and_then(|key| PITCH_NAMES.get(usize::from(key))) else {
+    return "?".to_string();
+  };
+  match minor {
+    Some(true) => app.strings().screens.minor_key(name),
+    Some(false) => app.strings().screens.major_key(name),
+    None => name.to_string(),
+  }
+}
+
 fn pitch_labels(width: u16, bars: usize) -> String {
   let mut line = vec![' '; usize::from(width)];
   if bars < 2 {

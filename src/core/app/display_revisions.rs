@@ -74,7 +74,6 @@ pub struct DisplayRevisions {
 
 impl DisplayDomain {
   /// Every domain, in declaration order.
-  #[cfg(feature = "gui")]
   pub const ALL: [DisplayDomain; 24] = [
     DisplayDomain::Route,
     DisplayDomain::Status,

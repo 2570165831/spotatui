@@ -7,6 +7,7 @@ use super::startup::{prepare_frontend, shutdown_frontend, FrontendHandles};
 use crate::core::action::Action;
 use crate::core::app::{App, PlaybackOwner};
 use crate::core::driver::{Driver, TickEnv};
+use crate::core::i18n::{system_language, Language};
 use crate::core::onboarding::Onboarding;
 use crate::core::update::{UpdateAsk, UpdateRequest, UpdateStatus};
 use crate::core::user_config::{parse_update_delay_secs, BehaviorConfig};
@@ -16,6 +17,7 @@ use crate::gui::protocol::ClientMessage;
 pub use crate::gui::protocol::WindowMode;
 use crate::gui::server;
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -91,7 +93,7 @@ pub async fn run_gui_hosted(host: GuiHost) -> Result<()> {
 }
 
 async fn run(host: Option<GuiHost>) -> Result<()> {
-  // No clap here: the crash notice's "rerun with --debug" must still work.
+  // The crash notice's "rerun with --debug" must still work.
   super::start_logging(std::env::args().skip(1).any(|arg| arg == "--debug"))?;
   log::info!("spotatui-gui {} starting up", env!("CARGO_PKG_VERSION"));
   bootstrap::init_audio_backend();
@@ -106,6 +108,56 @@ async fn run(host: Option<GuiHost>) -> Result<()> {
 
 fn launch_url(port: u16, code: &str) -> String {
   format!("http://127.0.0.1:{port}/#code={code}")
+}
+
+/// Read the same explicit config path for the first page and for the shared boot.
+/// Other GUI arguments keep their existing meaning (notably --debug).
+fn gui_config_path(args: impl IntoIterator<Item = String>) -> Result<Option<PathBuf>> {
+  let mut args = args.into_iter();
+  let mut path = None;
+  while let Some(arg) = args.next() {
+    if arg == "--" {
+      break;
+    }
+    let value = if arg == "--config" || arg == "-c" {
+      Some(
+        args
+          .next()
+          .ok_or_else(|| anyhow::anyhow!("{arg} requires a file path"))?,
+      )
+    } else {
+      arg
+        .strip_prefix("--config=")
+        .or_else(|| arg.strip_prefix("-c").filter(|value| !value.is_empty()))
+        .map(str::to_string)
+    };
+    if let Some(value) = value {
+      anyhow::ensure!(!value.is_empty(), "--config requires a file path");
+      path = Some(PathBuf::from(value));
+    }
+  }
+  Ok(path)
+}
+
+/// Only the language is deserialized here; boot remains the owner of full config
+/// validation and reports errors. This never creates paths or logs config data.
+fn preload_language(path: Option<&Path>, system: Language) -> Language {
+  #[derive(Default, serde::Deserialize)]
+  struct Behavior {
+    #[serde(default)]
+    language: Language,
+  }
+  #[derive(serde::Deserialize)]
+  struct Config {
+    behavior: Option<Behavior>,
+  }
+  path
+    .and_then(|path| std::fs::read_to_string(path).ok())
+    .and_then(|text| serde_yaml::from_str::<Config>(&text).ok())
+    .and_then(|config| config.behavior)
+    .unwrap_or_default()
+    .language
+    .resolve(system)
 }
 
 async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
@@ -137,7 +189,14 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
     log::warn!("[state] failed to migrate legacy app data files: {e}");
   }
   // The page answers the first-launch questions, so it must be up before boot asks them.
-  let onboarding = Arc::new(BrowserOnboarding::new());
+  let config_path = gui_config_path(std::env::args().skip(1))?;
+  let default_config = crate::core::paths::app_config_dir().map(|dir| dir.join("config.yml"));
+  let system_language = system_language();
+  let language = preload_language(
+    config_path.as_deref().or(default_config.as_deref()),
+    system_language,
+  );
+  let onboarding = Arc::new(BrowserOnboarding::with_language(language));
   let (boot_done, apps) = tokio::sync::watch::channel(None);
   let (link, publisher, inbox) = bridge::channel(apps, Arc::clone(&onboarding), window.is_some());
   let (port, access) = server::spawn_listener(server::ASSETS, link).await?;
@@ -147,13 +206,14 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
     None => {
       if let Err(e) = open::that_detached(&url) {
         log::warn!("could not open the browser: {e}");
-        eprintln!("Open {url} in a browser");
+        eprintln!("{}", language.strings().gui.open_browser(&url));
       }
     }
   }
   // No auto-update: it installs the console `spotatui` binary over this one and re-execs it.
   let options = BootOptions {
-    config_path: None,
+    system_language: Some(system_language),
+    config_path,
     tick_rate: None,
     subcommand: None,
     reconfigure_auth: false,
@@ -165,7 +225,7 @@ async fn launch_gui(host: Option<GuiHost>) -> Result<()> {
     // The shell shows the error in a window of its own.
     Err(e) if hosted => return Err(e),
     Err(e) => {
-      onboarding.info(&format!("spotatui could not start: {e:#}"));
+      onboarding.info(&language.strings().gui.start_failed(&format!("{e:#}")));
       // A browser that is still starting has not connected yet.
       onboarding
         .wait_for_page(crate::gui::onboarding::NO_PAGE_GRACE)
@@ -508,6 +568,40 @@ fn changed_check(last: Option<UpdateRequest>, behavior: &BehaviorConfig) -> Opti
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn an_explicit_gui_config_path_is_shared_with_the_language_preload() {
+    for args in [
+      vec!["--config", "custom.yml"],
+      vec!["-c", "custom.yml"],
+      vec!["--config=custom.yml"],
+      vec!["-ccustom.yml"],
+    ] {
+      assert_eq!(
+        gui_config_path(args.into_iter().map(str::to_string)).unwrap(),
+        Some(PathBuf::from("custom.yml"))
+      );
+    }
+    assert!(gui_config_path(["--config".to_string()]).is_err());
+    assert_eq!(gui_config_path(["--debug".to_string()]).unwrap(), None);
+  }
+
+  #[test]
+  fn the_first_page_uses_the_saved_language_before_app_boot() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("custom.yml");
+    std::fs::write(&path, "behavior:\n  language: zh-Hant\n").unwrap();
+    assert_eq!(
+      preload_language(Some(&path), Language::En),
+      Language::ZhHant
+    );
+    std::fs::write(&path, "behavior:\n  language: auto\n").unwrap();
+    assert_eq!(
+      preload_language(Some(&path), Language::ZhHans),
+      Language::ZhHans
+    );
+    assert_eq!(preload_language(None, Language::En), Language::En);
+  }
 
   fn behavior(disable_auto_update: bool) -> BehaviorConfig {
     let mut behavior = crate::core::user_config::UserConfig::new().behavior;

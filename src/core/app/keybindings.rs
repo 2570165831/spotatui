@@ -89,10 +89,7 @@ impl App {
       self.keybinding_runtime.fallback_reason = Some(KeyFallbackReason::CtrlCommaNotReported);
 
       if !self.keybinding_runtime.fallback_notice_shown {
-        self.set_status_message(
-          "Ctrl+, not detected in this terminal; using Alt+, for this session",
-          5,
-        );
+        self.set_status_message(self.strings().status.app.settings_shortcut_fallback, 5);
         self.keybinding_runtime.fallback_notice_shown = true;
       }
 
@@ -122,17 +119,25 @@ impl App {
 
     self.user_config.keys.open_settings = persist.open_settings_key;
     if let Err(e) = self.user_config.save_config() {
-      self.handle_error(anyhow!("Failed to save keybinding fallback: {}", e));
+      self.handle_error_with_message(
+        anyhow!("Failed to save keybinding fallback: {}", e),
+        self
+          .strings()
+          .status
+          .app
+          .shortcut_save_failed(&e.to_string()),
+      );
       return;
     }
 
     self.keybinding_runtime.effective_open_settings = None;
     self.keybinding_runtime.fallback_reason = None;
     self.set_status_message(
-      format!(
-        "Saved open settings shortcut as {}",
-        persist.open_settings_key
-      ),
+      self
+        .strings()
+        .status
+        .app
+        .shortcut_saved(&persist.open_settings_key.to_string()),
       4,
     );
   }

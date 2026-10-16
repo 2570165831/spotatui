@@ -18,10 +18,11 @@ impl App {
       if let Err(e) = open::that_detached(&prompt.path) {
         log::warn!("failed to open recap in browser: {}", e);
         self.set_status_message(
-          format!(
-            "Recap saved at {} (couldn't open browser)",
-            prompt.path.display()
-          ),
+          self
+            .strings()
+            .status
+            .app
+            .recap_browser_failed(&prompt.path.display().to_string()),
           8,
         );
       }
@@ -42,10 +43,7 @@ impl App {
     if let Err(e) = self.user_config.save_config() {
       log::warn!("failed to persist monthly recap prompt setting: {}", e);
     }
-    self.set_status_message(
-      "Monthly recap prompt disabled (re-enable in Settings)".to_string(),
-      6,
-    );
+    self.set_status_message(self.strings().status.app.recap_disabled.to_string(), 6);
     self.pop_navigation_stack();
   }
 }

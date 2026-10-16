@@ -5,9 +5,10 @@ use super::cast;
 use super::json;
 use super::lan::{self, CastDevice, ConnectSpeaker};
 use super::metadata::get_many;
-use super::router::{api_error, query_value, upstream_error};
+use super::router::{api_error, localized_api_error, query_value, upstream_error};
 use super::session::SpotifySession;
 use super::zeroconf;
+use crate::core::i18n::LocalizedMessage;
 use anyhow::anyhow;
 use futures::StreamExt;
 use librespot_core::dealer::protocol::{Message, TransferOptions};
@@ -379,6 +380,24 @@ fn lan_device_json(device: &LanDevice) -> Value {
   })
 }
 
+fn lan_login_error(name: &str, error: anyhow::Error) -> anyhow::Error {
+  let message = error
+    .downcast_ref::<LocalizedMessage>()
+    .filter(|message| error.to_string() == message.text(crate::core::i18n::Language::En))
+    .map(|message| {
+      // A localized decoding context still has a raw codec error underneath it.
+      let causes: String = error
+        .chain()
+        .skip(1)
+        .map(|cause| format!(": {cause}"))
+        .collect();
+      message.clone().map(|detail| format!("{detail}{causes}"))
+    })
+    .unwrap_or_else(|| LocalizedMessage::new(|_| format!("{error:#}")))
+    .map(|detail| format!("{name}: {detail}"));
+  localized_api_error(StatusCode::BAD_GATEWAY, message)
+}
+
 /// Logs a network device in and waits until it joins the cluster.
 async fn wake_lan_device(
   session: &SpotifySession,
@@ -389,14 +408,14 @@ async fn wake_lan_device(
     LanDevice::Cast(cast) => cast::log_in(session, cast).await,
     LanDevice::Speaker(speaker) => zeroconf::log_in(session, &speaker.url).await,
   };
-  login.map_err(|e| api_error(StatusCode::BAD_GATEWAY, format!("{}: {e:#}", device.name())))?;
+  login.map_err(|error| lan_login_error(device.name(), error))?;
   let id = device.id();
   let deadline = Instant::now() + JOIN_TIMEOUT;
   while !observer.cluster().device.contains_key(&id) {
     if Instant::now() >= deadline {
-      return Err(api_error(
+      return Err(localized_api_error(
         StatusCode::GATEWAY_TIMEOUT,
-        format!("{} did not join after its login", device.name()),
+        LocalizedMessage::new(|s| s.status.infra.speaker_not_joined(device.name())),
       ));
     }
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -691,6 +710,43 @@ pub async fn transfer(session: &SpotifySession, body: Option<&Value>) -> anyhow:
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn speaker_login_errors_keep_the_full_cause_chain_in_every_language() {
+    use crate::core::i18n::{Language, EN, ZH_HANS, ZH_HANT};
+    use crate::infra::network::requests::SpotifyApiError;
+
+    let detail = "codec {reason}: invalid wire type";
+    let name = "Room {name}";
+    let error = anyhow::anyhow!(detail).context(LocalizedMessage::new(|s| {
+      s.status.infra.cast_malformed.to_string()
+    }));
+    let original = format!("{name}: {error:#}");
+    let error = lan_login_error(name, error);
+    let api = error.downcast_ref::<SpotifyApiError>().unwrap();
+    assert_eq!(api.body, original);
+    for (language, strings) in [
+      (Language::En, &EN),
+      (Language::ZhHans, &ZH_HANS),
+      (Language::ZhHant, &ZH_HANT),
+    ] {
+      assert_eq!(
+        api.localized_body.as_ref().unwrap().text(language),
+        format!("{name}: {}: {detail}", strings.status.infra.cast_malformed)
+      );
+    }
+
+    let raw = anyhow::anyhow!(detail).context("external TLS diagnostic");
+    let original = format!("{name}: {raw:#}");
+    let error = lan_login_error(name, raw);
+    let api = error.downcast_ref::<SpotifyApiError>().unwrap();
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      assert_eq!(
+        api.localized_body.as_ref().unwrap().text(language),
+        original
+      );
+    }
+  }
 
   #[test]
   fn volume_maps_the_full_range_to_percent() {

@@ -2,6 +2,7 @@
 //! zeroconf `getInfo` and `addUser` calls of the official client.
 
 use super::session::SpotifySession;
+use crate::core::i18n::LocalizedMessage;
 use anyhow::{anyhow, bail};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -73,7 +74,15 @@ async fn connect_token(
   body["access_token"]
     .as_str()
     .map(str::to_owned)
-    .ok_or_else(|| anyhow!("the token exchange failed ({status}): {}", body["error"]))
+    .ok_or_else(|| {
+      anyhow!(LocalizedMessage::new(|s| s
+        .status
+        .infra
+        .speaker_token_failed(
+          &status.to_string(),
+          &body["error"].to_string()
+        )))
+    })
 }
 
 /// Logs the speaker at `url` in to the account.
@@ -81,11 +90,18 @@ pub async fn log_in(session: &SpotifySession, url: &str) -> anyhow::Result<()> {
   let info = get_info(url).await?;
   let token_type = info["tokenType"].as_str().unwrap_or_default();
   if !SUPPORTED_TOKEN_TYPES.contains(&token_type) {
-    bail!("the speaker asks for token type {token_type:?}, which is not supported yet");
+    bail!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .speaker_token_unsupported(&format!("{token_type:?}"))));
   }
-  let client_id = info["clientID"]
-    .as_str()
-    .ok_or_else(|| anyhow!("no clientID in getInfo"))?;
+  let client_id = info["clientID"].as_str().ok_or_else(|| {
+    anyhow!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .speaker_client_id_missing
+      .to_string()))
+  })?;
   let token = connect_token(session, client_id, token_type).await?;
 
   // A token login skips the key exchange, but the field must be present.
@@ -115,11 +131,13 @@ pub async fn log_in(session: &SpotifySession, url: &str) -> anyhow::Result<()> {
     .json()
     .await?;
   if reply["status"] != 101 {
-    bail!(
-      "the speaker refused the login: {} ({})",
-      reply["statusString"],
-      reply["spotifyError"]
-    );
+    bail!(LocalizedMessage::new(|s| s
+      .status
+      .infra
+      .speaker_login_refused(
+        &reply["statusString"].to_string(),
+        &reply["spotifyError"].to_string()
+      )));
   }
   Ok(())
 }

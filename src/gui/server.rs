@@ -20,7 +20,6 @@ const CODE_PROTOCOL: &str = "spotatui.code.";
 const TOKEN_PROTOCOL: &str = "spotatui.token.";
 const PROTOCOL_HEADER: &str = "Sec-WebSocket-Protocol";
 const TEXT: &str = "text/plain; charset=utf-8";
-const MISSING_FRONTEND: &[u8] = b"This spotatui-gui was built without its frontend. Run `npm ci` and `npm run build` in gui/, then rebuild spotatui-gui.\n";
 
 type Assets = &'static [(&'static str, &'static [u8])];
 
@@ -192,7 +191,7 @@ async fn answer(stream: &mut TcpStream, server: &Server) -> Result<Option<Vec<u8
         port,
         "503 Service Unavailable",
         TEXT,
-        MISSING_FRONTEND,
+        server.link.strings().await.gui.missing_frontend.as_bytes(),
       )
       .await?
     }
@@ -333,6 +332,27 @@ fn content_type(name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+  #[tokio::test]
+  async fn a_missing_frontend_uses_the_saved_language_before_boot() {
+    use crate::core::i18n::Language;
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let (_boot, apps) = tokio::sync::watch::channel(None);
+      let onboarding = Arc::new(crate::gui::onboarding::BrowserOnboarding::with_language(
+        language,
+      ));
+      let (link, _publisher, _inbox) = bridge::channel(apps, onboarding, false);
+      let (port, _access) = spawn_listener(&[], link).await.unwrap();
+      let reply = get(
+        port,
+        format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"),
+      )
+      .await;
+      assert!(reply.starts_with("HTTP/1.1 503"));
+      assert!(reply.ends_with(language.strings().gui.missing_frontend));
+      assert!(reply.contains("`npm ci`"));
+    }
+  }
   use super::*;
   use crate::core::app::App;
   use crate::core::user_config::UserConfig;

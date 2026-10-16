@@ -77,6 +77,43 @@ pub struct TrackInfo {
   /// snapshot, preserving the api_version = 4 plugin contract.
   #[serde(default)]
   pub release_date: Option<String>,
+  // Identity of a generated title, retained when a queue is saved and restored.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  #[cfg_attr(all(test, feature = "gui"), ts(optional))]
+  pub generated_name: Option<GeneratedTrackName>,
+}
+
+/// Generated track titles are translated at display time; real tags stay literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+pub enum GeneratedTrackName {
+  LocalUnknown,
+}
+
+impl GeneratedTrackName {
+  pub fn display_name<'a>(
+    name: &'a str,
+    generated: Option<Self>,
+    strings: &crate::core::i18n::Strings,
+  ) -> &'a str {
+    match generated {
+      Some(Self::LocalUnknown) => strings.status.infra.local_unknown_track,
+      None => name,
+    }
+  }
+}
+
+impl TrackInfo {
+  pub fn display_name<'a>(&'a self, strings: &crate::core::i18n::Strings) -> &'a str {
+    GeneratedTrackName::display_name(&self.name, self.generated_name, strings)
+  }
+
+  pub fn displayed(&self, strings: &crate::core::i18n::Strings) -> Self {
+    Self {
+      name: self.display_name(strings).to_owned(),
+      ..self.clone()
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -105,6 +142,10 @@ pub struct DeviceInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub struct PlaylistInfo {
+  /// In-memory identity for generated labels; frontends receive the rendered name.
+  #[serde(skip)]
+  #[cfg_attr(all(test, feature = "gui"), ts(skip))]
+  pub generated_name: Option<GeneratedPlaylistName>,
   pub uri: String,
   pub name: String,
   /// Owner display name (falls back to the owner id when no display name is set).
@@ -124,6 +165,21 @@ pub struct PlaylistInfo {
   pub public: Option<bool>,
   #[serde(default)]
   pub image_url: Option<String>,
+}
+
+/// Synthetic playlist names are rendered from the current table, never matched by text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedPlaylistName {
+  LocalRoot,
+}
+
+impl PlaylistInfo {
+  pub fn display_name<'a>(&'a self, strings: &crate::core::i18n::Strings) -> &'a str {
+    match self.generated_name {
+      Some(GeneratedPlaylistName::LocalRoot) => strings.status.infra.local_root_folder,
+      None => &self.name,
+    }
+  }
 }
 
 /// A navigable reference to an artist: optional Spotify id plus display name.
@@ -548,6 +604,7 @@ impl PlaylistInfo {
       .clone()
       .unwrap_or_else(|| p.owner.id.id().to_string());
     PlaylistInfo {
+      generated_name: None,
       uri: p.id.uri(),
       name: p.name.clone(),
       owner,
@@ -577,6 +634,7 @@ pub fn playback_state(app: &App) -> Option<PlaybackState> {
   }
 
   let track = snapshot.as_ref().map(|s| TrackInfo {
+    generated_name: None,
     uri: s.item_uri.clone(),
     name: s.metadata.title.clone(),
     artists: s.metadata.artists.clone(),

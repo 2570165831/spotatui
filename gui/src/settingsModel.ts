@@ -1,20 +1,24 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { SettingInput } from "./bindings/SettingInput";
 import type { SettingRow } from "./bindings/SettingRow";
 import type { UpdateAsk } from "./bindings/UpdateAsk";
 import type { UpdateStatus } from "./bindings/UpdateStatus";
-import { ALBUM_SORTS, ARTIST_SORTS } from "./libraryModel";
-import { SORT_OPTIONS } from "./sortModel";
+import { albumSorts, artistSorts } from "./libraryModel";
+import { sortOptions } from "./sortModel";
 
 /** The page's sections, in display order. */
-export const GROUPS = [
-  { group: "playback", heading: "Playback" },
-  { group: "library", heading: "Library" },
-  { group: "sources", heading: "Sources" },
-  { group: "streaming", heading: "Streaming" },
-  { group: "integrations", heading: "Integrations" },
-  { group: "updates", heading: "Updates" },
-] as const;
+export const groups = (s: GuiStrings = EN) =>
+  [
+    { group: "interface", heading: s.interface },
+    { group: "playback", heading: s.playback },
+    { group: "library", heading: s.library },
+    { group: "sources", heading: s.sources },
+    { group: "streaming", heading: s.streaming },
+    { group: "integrations", heading: s.integrations },
+    { group: "updates", heading: s.updates },
+  ] as const;
+export const GROUPS = groups();
 
 export interface Section {
   group: string;
@@ -23,26 +27,39 @@ export interface Section {
 }
 
 /** The sections that have rows; Updates shows whenever there is an updater. */
-export function sections(rows: SettingRow[], updater: boolean): Section[] {
-  return GROUPS.map(({ group, heading }) => ({
-    group,
-    heading,
-    rows: rows.filter((row) => row.group === group),
-  })).filter((section) =>
-    section.group === "updates" ? updater : section.rows.length > 0,
-  );
+export function sections(
+  rows: SettingRow[],
+  updater: boolean,
+  s: GuiStrings = EN,
+): Section[] {
+  return groups(s)
+    .map(({ group, heading }) => ({
+      group,
+      heading,
+      rows: rows.filter((row) => row.group === group),
+    }))
+    .filter((section) =>
+      section.group === "updates" ? updater : section.rows.length > 0,
+    );
 }
 
-const OPTION_LABELS: Record<string, { value: string; label: string }[]> = {
-  "behavior.default_sort_playlist_tracks": SORT_OPTIONS,
-  "behavior.default_sort_saved_albums": ALBUM_SORTS,
-  "behavior.default_sort_saved_artists": ARTIST_SORTS,
-};
+const optionLabels = (
+  s: GuiStrings,
+): Record<string, { value: string; label: string }[]> => ({
+  "behavior.default_sort_playlist_tracks": sortOptions(s),
+  "behavior.default_sort_saved_albums": albumSorts(s),
+  "behavior.default_sort_saved_artists": artistSorts(s),
+});
 
 /** The label a choice row shows for `option`; the option itself when it has none. */
-export function optionLabel(id: string, option: string): string {
+export function optionLabel(
+  id: string,
+  option: string,
+  s: GuiStrings = EN,
+): string {
   return (
-    OPTION_LABELS[id]?.find((known) => known.value === option)?.label ?? option
+    optionLabels(s)[id]?.find((known) => known.value === option)?.label ??
+    option
   );
 }
 
@@ -78,6 +95,7 @@ export interface UpdateLine {
 export function updateLine(
   status: UpdateStatus,
   version: string | null,
+  s: GuiStrings = EN,
 ): UpdateLine {
   const line = (
     text: string,
@@ -88,43 +106,42 @@ export function updateLine(
     case "idle":
     case "up_to_date":
       return line(
-        version
-          ? `You have the latest version (${version})`
-          : "You have the latest version",
-        { label: "Check for updates", ask: "check", disabled: false },
+        version ? fmt(s.latest_version_number, { version }) : s.latest_version,
+        { label: s.check_updates, ask: "check", disabled: false },
       );
     case "checking":
-      return line("Looking for updates…", {
-        label: "Check for updates",
+      return line(s.looking_updates, {
+        label: s.check_updates,
         ask: "check",
         disabled: true,
       });
     case "available":
-      return line(`Version ${status.version} is available`, {
-        label: "Download",
+      return line(fmt(s.version_available, { version: status.version }), {
+        label: s.download,
         ask: "download",
         disabled: false,
       });
     case "downloading":
       return line(
         status.percent === null
-          ? `Downloading version ${status.version}`
-          : `Downloading version ${status.version} (${Math.round(status.percent)}%)`,
+          ? fmt(s.downloading_version, { version: status.version })
+          : fmt(s.downloading_percent, {
+              version: status.version,
+              percent: Math.round(status.percent),
+            }),
       );
     case "ready":
-      return line(`Version ${status.version} is ready`, {
-        label: "Restart to update",
+      return line(fmt(s.version_ready, { version: status.version }), {
+        label: s.restart_update,
         ask: "install",
         disabled: false,
       });
     case "manual":
-      return line(
-        `Version ${status.version} is out. Download it from the release page.`,
-      );
+      return line(fmt(s.version_manual, { version: status.version }));
     case "failed":
       return line(
         status.message,
-        { label: "Try again", ask: "check", disabled: false },
+        { label: s.try_again, ask: "check", disabled: false },
         true,
       );
   }

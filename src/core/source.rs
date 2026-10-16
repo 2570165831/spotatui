@@ -86,30 +86,16 @@ impl Source {
     }
   }
 
-  /// Human-readable label shown in the source picker.
+  /// Stable English name for CLI output, logs and protocol tokens.
+  /// Interfaces use the active table's `sidebar.source_label` instead.
   pub fn label(&self) -> &'static str {
-    match self {
-      Source::Spotify => "Spotify",
-      Source::Local => "Local Files",
-      Source::Subsonic => "Subsonic",
-      Source::Radio => "Internet Radio",
-      Source::YouTube => "YouTube",
-      Source::Qobuz => "Qobuz",
-      Source::AppleMusic => "Apple Music",
-    }
+    crate::core::i18n::EN.sidebar.source_label(*self)
   }
 
-  /// What the source needs, shown after its label in the first-run picker.
+  /// English first-run note for fixtures; interfaces use the active onboarding table.
+  #[cfg(test)]
   pub fn note(&self) -> &'static str {
-    match self {
-      Source::Spotify => "needs login",
-      Source::YouTube => "free, needs the yt-dlp binary",
-      Source::Subsonic => "free, needs a Subsonic/Navidrome server",
-      Source::Radio => "free",
-      Source::Local => "free",
-      Source::Qobuz => "paid subscription, logs in through the browser",
-      Source::AppleMusic => "macOS Music app, needs Automation permission",
-    }
+    crate::core::i18n::EN.onboarding.source_note(*self)
   }
 
   /// Config-file token used to persist the active source.

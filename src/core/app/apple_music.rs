@@ -49,7 +49,7 @@ impl App {
 
   pub(crate) fn toggle_apple_music(&mut self) {
     if self.apple_music.switching {
-      self.set_status_message("Waiting for Music to pause before switching source", 4);
+      self.set_status_message(self.strings().status.app.music_wait_pause, 4);
       return;
     }
     let playing = self.apple_music_is_playing();
@@ -70,7 +70,7 @@ impl App {
   /// answer must not depend on a snapshot that may not have arrived yet.
   pub(crate) fn set_apple_music_playing(&mut self, playing: bool) {
     if self.apple_music.switching {
-      self.set_status_message("Waiting for Music to pause before switching source", 4);
+      self.set_status_message(self.strings().status.app.music_wait_pause, 4);
       return;
     }
     self.apple_music.desired_playing = playing;
@@ -89,7 +89,7 @@ impl App {
   /// the next source: refuse it with a message instead.
   pub(crate) fn apple_music_refuses_while_switching(&mut self) -> bool {
     if self.apple_music.switching {
-      self.set_status_message("Waiting for Music to pause before switching source", 4);
+      self.set_status_message(self.strings().status.app.music_wait_pause, 4);
     }
     self.apple_music.switching
   }
@@ -124,10 +124,7 @@ impl App {
     // window and plays nothing until someone dismisses it. The script raises
     // a level Music stores as 0 (1 on some versions) to the next that sticks.
     if value == 0 {
-      self.set_status_message(
-        "Apple Music: the volume stops just above 0 (Music refuses to play at 0)",
-        4,
-      );
+      self.set_status_message(self.strings().status.app.music_volume_floor, 4);
     }
     let value = value.clamp(1, 100);
     if value == self.apple_music_volume() {
@@ -247,10 +244,7 @@ impl App {
       }
     }
     self.resync_apple_music_list();
-    self.set_error_status_message(
-      "Apple Music: Music did not start playing. Check the Music window for a dialog or an unavailable track",
-      10,
-    );
+    self.set_error_status_message(self.strings().status.app.music_did_not_start, 10);
   }
 
   /// A transport command was queued for the Music worker.
@@ -452,7 +446,7 @@ impl App {
           match self.apple_music.quit_seen {
             Some(at) if at.elapsed() >= std::time::Duration::from_secs(2) => {
               self.release_apple_music();
-              self.set_status_message("Apple Music: Music quit", 5);
+              self.set_status_message(self.strings().status.app.music_quit, 5);
             }
             Some(_) => {}
             None => self.apple_music.quit_seen = Some(Instant::now()),
@@ -593,7 +587,7 @@ impl App {
     allow(dead_code)
   )]
   pub(crate) fn report_apple_music_error(&mut self, error: &anyhow::Error) {
-    self.set_error_status_message(format!("Apple Music: {error}"), 8);
+    self.set_error_status_message(self.strings().status.app.music_error(&error.to_string()), 8);
   }
 
   pub(crate) fn apple_music_playlists(&self) -> &[PlaylistInfo] {
@@ -616,12 +610,13 @@ impl App {
   /// and reloading the sidebar must not drop the list a track is played from.
   pub(crate) fn browse_apple_music(&mut self, request: crate::infra::apple_music::Browse) {
     if !cfg!(all(feature = "apple-music", target_os = "macos")) {
-      self.set_status_message("Apple Music requires macOS and the apple-music feature", 5);
+      self.set_status_message(self.strings().status.app.music_requires_macos, 5);
       return;
     }
     if request == crate::infra::apple_music::Browse::Playlists {
       self.apple_music.playlists_generation = self.apple_music.playlists_generation.wrapping_add(1);
       self.apple_music.playlists = vec![PlaylistInfo {
+        generated_name: None,
         uri: crate::infra::apple_music::LIBRARY_URI.into(),
         name: "All songs".into(),
         owner: "Music".into(),
@@ -754,10 +749,7 @@ impl App {
       .chain(self.apple_music.tracks.iter())
       .any(|t| t.uri.as_deref() == Some(uri.as_str()) && !t.is_playable);
     if unplayable {
-      self.set_error_status_message(
-        "Apple Music: Music cannot play this track (it is no longer available, or its file is missing)",
-        6,
-      );
+      self.set_error_status_message(self.strings().status.app.music_track_unavailable, 6);
       return;
     }
     // Next, previous and the end-of-track continuation only step through
@@ -946,6 +938,26 @@ impl App {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn apple_music_errors_use_the_active_table_and_keep_provider_details_literal() {
+    use crate::core::i18n::Language;
+    let detail = "{error}: Music denied <&> 中文";
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let (tx, _rx) = channel();
+      let mut app = App::new(tx, UserConfig::new(), None);
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      app.report_apple_music_error(&anyhow::anyhow!(detail));
+      let expected = app.strings().status.app.music_error(detail);
+      assert_eq!(app.status_message(), Some(expected.as_str()));
+      assert!(app.status_message_is_error());
+      assert!(expected.contains(detail));
+      if language == Language::En {
+        assert_eq!(expected, "Apple Music: {error}: Music denied <&> 中文");
+      }
+    }
+  }
   #[test]
   fn apple_music_owner_routes_without_spotify_or_a_decoded_player() {
     let (tx, rx) = channel();

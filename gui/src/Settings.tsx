@@ -1,25 +1,22 @@
+import { EN, type GuiStrings } from "./i18n";
 import { memo, useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { SettingRow } from "./bindings/SettingRow";
 import type { UpdateAsk } from "./bindings/UpdateAsk";
 import type { UpdateStatus } from "./bindings/UpdateStatus";
 import "./Settings.css";
-import {
-  commitValue,
-  optionLabel,
-  sections,
-  setSetting,
-  updateLine,
-} from "./settingsModel";
+import { commitValue, sections, setSetting, updateLine } from "./settingsModel";
 
 /** The Settings page: the desktop app's Behavior rows by group, and the updater. */
 export const Settings = memo(function Settings({
+  s = EN,
   rows,
   update,
   version,
   send,
   onUpdate,
 }: {
+  s?: GuiStrings;
   rows: SettingRow[] | null;
   update: UpdateStatus | null;
   version: string | null;
@@ -28,16 +25,21 @@ export const Settings = memo(function Settings({
 }) {
   return (
     <div className="settings" tabIndex={-1} data-focus>
-      <h1>Settings</h1>
-      {rows === null && <p className="settings-empty">Loading…</p>}
-      {sections(rows ?? [], update !== null).map((section) => (
+      <h1>{s.settings}</h1>
+      {rows === null && <p className="settings-empty">{s.loading}</p>}
+      {sections(rows ?? [], update !== null, s).map((section) => (
         <section
           key={section.group}
           aria-labelledby={`settings-${section.group}`}
         >
           <h2 id={`settings-${section.group}`}>{section.heading}</h2>
           {section.group === "updates" && update && (
-            <UpdateRow status={update} version={version} onUpdate={onUpdate} />
+            <UpdateRow
+              s={s}
+              status={update}
+              version={version}
+              onUpdate={onUpdate}
+            />
           )}
           {section.rows.map((row) => (
             <div key={row.id} className="setting-row">
@@ -49,7 +51,7 @@ export const Settings = memo(function Settings({
                   {row.description}
                 </span>
               </div>
-              <SettingControl row={row} send={send} />
+              <SettingControl s={s} row={row} send={send} />
             </div>
           ))}
         </section>
@@ -60,15 +62,17 @@ export const Settings = memo(function Settings({
 
 /** The updater's status line and its one action. */
 export function UpdateRow({
+  s = EN,
   status,
   version,
   onUpdate,
 }: {
+  s?: GuiStrings;
   status: UpdateStatus;
   version: string | null;
   onUpdate: (ask: UpdateAsk) => void;
 }) {
-  const { text, button, failed } = updateLine(status, version);
+  const { text, button, failed } = updateLine(status, version, s);
   return (
     <div className="setting-row update-row">
       <span
@@ -95,9 +99,11 @@ export function UpdateRow({
 
 /** The control for one row: a switch, a select, or a field that commits on blur and Enter. */
 export function SettingControl({
+  s = EN,
   row,
   send,
 }: {
+  s?: GuiStrings;
   row: SettingRow;
   send: (action: Action) => void;
 }) {
@@ -130,9 +136,9 @@ export function SettingControl({
             send(setSetting(row.id, { Text: event.currentTarget.value }))
           }
         >
-          {value.options.map((option) => (
+          {value.options.map((option, index) => (
             <option key={option} value={option}>
-              {optionLabel(row.id, option)}
+              {value.labels[index] ?? option}
             </option>
           ))}
         </select>
@@ -140,6 +146,7 @@ export function SettingControl({
     case "secret":
       return (
         <SecretField
+          s={s}
           set={value.set}
           labels={labels}
           onCommit={(draft) => {
@@ -207,10 +214,12 @@ function Field({
 
 /** A password field: it shows only whether a password is saved and empties after each commit. */
 function SecretField({
+  s,
   set,
   labels,
   onCommit,
 }: {
+  s: GuiStrings;
   set: boolean;
   labels: Record<string, string>;
   onCommit: (draft: string) => void;
@@ -226,7 +235,7 @@ function SecretField({
       type="password"
       autoComplete="new-password"
       spellCheck={false}
-      placeholder={set ? "Saved" : "Not set"}
+      placeholder={set ? s.secret_saved : s.secret_not_set}
       {...labels}
       onBlur={(event) => commit(event.currentTarget)}
       onKeyDown={(event) => {

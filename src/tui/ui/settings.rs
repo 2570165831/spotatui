@@ -127,7 +127,7 @@ pub fn draw_settings(f: &mut Frame<'_>, app: &App) {
 fn draw_category_tabs(f: &mut Frame<'_>, app: &App, area: Rect) {
   let titles: Vec<Line> = SettingsCategory::all()
     .iter()
-    .map(|cat| Line::from(cat.name()))
+    .map(|cat| Line::from(cat.localized_name(app.strings())))
     .collect();
 
   let selected = app.view.settings_category.index();
@@ -137,7 +137,7 @@ fn draw_category_tabs(f: &mut Frame<'_>, app: &App, area: Rect) {
     .block(
       Block::default()
         .borders(Borders::ALL)
-        .title("Settings (←/→ to switch tabs)"),
+        .title(app.strings().settings.tabs_title),
     )
     .highlight_style(
       Style::default()
@@ -164,9 +164,9 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
           SettingValue::Bool(v) => {
             // Show toggle state (shouldn't reach here with new logic, but just in case)
             if *v {
-              "[●] On  [ ] Off"
+              app.strings().settings.bool_edit_on
             } else {
-              "[ ] On  [●] Off"
+              app.strings().settings.bool_edit_off
             }
             .to_string()
           }
@@ -183,7 +183,12 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
         match &setting.value {
           SettingValue::Bool(v) => {
             // Show toggle indicator - pressing Enter will toggle
-            if *v { "[●] On" } else { "[○] Off" }.to_string()
+            if *v {
+              app.strings().settings.bool_on
+            } else {
+              app.strings().settings.bool_off
+            }
+            .to_string()
           }
           SettingValue::Number(v) => v.to_string(),
           SettingValue::String(v) => format!("\"{}\"", v),
@@ -192,7 +197,10 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
               let effective = app.effective_open_settings_key();
               let configured = app.user_config.keys.open_settings;
               if effective != configured {
-                format!("[{}] (effective: {})", v, effective)
+                app
+                  .strings()
+                  .settings
+                  .effective_key(v, &effective.to_string())
               } else {
                 format!("[{}]", v)
               }
@@ -200,9 +208,17 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
               format!("[{}]", v)
             }
           }
-          SettingValue::Color(v) => format!("■ {}", v),
-          SettingValue::Preset(v) => format!("◆ {} ◆", v), // Show preset name with arrows hint
-          SettingValue::Cycle(v, _) => format!("◆ {} ◆", v),
+          SettingValue::Color(v) => {
+            format!("■ {}", app.strings().settings.option_label(&setting.id, v))
+          }
+          SettingValue::Preset(v) => format!(
+            "◆ {} ◆",
+            app.strings().settings.option_label(&setting.id, v)
+          ), // Show preset name with arrows hint
+          SettingValue::Cycle(v, _) => format!(
+            "◆ {} ◆",
+            app.strings().settings.option_label(&setting.id, v)
+          ),
           SettingValue::Secret(_) => setting.value.display(),
         }
       };
@@ -233,7 +249,10 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
       let mut spans = highlighted_spans(&setting.name, name_ranges, name_style, match_style);
       spans.push(Span::styled(": ", name_style));
       spans.push(Span::styled(value_str, value_style));
-      if let Some(hint) = app.availability(setting_requirement(&setting.id)).hint() {
+      if let Some(hint) = app
+        .availability(setting_requirement(&setting.id))
+        .localized_hint(app.strings())
+      {
         spans.push(Span::styled(
           format!("  ({hint})"),
           Style::default().fg(app.user_config.theme.inactive.into()),
@@ -246,11 +265,17 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let filtering = !app.view.settings_filter.trim().is_empty();
   let count = if filtering {
-    format!("{} of {}", visible.len(), app.settings_items.len())
+    app
+      .strings()
+      .settings
+      .filtered_count(visible.len(), app.settings_items.len())
   } else {
-    format!("{} items", app.settings_items.len())
+    app.strings().settings.item_count(app.settings_items.len())
   };
-  let title = format!("{} Settings ({count})", app.view.settings_category.name());
+  let title = app.strings().settings.category_title(
+    app.view.settings_category.localized_name(app.strings()),
+    &count,
+  );
 
   // Only the filter can empty a loaded category, so the placeholder stays
   // scoped to it rather than claiming a filter that is not there.
@@ -259,10 +284,10 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
     // the tab: a query typed on Behavior that only matches Theme rows would
     // otherwise read as "no such setting".
     vec![ListItem::new(Line::styled(
-      format!(
-        "No {} settings match the filter (←/→ to try another tab)",
-        app.view.settings_category.name()
-      ),
+      app
+        .strings()
+        .settings
+        .no_matches(app.view.settings_category.localized_name(app.strings())),
       Style::default().fg(app.user_config.theme.inactive.into()),
     ))]
   } else {
@@ -304,58 +329,62 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn format_terminal_input_caps(app: &App) -> String {
   let enhancement = if app.view.terminal_input_caps.keyboard_enhancement_enabled {
-    "enh:on"
+    app.strings().settings.enhancement_on
   } else if app.view.terminal_input_caps.keyboard_enhancement_supported {
-    "enh:available"
+    app.strings().settings.enhancement_available
   } else {
-    "enh:off"
+    app.strings().settings.enhancement_off
   };
 
   let ctrl_comma = match app.view.terminal_input_caps.ctrl_punct_reliable {
-    crate::core::app::CapabilityState::Yes => "ctrl+,=ok",
-    crate::core::app::CapabilityState::No => "ctrl+,=degraded",
-    crate::core::app::CapabilityState::Unknown => "ctrl+,=unknown",
+    crate::core::app::CapabilityState::Yes => app.strings().settings.ctrl_comma_ok,
+    crate::core::app::CapabilityState::No => app.strings().settings.ctrl_comma_degraded,
+    crate::core::app::CapabilityState::Unknown => app.strings().settings.ctrl_comma_unknown,
   };
 
-  format!("Terminal Input: {} | {}", enhancement, ctrl_comma)
+  app
+    .strings()
+    .settings
+    .terminal_input(enhancement, ctrl_comma)
 }
 
 fn draw_settings_help(f: &mut Frame<'_>, app: &App, area: Rect) {
   let controls_line = if app.view.settings_filter_editing {
-    "Type to filter | Ctrl+W: Delete word | Ctrl+U: Clear | Enter: Apply | Esc: Cancel"
+    app.strings().settings.filter_controls
   } else if app.view.settings_edit_mode {
     match app.settings_items.get(app.view.settings_selected_index) {
       Some(setting) => match &setting.value {
-        SettingValue::Bool(_) => "Space/Enter: Toggle | ←/→: Toggle | Esc: Cancel",
-        SettingValue::Number(_) => {
-          "↑/↓: Increment/Decrement | Type numbers | Enter: Confirm | Esc: Cancel"
-        }
-        SettingValue::Key(_) => "Press any key to set binding | Esc: Cancel",
+        SettingValue::Bool(_) => app.strings().settings.bool_controls,
+        SettingValue::Number(_) => app.strings().settings.number_controls,
+        SettingValue::Key(_) => app.strings().settings.key_controls,
         SettingValue::Preset(_) | SettingValue::Cycle(_, _) => {
-          "Enter/→: Next | ←: Previous | Esc: Cancel"
+          app.strings().settings.cycle_controls
         }
-        _ => "Type to edit | Enter: Confirm | Esc: Cancel",
+        _ => app.strings().settings.text_controls,
       },
       None => "",
     }
   } else {
-    &format!(
-      // Kept inside ~93 columns: the row is not wrapped, so anything past the
-      // block's inner width is simply cut off.
-      "↑/↓: Select | ←/→: Tab | Enter: Edit | Mouse: Click | {}: Filter | {}: Save | Esc/{}: Exit",
-      app.user_config.keys.search,
-      app.effective_save_settings_key(),
-      app.user_config.keys.back
+    &app.strings().settings.navigation_controls(
+      &app.user_config.keys.search.to_string(),
+      &app.effective_save_settings_key().to_string(),
+      &app.user_config.keys.back.to_string(),
     )
   };
   // The filter query takes the second row while it exists, like the Help
   // menu's filter line; the terminal-caps line comes back once it is cleared.
   let second_line = if app.view.settings_filter_editing {
-    format!("Filter: {}▏", app.view.settings_filter)
+    app
+      .strings()
+      .settings
+      .filter_edit(&app.view.settings_filter)
   } else if app.view.settings_filter.is_empty() {
     format_terminal_input_caps(app)
   } else {
-    format!("Filter: {} (Esc: clear)", app.view.settings_filter)
+    app
+      .strings()
+      .settings
+      .filter_applied(&app.view.settings_filter)
   };
   let help_text = format!("{}\n{}", controls_line, second_line);
 
@@ -368,7 +397,7 @@ fn draw_settings_help(f: &mut Frame<'_>, app: &App, area: Rect) {
     .block(
       Block::default()
         .borders(Borders::ALL)
-        .title("Controls")
+        .title(app.strings().settings.controls_title)
         .style(app.user_config.theme.base_style())
         .border_style(Style::default().fg(app.user_config.theme.inactive.into())),
     );
@@ -391,7 +420,7 @@ fn draw_unsaved_changes_prompt(f: &mut Frame<'_>, app: &App) {
   f.render_widget(Clear, rect);
 
   let block = Block::default()
-    .title(" Unsaved Settings ")
+    .title(app.strings().settings.unsaved_title)
     .borders(Borders::ALL)
     .style(app.user_config.theme.base_style())
     .border_style(Style::default().fg(app.user_config.theme.active.into()));
@@ -406,7 +435,7 @@ fn draw_unsaved_changes_prompt(f: &mut Frame<'_>, app: &App) {
     .margin(1),
   );
 
-  let message = Paragraph::new("You have unsaved changes. Save before leaving settings?")
+  let message = Paragraph::new(app.strings().settings.unsaved_message)
     .style(app.user_config.theme.base_style())
     .alignment(Alignment::Center);
   f.render_widget(message, message_area);
@@ -416,7 +445,7 @@ fn draw_unsaved_changes_prompt(f: &mut Frame<'_>, app: &App) {
   );
 
   let yes_selected = app.view.settings_unsaved_prompt_save_selected;
-  let yes = Paragraph::new("[ Yes ]")
+  let yes = Paragraph::new(app.strings().settings.yes_button)
     .alignment(Alignment::Center)
     .style(Style::default().fg(if yes_selected {
       app.user_config.theme.hovered.into()
@@ -425,7 +454,7 @@ fn draw_unsaved_changes_prompt(f: &mut Frame<'_>, app: &App) {
     }));
   f.render_widget(yes, yes_area);
 
-  let no = Paragraph::new("[ No ]")
+  let no = Paragraph::new(app.strings().settings.no_button)
     .alignment(Alignment::Center)
     .style(Style::default().fg(if yes_selected {
       app.user_config.theme.inactive.into()
@@ -434,7 +463,7 @@ fn draw_unsaved_changes_prompt(f: &mut Frame<'_>, app: &App) {
     }));
   f.render_widget(no, no_area);
 
-  let hint = Paragraph::new("Y: Yes | N: No | Enter: Select | Esc: Cancel")
+  let hint = Paragraph::new(app.strings().settings.unsaved_controls)
     .alignment(Alignment::Center)
     .style(Style::default().fg(app.user_config.theme.inactive.into()));
   f.render_widget(hint, hint_area);

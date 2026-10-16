@@ -237,6 +237,7 @@ pub fn find_playlist<'a>(file: &'a PlaylistsFile, uri_or_id: &str) -> Option<&'a
 /// Map a stored playlist onto the sidebar row type.
 pub fn playlist_to_info(p: &StoredPlaylist) -> PlaylistInfo {
   PlaylistInfo {
+    generated_name: None,
     uri: uri_for_playlist_id(&p.id),
     name: p.name.clone(),
     owner: "local".to_string(),
@@ -252,6 +253,7 @@ pub fn playlist_to_info(p: &StoredPlaylist) -> PlaylistInfo {
 /// Map a stored track onto the shared track-table row type.
 pub fn stored_to_track_info(t: &StoredTrack) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri_for_video_id(&t.video_id)),
     name: t.title.clone(),
     artists: if t.channel.is_empty() {

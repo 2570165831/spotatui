@@ -171,7 +171,8 @@ impl Router {
         let permit = match self.tx.try_reserve() {
           Ok(permit) => permit,
           Err(_) => {
-            app.set_error_status_message("Music is busy; retry the playback request", 4);
+            let strings = app.strings();
+            app.set_error_status_message(strings.status.infra.music_busy_playback, 4);
             app.resync_apple_music_list();
             return None;
           }
@@ -202,7 +203,8 @@ impl Router {
         if app.apple_music_state().switching
           && crate::infra::network::Network::event_is_transport(&other)
         {
-          app.set_status_message("Waiting for Music to pause before switching source", 4);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.music_wait_pause, 4);
           return None;
         }
         // Music was just found quit: a key now would launch it again and
@@ -210,7 +212,8 @@ impl Router {
         if app.apple_music_state().quit_seen.is_some()
           && crate::infra::network::Network::event_is_transport(&other)
         {
-          app.set_status_message("Music is not running; choose a Music track to start it", 4);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.music_not_running, 4);
           return None;
         }
         let command = match other {
@@ -221,15 +224,18 @@ impl Router {
           IoEvent::Seek(position) => Command::Seek(position),
           IoEvent::ChangeVolume(volume) => Command::Volume(volume),
           IoEvent::Shuffle(_) | IoEvent::Repeat(_) => {
-            app.set_status_message("Use Music to change shuffle or repeat", 4);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.music_shuffle_repeat, 4);
             return None;
           }
           IoEvent::AdvanceNativeQueue | IoEvent::FinishNativeQueue | IoEvent::AddItemToQueue(_) => {
-            app.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.music_queue_unsupported, 4);
             return None;
           }
           IoEvent::TransferPlaybackToDevice(..) => {
-            app.set_status_message("Start a Spotify track to switch playback from Music", 4);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.music_switch_spotify, 4);
             return None;
           }
           _ => return Some(other),
@@ -247,7 +253,8 @@ impl Router {
       if let Some(generation) = volume_generation {
         app.finish_apple_music_volume(generation);
       }
-      app.set_error_status_message("Music is busy; retry the request", 4);
+      let strings = app.strings();
+      app.set_error_status_message(strings.status.infra.music_busy, 4);
     } else if transport {
       app.note_apple_music_command_queued();
     }
@@ -450,7 +457,8 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         });
         match next {
           Ok((end, total)) if end < total => {
-            app.set_status_message(format!("Loading Apple Music library: {end}/{total}"), 4);
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.music_loading(end, total), 4);
             // Re-enter at the tail of the pump/worker so transport is served
             // between pages. The same generation guards every append.
             app.dispatch_without_spinner(IoEvent::AppleMusicPage {
@@ -459,7 +467,10 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
               offset: end,
             });
           }
-          Ok((end, _)) => app.set_status_message(format!("Apple Music: loaded {end} items"), 3),
+          Ok((end, _)) => {
+            let strings = app.strings();
+            app.set_status_message(strings.status.infra.music_loaded(end), 3);
+          }
           Err(error) => app.report_apple_music_error(&error),
         }
       }
@@ -490,8 +501,12 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
             // A read that a newer start overtook says nothing about Music now.
             let current = app.apple_music_state().generation == generation;
             if current && backoff.take_report(now) {
+              let strings = app.strings();
               app.set_error_status_message(
-                format!("Music status unavailable: {error}. Retrying in the background."),
+                strings
+                  .status
+                  .infra
+                  .music_status_unavailable(&error.to_string()),
                 8,
               );
             }

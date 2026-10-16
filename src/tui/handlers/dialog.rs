@@ -42,13 +42,13 @@ fn handle_confirmation_dialog(key: Key, app: &mut App, dialog_context: DialogCon
           DialogContext::PlaylistSyncPicker => {}
         }
       } else if dialog_context == DialogContext::PersistKeybindingFallback {
-        app.set_status_message("Using Alt+, for this session only", 4);
+        app.set_status_message(app.strings().popups.fallback_session_only, 4);
       }
       close_dialog(app);
     }
     Key::Char('q') => {
       if dialog_context == DialogContext::PersistKeybindingFallback {
-        app.set_status_message("Using Alt+, for this session only", 4);
+        app.set_status_message(app.strings().popups.fallback_session_only, 4);
       }
       close_dialog(app);
     }
@@ -293,11 +293,13 @@ mod tests {
     ];
     *app.playlist_folder_items_mut() = vec![
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "Mixes".to_string(),
         current_id: 0,
         target_id: 1,
       }),
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "\u{2190} Mixes".to_string(),
         current_id: 1,
         target_id: 0,
@@ -363,6 +365,7 @@ mod tests {
         current_id: 0,
       },
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: "Mixes".to_string(),
         current_id: 0,
         target_id: 1,
@@ -389,6 +392,7 @@ mod tests {
     let mut app =
       App::new(tx, UserConfig::new(), Some(SystemTime::now())).under_source(Source::Qobuz);
     app.qobuz_playlists_mut().push(PlaylistInfo {
+      generated_name: None,
       uri: "qobuz:playlist:9".to_string(),
       name: "Mine".to_string(),
       owner: "qobuz".to_string(),

@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import { useEffect, useRef } from "react";
 import type { Action } from "./bindings/Action";
 import type { DiscoverPayload } from "./bindings/DiscoverPayload";
@@ -27,6 +28,7 @@ const playlistView = (playlist: PlaylistInfo): View => ({
 
 /** Home: shelves of recently played, the user's playlists, saved albums and Made For You. */
 export function Home({
+  s = EN,
   recent,
   playlists,
   discover,
@@ -35,6 +37,7 @@ export function Home({
   open,
   send,
 }: {
+  s?: GuiStrings;
   /** Recently played, most recent first; null before the first fetch landed. */
   recent: TrackInfo[] | null;
   playlists: SourcePlaylists | null;
@@ -68,7 +71,7 @@ export function Home({
   return (
     <section className="home" data-focus tabIndex={-1}>
       <div className="home-top">
-        <h1>{greeting(new Date().getHours())}</h1>
+        <h1>{greeting(new Date().getHours(), s)}</h1>
         <div className="quick-grid">
           <div className="quick-tile">
             <button
@@ -79,7 +82,7 @@ export function Home({
               <span className="quick-liked" aria-hidden="true">
                 <Glyph name="heart" size={24} filled />
               </span>
-              <span className="quick-name">Liked Songs</span>
+              <span className="quick-name">{s.liked_songs}</span>
             </button>
           </div>
           {spotify.slice(0, QUICK_PLAYLISTS).map((playlist) => (
@@ -94,7 +97,7 @@ export function Home({
               </button>
               <span className="quick-play">
                 <PlayButton
-                  label={`Play ${playlist.name}`}
+                  label={fmt(s.play_named, { name: playlist.name })}
                   onClick={() => playContext(playlist.uri)}
                 />
               </span>
@@ -104,12 +107,14 @@ export function Home({
       </div>
       {recentShelf.length > 0 && (
         <Shelf
+          s={s}
           oneRow
-          title="Recently played"
+          title={s.recently_played}
           onMore={() => open({ page: "recent" })}
         >
           {recentShelf.slice(0, SHELF_MAX).map((track) => (
             <Card
+              s={s}
               key={track.album_id}
               image={track.image_url}
               title={track.album}
@@ -126,13 +131,14 @@ export function Home({
         </Shelf>
       )}
       {spotify.length > 0 && (
-        <Shelf oneRow title="Your playlists">
+        <Shelf s={s} oneRow title={s.your_playlists}>
           {spotify.slice(0, SHELF_MAX).map((playlist) => (
             <Card
+              s={s}
               key={playlist.uri}
               image={playlist.image_url}
               title={playlist.name}
-              subtitle={`By ${playlist.owner}`}
+              subtitle={fmt(s.by_owner, { owner: playlist.owner })}
               onOpen={() => open(playlistView(playlist))}
               onPlay={() => playContext(playlist.uri)}
             />
@@ -140,9 +146,10 @@ export function Home({
         </Shelf>
       )}
       {albums.length > 0 && (
-        <Shelf oneRow title="Saved albums">
+        <Shelf s={s} oneRow title={s.saved_albums}>
           {albums.slice(0, SHELF_MAX).map((album, index) => (
             <Card
+              s={s}
               key={album.id ?? `${index}-${album.name}`}
               image={album.image_url}
               title={album.name}
@@ -156,15 +163,17 @@ export function Home({
       {forYou.length > 0 && (
         <Shelf
           oneRow
-          title="Made For You"
+          s={s}
+          title={s.made_for_you}
           onMore={() => open({ page: "discover" })}
         >
           {forYou.slice(0, SHELF_MAX).map((playlist) => (
             <Card
+              s={s}
               key={playlist.uri}
               image={playlist.image_url}
               title={playlist.name}
-              subtitle={playlist.description ?? "By Spotify"}
+              subtitle={playlist.description ?? s.by_spotify}
               onOpen={() => open(discoverView(playlist))}
               onPlay={() => playContext(playlist.uri)}
             />

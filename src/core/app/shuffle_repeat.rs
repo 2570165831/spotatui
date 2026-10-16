@@ -158,9 +158,9 @@ impl App {
       self.decoded_shuffle = !self.decoded_shuffle;
       self.apply_decoded_shuffle();
       let label = if self.decoded_shuffle {
-        "Shuffle: On"
+        self.strings().status.app.shuffle_on
       } else {
-        "Shuffle: Off"
+        self.strings().status.app.shuffle_off
       };
       self.set_status_message(label, 2);
       return;
@@ -177,7 +177,7 @@ impl App {
       || self.active_decoded_source()
       || self.queue_owns_playback()
     {
-      self.set_status_message("Shuffle does not apply to this source", 2);
+      self.set_status_message(self.strings().status.app.shuffle_unsupported, 2);
       return;
     }
 
@@ -226,9 +226,9 @@ impl App {
     if self.active_queueable_decoded_source() {
       self.decoded_repeat = self.decoded_repeat.next();
       let label = match self.decoded_repeat {
-        RepeatMode::Off => "Repeat: Off",
-        RepeatMode::Context => "Repeat: All",
-        RepeatMode::Track => "Repeat: One",
+        RepeatMode::Off => self.strings().status.app.repeat_off,
+        RepeatMode::Context => self.strings().status.app.repeat_all,
+        RepeatMode::Track => self.strings().status.app.repeat_one,
       };
       self.set_status_message(label, 2);
       return;
@@ -241,7 +241,7 @@ impl App {
       || self.active_decoded_source()
       || self.queue_owns_playback()
     {
-      self.set_status_message("Repeat does not apply to this source", 2);
+      self.set_status_message(self.strings().status.app.repeat_unsupported, 2);
       return;
     }
 

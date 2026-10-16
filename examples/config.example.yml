@@ -5,6 +5,9 @@
 # Full reference: docs/configuration.md
 
 behavior:
+  # Interface language: auto follows the system locale (Chinese or English).
+  # Explicit choices: en, zh-Hans (Simplified), zh-Hant (Traditional).
+  language: auto
   # --- Timing / behavior constants ---
   status_message_ttl_percent: 100 # 10..=1000; 200 = status messages last twice as long
   playback_poll_seconds: 5        # min 1; playback-state poll interval

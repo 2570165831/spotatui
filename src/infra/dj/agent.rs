@@ -138,11 +138,11 @@ impl<E: ToolExecutor> Turn<'_, E> {
 
     // Out of steps with the model still working. Said out loud: silence here looks
     // identical to a hang, and on an agent CLI the turn has just cost real quota.
-    self
-      .push(DjLine::system(format!(
-        "Stopped after {max_steps} steps. Ask again if that is not where you wanted to end up."
-      )))
-      .await;
+    {
+      let mut app = self.app.lock().await;
+      let message = app.strings().status.infra.dj_steps_exhausted(max_steps);
+      app.dj.push_line(DjLine::system(message));
+    }
     Ok(TurnOutcome {
       acted,
       abandoned: false,
@@ -164,7 +164,17 @@ impl<E: ToolExecutor> Turn<'_, E> {
           }
           ToolCallError::InvalidArguments(detail) => format!("Invalid arguments: {detail}"),
         };
-        self.show_call(&call.name, &detail).await;
+        self
+          .show_call(&call.name, |language| {
+            let strings = language.strings();
+            match &e {
+              ToolCallError::UnknownTool(name) => strings.status.tools.unknown_tool(name),
+              ToolCallError::InvalidArguments(detail) => {
+                strings.status.tools.invalid_arguments(detail)
+              }
+            }
+          })
+          .await;
         return CallResult::Ran {
           exchange: ToolExchange {
             name: call.name.clone(),
@@ -204,7 +214,11 @@ impl<E: ToolExecutor> Turn<'_, E> {
         return CallResult::Abandoned;
       }
     }
-    self.show_call(&call.name, &outcome.text).await;
+    self
+      .show_call(&call.name, |language| {
+        outcome.display_text(language).to_owned()
+      })
+      .await;
 
     CallResult::Ran {
       exchange: ToolExchange {
@@ -251,14 +265,18 @@ impl<E: ToolExecutor> Turn<'_, E> {
 
   /// One transcript line per tool call, so the listener sees the DJ work rather
   /// than watching it stall.
-  async fn show_call(&self, name: &str, result: &str) {
-    let summary = first_line(result);
-    self
-      .push(DjLine {
-        speaker: DjSpeaker::System,
-        text: format!("· {name} → {summary}"),
-      })
-      .await;
+  async fn show_call(
+    &self,
+    name: &str,
+    render: impl FnOnce(crate::core::i18n::Language) -> String,
+  ) {
+    let mut app = self.app.lock().await;
+    // Select and render under the same lock that publishes the visible line.
+    let summary = first_line(&render(app.language()));
+    app.dj.push_line(DjLine {
+      speaker: DjSpeaker::System,
+      text: format!("· {name} → {summary}"),
+    });
   }
 
   async fn show_step(&self, step: usize, of: usize) {
@@ -690,6 +708,41 @@ echo '{"say":"Still going.","tool_calls":[{"name":"get_queue","arguments":{}}]}'
         .iter()
         .any(|t| t.contains(&format!("Stopped after {MAX_STEPS} steps"))),
       "{transcript:?}"
+    );
+  }
+
+  #[tokio::test]
+  async fn a_tool_line_selects_its_language_while_holding_the_publish_lock() {
+    use crate::core::i18n::Language;
+    let app = Arc::new(Mutex::new(App::default()));
+    let brain = DjBrain::OpenAiCompat(super::super::brain::openai_compat::OpenAiCompatBrain::new(
+      None, None, None,
+    ));
+    let executor = ScriptedExecutor::new();
+    let context = context(false);
+    let turn = turn(&app, &brain, &context, &executor);
+    let mut guard = app.lock().await;
+    let show = turn.show_call("raw_tool", |language| {
+      assert!(
+        app.try_lock().is_err(),
+        "rendering must hold the publication lock"
+      );
+      assert_eq!(language, Language::ZhHant);
+      language.strings().status.tools.unknown_tool("raw {tool}")
+    });
+    tokio::pin!(show);
+    assert!(futures::poll!(&mut show).is_pending());
+    guard.user_config.behavior.language = Language::ZhHant;
+    guard.refresh_language();
+    drop(guard);
+    show.await;
+    let guard = app.lock().await;
+    assert_eq!(
+      guard.dj.transcript.last().unwrap().text,
+      format!(
+        "· raw_tool → {}",
+        first_line(&guard.strings().status.tools.unknown_tool("raw {tool}"))
+      )
     );
   }
 }

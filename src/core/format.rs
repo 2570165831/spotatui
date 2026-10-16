@@ -119,9 +119,14 @@ impl Template {
         }
       }
     }
-    out.retain(|c| c != '\n' && c != '\r' && c != '\t');
+    strip_line_controls(&mut out);
     out
   }
+}
+
+/// Keep terminal templates on one line, including values supplied by devices or users.
+pub fn strip_line_controls(text: &mut String) {
+  text.retain(|c| c != '\n' && c != '\r' && c != '\t');
 }
 
 /// Number of bytes consumed by the UTF-8 codepoint whose first byte is `b`.

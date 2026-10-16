@@ -6,6 +6,9 @@
 //! (`runtime/`), so anything that has to resolve a track name to a URI belongs
 //! here rather than there.
 
+//! Tool schemas and replies intentionally stay English: they are model-facing
+//! protocol text, independent of the user's interface language.
+
 use super::Network;
 #[cfg(any(feature = "mcp-server", feature = "ai-dj"))]
 use crate::core::action::{Action, ActionOutcome};
@@ -71,6 +74,19 @@ fn pick_device(
 /// The tool handlers behind `DjToolCall`, shared by both front doors.
 #[cfg(any(feature = "mcp-server", feature = "ai-dj"))]
 impl Network {
+  async fn queue_resolved_tracks(&self, report: &mut resolve::ResolveReport) -> usize {
+    let mut app = self.app.lock().await;
+    // Count before taking the tracks; render and publish with one language lock.
+    let summary = report.summary_with(app.strings());
+    let accepted = match app.apply(Action::QueueTracks(std::mem::take(&mut report.resolved))) {
+      ActionOutcome::Queued { accepted } => accepted,
+      ActionOutcome::Applied | ActionOutcome::SettingsSaved { .. } => 0,
+    };
+    let message = app.strings().status.infra.dj_status(&summary);
+    app.set_status_message(message, 5);
+    accepted
+  }
+
   /// Answers a call with no Spotify item (`!call.needs_network()`) at once,
   /// with no Spotify client, so it never waits behind Spotify work.
   pub async fn answer_dj_tool_call_without_spotify(
@@ -107,10 +123,7 @@ impl Network {
     // This variant bypasses the generic auth gate so we can say something
     // useful here instead of the caller seeing a dropped channel.
     if call.needs_network() && self.spotify.is_none() {
-      return ToolOutcome::error(
-        "spotatui has no Spotify session, so the catalogue is unavailable. Log in from the \
-         spotatui UI, then try again.",
-      );
+      return ToolOutcome::error_localized(|strings| strings.status.tools.catalogue_unavailable);
     }
 
     match call {
@@ -286,7 +299,7 @@ impl Network {
       device_id: id,
       persist: false,
     });
-    ToolOutcome::ok(format!("Moving playback to {name}"))
+    ToolOutcome::ok_localized(|strings| strings.status.tools.transfer(&name))
   }
 
   /// Toggles only the tracks whose liked state differs, after reading it.
@@ -318,11 +331,13 @@ impl Network {
       }
     }
     let unchanged = uris.len() - changed;
-    ToolOutcome::ok(format!(
-      "{} {changed} track(s); {unchanged} already {}",
-      if liked { "Liking" } else { "Unliking" },
-      if liked { "liked" } else { "not liked" }
-    ))
+    ToolOutcome::ok_localized(|strings| {
+      if liked {
+        strings.status.tools.liking(changed, unchanged)
+      } else {
+        strings.status.tools.unliking(changed, unchanged)
+      }
+    })
   }
 
   async fn dj_search(&self, query: &str, limit: usize) -> ToolOutcome {
@@ -339,7 +354,11 @@ impl Network {
       Ok(response) => response,
       // Reported as an execution error, not the modal error page: an agent can
       // act on this, and a failed search must not hijack the user's screen.
-      Err(e) => return ToolOutcome::error(format!("Search failed: {e}")),
+      Err(e) => {
+        return ToolOutcome::error_localized(|strings| {
+          strings.status.tools.search_failed(&e.to_string())
+        })
+      }
     };
 
     let tracks: Vec<TrackInfo> = response
@@ -351,7 +370,7 @@ impl Network {
       .collect();
 
     if tracks.is_empty() {
-      return ToolOutcome::ok(format!("No tracks found for \"{query}\""));
+      return ToolOutcome::ok_localized(|strings| strings.status.tools.no_tracks(query));
     }
 
     // Ownership rides along with the results rather than behind a separate tool:
@@ -367,28 +386,6 @@ impl Network {
         .is_some_and(|id| ownership.owned.contains(id))
     };
 
-    let mut rendered = tracks
-      .iter()
-      .map(|track| {
-        format!(
-          "{} — {} [{}] [{}]",
-          track.name,
-          track.artists.join(", "),
-          track.uri.as_deref().unwrap_or("no uri"),
-          if owned(track) { "owned" } else { "new" }
-        )
-      })
-      .collect::<Vec<_>>()
-      .join("\n");
-    if !ownership.complete {
-      // Said out loud rather than passed off as complete: a silently partial
-      // answer is how this feature would look broken.
-      rendered.push_str(
-        "\n\nNote: the playlist index is still being built, so [owned] reflects Liked Songs only \
-         for this search. Search again for the complete answer.",
-      );
-    }
-
     let structured = json!({
       "ownership_complete": ownership.complete,
       "tracks": tracks.iter().map(|track| json!({
@@ -400,7 +397,28 @@ impl Network {
         "owned": owned(track),
       })).collect::<Vec<_>>()
     });
-    ToolOutcome::with_data(rendered, structured)
+    ToolOutcome::data_localized(
+      |strings| {
+        let s = &strings.status.tools;
+        let mut rendered = tracks
+          .iter()
+          .map(|track| {
+            s.found_track(
+              &track.name,
+              &track.artists.join(", "),
+              track.uri.as_deref().unwrap_or("no uri"),
+              if owned(track) { s.owned } else { s.new_track },
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        if !ownership.complete {
+          rendered.push_str(s.ownership_incomplete);
+        }
+        rendered
+      },
+      structured,
+    )
   }
 
   async fn dj_queue(
@@ -437,11 +455,7 @@ impl Network {
       match self.dj_library_index().await {
         Some(library) => library.keys,
         None => {
-          return ToolOutcome::error(
-            "Could not read your playlists, so exclude_owned cannot be honoured and nothing was \
-             queued. Try again in a moment, or call queue_tracks without exclude_owned to queue \
-             these anyway.",
-          )
+          return ToolOutcome::error_localized(|strings| strings.status.tools.queue_filter_failed)
         }
       }
     } else {
@@ -495,10 +509,12 @@ impl Network {
     }
 
     if report.resolved.is_empty() {
-      return ToolOutcome::error(format!(
-        "Nothing was queued.\n{}",
-        nothing_queued_detail(&report)
-      ));
+      return ToolOutcome::error_localized(|strings| {
+        strings
+          .status
+          .tools
+          .nothing_queued(&nothing_queued_detail(&report, strings))
+      });
     }
 
     let queued_labels: Vec<String> = report
@@ -507,50 +523,26 @@ impl Network {
       .map(|track| format!("{} — {}", track.name, track.artists.join(", ")))
       .collect();
 
-    // Read before the take: `summary()` counts `resolved`, and taking it first is
-    // what made every queue report "queued 0".
-    let summary = report.summary();
-    let accepted = {
-      let mut app = self.app.lock().await;
-      match app.apply(Action::QueueTracks(std::mem::take(&mut report.resolved))) {
-        ActionOutcome::Queued { accepted } => accepted,
-        ActionOutcome::Applied | ActionOutcome::SettingsSaved { .. } => 0,
-      }
-    };
-    // After the block, not inside it: the network layer's helper takes the lock
-    // itself. "DJ:", not "MCP:", because this handler serves both front doors and
-    // `DjToolCall` does not carry which one asked.
-    self.show_status_message(format!("DJ: {summary}"), 5).await;
+    let accepted = self.queue_resolved_tracks(&mut report).await;
 
-    let mut text = format!("Queued {accepted} track(s):\n{}", queued_labels.join("\n"));
-    // Report the misses explicitly: MCP clients feed execution detail back to
-    // the model, which is how it learns not to invent that track again.
-    if !report.unresolved.is_empty() {
-      text.push_str(&format!(
-        "\n\nNot found (skipped): {}",
-        report.unresolved.join("; ")
-      ));
-    }
-    if !report.in_library.is_empty() {
-      // Its own line, and its own words. "Already queued" is false for a track
-      // they own and never queued, and "not found" would tell the model a real
-      // track does not exist — which is how it learns the wrong lesson.
-      text.push_str(&format!(
-        "\nAlready in your library (skipped by exclude_owned): {}",
-        report.in_library.join("; ")
-      ));
-    }
-    if !report.duplicates.is_empty() {
-      text.push_str(&format!(
-        "\nAlready queued, playing, or recently played (skipped): {}",
-        report.duplicates.join("; ")
-      ));
-    }
-    if exclude_owned && !filter_applies {
-      text.push_str("\nexclude_owned only checks Spotify tracks, so it skipped nothing here.");
-    }
-    ToolOutcome::with_data(
-      text,
+    ToolOutcome::data_localized(
+      |strings| {
+        let s = &strings.status.tools;
+        let mut text = format!("{}\n{}", s.queued(accepted), queued_labels.join("\n"));
+        if !report.unresolved.is_empty() {
+          text.push_str(&s.queue_not_found(&report.unresolved.join("; ")));
+        }
+        if !report.in_library.is_empty() {
+          text.push_str(&s.queue_owned(&report.in_library.join("; ")));
+        }
+        if !report.duplicates.is_empty() {
+          text.push_str(&s.queue_duplicate(&report.duplicates.join("; ")));
+        }
+        if exclude_owned && !filter_applies {
+          text.push_str(s.queue_filter_spotify_only);
+        }
+        text
+      },
       json!({
         "queued": queued_labels,
         "not_found": report.unresolved,
@@ -579,27 +571,23 @@ impl Network {
       // consume this scheme is gated on its own feature, and without it the event
       // reaches nothing while the caller is told playback started.
       if let Some(feature) = crate::core::queue::missing_source_feature(&uri) {
-        return ToolOutcome::error(format!(
-          "Nothing is playing that: this spotatui was built without the `{feature}` feature, so it \
-           has no source that can play {uri}. Playback was left alone."
-        ));
+        return ToolOutcome::error_localized(|strings| {
+          strings.status.tools.missing_feature(feature, &uri)
+        });
       }
       self.dj_start_playback(&uri).await;
-      return ToolOutcome::ok(format!("Sent {uri} to the player"));
+      return ToolOutcome::ok_localized(|strings| strings.status.tools.sent(&uri));
     }
 
     let (resolved, _missing) = self.tracks_for_uris(std::slice::from_ref(&uri)).await;
     let Some(track) = resolved.into_iter().next() else {
-      return ToolOutcome::error(format!(
-        "Nothing is playing that: {uri} is not in the catalogue, so playback was left alone. \
-         Use search_tracks to get a URI that exists."
-      ));
+      return ToolOutcome::error_localized(|strings| strings.status.tools.missing_track(&uri));
     };
 
     let label = format!("{} — {}", track.name, track.artists.join(", "));
     self.dj_start_playback(&uri).await;
-    ToolOutcome::with_data(
-      format!("Playing {label}"),
+    ToolOutcome::data_localized(
+      |strings| strings.status.tools.play_started(&label),
       json!({"uri": uri, "title": track.name, "artist": track.artists.join(", ")}),
     )
   }
@@ -693,25 +681,20 @@ impl Network {
 /// track label is `"Title — Artist"`, so neither semicolons nor dashes can
 /// separate the groups unambiguously.
 #[cfg(any(feature = "mcp-server", feature = "ai-dj"))]
-fn nothing_queued_detail(report: &ResolveReport) -> String {
+fn nothing_queued_detail(report: &ResolveReport, strings: &crate::core::i18n::Strings) -> String {
+  let s = &strings.status.tools;
   let mut reasons = Vec::new();
   if !report.unresolved.is_empty() {
-    reasons.push(format!("Could not find: {}", report.unresolved.join("; ")));
+    reasons.push(s.none_found(&report.unresolved.join("; ")));
   }
   if !report.in_library.is_empty() {
-    reasons.push(format!(
-      "Already in your library: {}",
-      report.in_library.join("; ")
-    ));
+    reasons.push(s.none_owned(&report.in_library.join("; ")));
   }
   if !report.duplicates.is_empty() {
-    reasons.push(format!(
-      "Already queued, playing, or recently played: {}",
-      report.duplicates.join("; ")
-    ));
+    reasons.push(s.none_duplicate(&report.duplicates.join("; ")));
   }
   if reasons.is_empty() {
-    return "Every track was already queued or playing.".to_string();
+    return s.none_new.to_string();
   }
   reasons.join("\n")
 }
@@ -797,6 +780,7 @@ impl Network {
         continue;
       }
       resolved.push(TrackInfo {
+        generated_name: None,
         uri: Some(uri.clone()),
         name: uri.clone(),
         artists: Vec::new(),
@@ -854,14 +838,15 @@ impl Network {
     app.dj.library_indexing = false;
     match outcome {
       Ok(library) => {
-        let summary = library.summary();
+        let summary = library.summary_with(app.strings());
         app.dj.library = Some(library);
         app.dj.push_line(DjLine::system(summary.clone()));
-        app.set_status_message(format!("DJ: {summary}"), 5);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.dj_status(&summary), 5);
       }
       Err(e) => {
         log::warn!("DJ: could not index the library: {e}");
-        let message = format!("DJ: could not read your playlists ({e}); recommending unfiltered");
+        let message = app.strings().status.infra.dj_library_failed(&e.to_string());
         app.dj.push_line(DjLine::system(message.clone()));
         app.set_error_status_message(message, 8);
       }
@@ -971,6 +956,77 @@ mod tests {
   use crate::core::app::App;
   use std::sync::Arc;
   use tokio::sync::Mutex;
+
+  #[tokio::test]
+  async fn a_queue_summary_uses_the_language_at_publication_and_counts_before_taking_tracks() {
+    use crate::core::i18n::Language;
+    let network = unauthenticated_network().await;
+    let mut report = ResolveReport {
+      resolved: vec![serde_json::from_value(json!({"uri":"file:///literal.mp3", "name":"Literal {title}", "artists":[], "album":"", "duration_ms":0})).unwrap()],
+      unresolved: vec!["raw {error}".into()],
+      ..ResolveReport::default()
+    };
+    let expected = Language::ZhHant
+      .strings()
+      .status
+      .infra
+      .dj_status(&report.summary_with(Language::ZhHant.strings()));
+    let mut guard = network.app.lock().await;
+    let publish = network.queue_resolved_tracks(&mut report);
+    tokio::pin!(publish);
+    assert!(futures::poll!(&mut publish).is_pending());
+    guard.user_config.behavior.language = Language::ZhHant;
+    guard.refresh_language();
+    drop(guard);
+    publish.await;
+    assert_eq!(
+      network.app.lock().await.status_message(),
+      Some(expected.as_str())
+    );
+  }
+
+  #[tokio::test]
+  async fn a_queue_summary_cannot_mix_languages_between_locks() {
+    use crate::core::i18n::Language;
+    let network = unauthenticated_network().await;
+    let mut report = ResolveReport {
+      resolved: vec![serde_json::from_value(json!({"uri":"file:///literal.mp3", "name":"Literal {title}", "artists":[], "album":"", "duration_ms":0})).unwrap()],
+      ..ResolveReport::default()
+    };
+    let expected = |language: Language| {
+      language
+        .strings()
+        .status
+        .infra
+        .dj_status(&report.summary_with(language.strings()))
+    };
+    let english = expected(Language::En);
+    let traditional = expected(Language::ZhHant);
+    let held = network.app.lock().await;
+    let publish = network.queue_resolved_tracks(&mut report);
+    let switch = async {
+      let mut app = network.app.lock().await;
+      let already_published = app.status_message().is_some();
+      app.user_config.behavior.language = Language::ZhHant;
+      app.refresh_language();
+      already_published
+    };
+    tokio::pin!(publish, switch);
+    // Tokio's mutex queues the language change after the first publication lock.
+    assert!(futures::poll!(&mut publish).is_pending());
+    assert!(futures::poll!(&mut switch).is_pending());
+    drop(held);
+    let (_, already_published) = tokio::join!(publish, switch);
+    let expected = if already_published {
+      english
+    } else {
+      traditional
+    };
+    assert_eq!(
+      network.app.lock().await.status_message(),
+      Some(expected.as_str())
+    );
+  }
 
   #[test]
   fn a_transfer_picks_a_device_by_id_then_by_name() {
@@ -1180,7 +1236,7 @@ mod tests {
       in_library: vec!["Firestone — Kygo".into()],
       ..ResolveReport::default()
     };
-    let detail = nothing_queued_detail(&owned);
+    let detail = nothing_queued_detail(&owned, &crate::core::i18n::EN);
     assert!(detail.contains("Already in your library: Firestone — Kygo"));
     assert!(
       !detail.contains("Could not find"),
@@ -1197,7 +1253,7 @@ mod tests {
       duplicates: vec!["Nightcall".into()],
       ..ResolveReport::default()
     };
-    let detail = nothing_queued_detail(&mixed);
+    let detail = nothing_queued_detail(&mixed, &crate::core::i18n::EN);
     for expected in [
       "Could not find: Ghost Song; Second Ghost",
       "Already in your library: Firestone — Kygo",
@@ -1218,7 +1274,7 @@ mod tests {
     );
 
     // The fallback still says something, rather than trailing off after the dash.
-    assert!(!nothing_queued_detail(&ResolveReport::default()).is_empty());
+    assert!(!nothing_queued_detail(&ResolveReport::default(), &crate::core::i18n::EN).is_empty());
   }
 
   #[tokio::test]
@@ -1330,14 +1386,14 @@ mod in_tui {
           // deliberately left transcript-only.
           if request.must_act && !turn.abandoned {
             if turn.acted {
-              app.set_status_message("DJ: topped up the queue".to_string(), 5);
+              let strings = app.strings();
+              app.set_status_message(strings.status.infra.dj_topped_up.to_string(), 5);
             } else {
               // A turn that had to queue and did not is a failure, not a quiet
               // success. A vibe shift has just *emptied* the queue, and with
               // auto-queue off nothing retries — so saying nothing leaves the
               // listener with silence and no explanation.
-              let message = "DJ: nothing was queued that time. Ask again, or try a different \
-                             direction.";
+              let message = app.strings().status.infra.dj_nothing_queued;
               app.dj.push_line(DjLine::system(message));
               app.set_error_status_message(message.to_string(), 6);
             }
@@ -1357,7 +1413,7 @@ mod in_tui {
           let backend = session::build_brain(&app.user_config.behavior)
             .map(|brain| brain.label())
             .unwrap_or("DJ");
-          let message = format!("DJ error ({backend}): {e}");
+          let message = app.strings().status.infra.dj_error(backend, &e.to_string());
           app.dj.push_line(DjLine::system(message.clone()));
           // A toast, never `handle_error` — that pushes a modal error page over
           // whatever the user was doing.

@@ -25,26 +25,24 @@ pub fn draw_playlist_sync(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   ]));
 
   let links = app.playlist_sync_links();
-  let mut title = "Playlist sync".to_string();
+  let mut title = app.strings().screens.playlist_sync.to_string();
   if app.playlist_sync_in_flight() {
-    title.push_str(" (syncing...)");
+    title.push_str(app.strings().screens.syncing_suffix);
   }
 
   if links.is_empty() {
-    let empty = Paragraph::new(
-      "No playlist links. Highlight a playlist in the sidebar and press m to mirror it.",
-    )
-    .wrap(Wrap { trim: true })
-    .style(Style::default().fg(theme.hint.into()))
-    .block(
-      Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(title, get_color(highlight_state, theme)))
-        .border_style(get_color(highlight_state, theme)),
-    );
+    let empty = Paragraph::new(app.strings().screens.playlist_links_empty)
+      .wrap(Wrap { trim: true })
+      .style(Style::default().fg(theme.hint.into()))
+      .block(
+        Block::default()
+          .borders(Borders::ALL)
+          .title(Span::styled(title, get_color(highlight_state, theme)))
+          .border_style(get_color(highlight_state, theme)),
+      );
     f.render_widget(empty, links_area);
   } else {
-    let rows: Vec<String> = links.iter().map(link_row).collect();
+    let rows: Vec<String> = links.iter().map(|link| link_row(app, link)).collect();
     draw_selectable_list(
       f,
       app,
@@ -61,31 +59,30 @@ pub fn draw_playlist_sync(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 }
 
 /// One link's row: the master, its source, and the sources it mirrors onto.
-fn link_row(link: &Link) -> String {
+fn link_row(app: &App, link: &Link) -> String {
   let mut mirrors = link
     .mirrors
     .iter()
-    .map(|mirror| mirror.endpoint.source.label())
+    .map(|mirror| app.strings().sidebar.source_label(mirror.endpoint.source))
     .collect::<Vec<&str>>()
     .join(", ");
   if mirrors.is_empty() {
-    mirrors = "no mirrors".to_string();
+    mirrors = app.strings().screens.no_mirrors.to_string();
   }
-  format!(
-    "{} [{}] -> {} ({} unmatched)",
-    link.master.name,
-    link.master.source.label(),
-    mirrors,
-    link.unmatched_count()
+  app.strings().screens.sync_link_row(
+    &link.master.name,
+    app.strings().sidebar.source_label(link.master.source),
+    &mirrors,
+    link.unmatched_count(),
   )
 }
 
 /// What the unmatched line says about a track the last run could not place.
-fn reason_text(reason: &UnmatchReason) -> String {
+fn reason_text(app: &App, reason: &UnmatchReason) -> String {
   match reason {
-    UnmatchReason::NoCandidate => "no match".to_string(),
-    UnmatchReason::NotSyncable => "cannot sync".to_string(),
-    UnmatchReason::SearchFailed(text) => format!("search failed: {text}"),
+    UnmatchReason::NoCandidate => app.strings().screens.sync_no_match.to_string(),
+    UnmatchReason::NotSyncable => app.strings().screens.sync_cannot_match.to_string(),
+    UnmatchReason::SearchFailed(text) => app.strings().screens.sync_search_failed(text),
   }
 }
 
@@ -99,20 +96,27 @@ fn draw_detail(f: &mut Frame<'_>, app: &App, area: Rect) {
         .links
         .iter()
         .find(|entry| entry.id == link.id)
-        .map(|entry| format!("Last run: {}", entry.line()))
+        .map(|entry| {
+          app
+            .strings()
+            .screens
+            .sync_last_run(&entry.line_with(app.strings()))
+        })
     })
-    .unwrap_or_else(|| "Details".to_string());
+    .unwrap_or_else(|| app.strings().screens.details.to_string());
 
   let mut lines: Vec<Line> = Vec::new();
   if let Some(link) = selected {
     for mirror in &link.mirrors {
       lines.push(Line::from(Span::styled(
-        format!(
-          "{}: {} matched, {} unmatched, last run {}",
-          mirror.endpoint.source.label(),
+        app.strings().screens.sync_mirror_detail(
+          app.strings().sidebar.source_label(mirror.endpoint.source),
           mirror.matches.len(),
           mirror.unmatched.len(),
-          mirror.last_run.as_deref().unwrap_or("never")
+          mirror
+            .last_run
+            .as_deref()
+            .unwrap_or(app.strings().screens.never),
         ),
         Style::default().fg(theme.text.into()),
       )));
@@ -122,7 +126,7 @@ fn draw_detail(f: &mut Frame<'_>, app: &App, area: Rect) {
             "  {} - {}: {}",
             entry.title,
             entry.artist,
-            reason_text(&entry.reason)
+            reason_text(app, &entry.reason)
           ),
           Style::default().fg(theme.hint.into()),
         )));
@@ -148,13 +152,13 @@ fn draw_help_bar(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let line = Line::from(vec![
     hint_span("s", theme),
-    label(" Sync now  "),
+    label(app.strings().screens.sync_now_hint),
     hint_span("D", theme),
-    label(" Remove link  "),
+    label(app.strings().screens.remove_link_hint),
     hint_span("↑/↓", theme),
-    label(" Select  "),
+    label(app.strings().screens.select_hint),
     hint_span("←", theme),
-    label(" Back"),
+    label(app.strings().screens.back_hint),
   ]);
 
   f.render_widget(Paragraph::new(line), area);

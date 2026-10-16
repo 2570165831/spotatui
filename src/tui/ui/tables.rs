@@ -2,7 +2,6 @@ use crate::core::app::{
   ActiveBlock, AlbumTableContext, App, EpisodeTableContext, RecommendationsContext,
 };
 use crate::core::plugin_api::{EpisodeInfo, SavedAlbumInfo, ShowInfo, TrackInfo};
-use crate::infra::history::count_label;
 use ratatui::{
   layout::{Constraint, Rect},
   style::{Modifier, Style},
@@ -13,7 +12,9 @@ use ratatui::{
 use rspotify::model::PlayableItem;
 use rspotify::prelude::Id;
 
-use super::columns::{resolve_columns, ResolvedColumn, TableColumnSet};
+#[cfg(test)]
+use super::columns::resolve_columns;
+use super::columns::{resolve_columns_localized, ResolvedColumn, TableColumnSet};
 use super::util::{
   get_color, get_percentage_width, join_artist_names, millis_to_minutes, release_year,
 };
@@ -152,7 +153,7 @@ fn table_columns(app: &App, table: TableColumnSet, layout_width: u16) -> Vec<Res
     TableColumnSet::Episodes => &app.user_config.tables.episodes,
     TableColumnSet::RecentlyPlayed => &app.user_config.tables.recently_played,
   };
-  resolve_columns(table, layout_width, configured)
+  resolve_columns_localized(table, layout_width, configured, &app.strings().screens)
 }
 
 fn table_header(id: TableId, columns: &[ResolvedColumn]) -> TableHeader {
@@ -169,7 +170,11 @@ fn table_header(id: TableId, columns: &[ResolvedColumn]) -> TableHeader {
   }
 }
 
-fn track_table_item(track: &TrackInfo, columns: &[ResolvedColumn]) -> TableItem {
+fn track_table_item(
+  track: &TrackInfo,
+  columns: &[ResolvedColumn],
+  strings: &crate::core::i18n::Strings,
+) -> TableItem {
   TableItem {
     id: track.id.clone().unwrap_or_default(),
     format: columns
@@ -177,7 +182,7 @@ fn track_table_item(track: &TrackInfo, columns: &[ResolvedColumn]) -> TableItem 
       .map(|column| match column.id.as_str() {
         "liked" => String::new(),
         "index" => track.track_number.to_string(),
-        "title" => track.name.clone(),
+        "title" => track.display_name(strings).to_owned(),
         "artist" => track.artists.join(", "),
         "album" => track.album.clone(),
         "length" => millis_to_minutes(track.duration_ms as u128),
@@ -278,21 +283,20 @@ pub fn draw_local_browser(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .iter()
     .map(|folder| {
       if folder.track_count > 0 {
-        format!(
-          "{} ({})",
-          folder.name,
-          count_label(folder.track_count as u64, "track", "tracks")
-        )
+        app
+          .strings()
+          .screens
+          .folder_tracks(folder.display_name(app.strings()), folder.track_count)
       } else {
-        folder.name.clone()
+        folder.display_name(app.strings()).to_string()
       }
     })
     .collect();
 
   let title = if app.local_playlists().is_empty() {
-    "Local Files (no folders — set behavior.local_music_path)"
+    app.strings().screens.local_files_empty
   } else {
-    "Local Files"
+    app.strings().screens.local_files
   };
 
   super::util::draw_selectable_list(
@@ -310,7 +314,7 @@ pub fn draw_artist_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::Artist,
     items: vec![TableHeaderItem {
-      text: "Artist".to_string(),
+      text: app.strings().screens.artist.to_string(),
       width: get_percentage_width(layout_chunk.width, 1.0),
       ..Default::default()
     }],
@@ -337,7 +341,7 @@ pub fn draw_artist_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     f,
     app,
     layout_chunk,
-    ("Artists", &header),
+    (app.strings().screens.artists, &header),
     &items,
     app.view.artists_list_index,
     offset,
@@ -372,7 +376,7 @@ pub fn draw_podcast_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      ("Podcasts", &header),
+      (app.strings().screens.podcasts, &header),
       &items,
       app.view.shows_list_index,
       offset,
@@ -383,7 +387,7 @@ pub fn draw_podcast_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      ("Podcasts", &header),
+      (app.strings().screens.podcasts, &header),
       &[],
       app.view.shows_list_index,
       0,
@@ -417,12 +421,11 @@ pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
           AlbumUi {
             items: visible
               .iter()
-              .map(|item| track_table_item(item, &columns))
+              .map(|item| track_table_item(item, &columns, app.strings()))
               .collect::<Vec<TableItem>>(),
-            title: format!(
-              "{} by {}",
-              selected_album_simplified.album.name,
-              join_artist_names(&selected_album_simplified.album.artists)
+            title: app.strings().screens.title_by_artist(
+              &selected_album_simplified.album.name,
+              &join_artist_names(&selected_album_simplified.album.artists),
             ),
             selected_index: selected_album_simplified.selected_index,
             offset,
@@ -439,12 +442,11 @@ pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       AlbumUi {
         items: visible
           .iter()
-          .map(|item| track_table_item(item, &columns))
+          .map(|item| track_table_item(item, &columns, app.strings()))
           .collect::<Vec<TableItem>>(),
-        title: format!(
-          "{} by {}",
-          selected_album.album.name,
-          join_artist_names(&selected_album.album.artists)
+        title: app.strings().screens.title_by_artist(
+          &selected_album.album.name,
+          &join_artist_names(&selected_album.album.artists),
         ),
         selected_index: app.view.saved_album_tracks_index,
         offset,
@@ -485,19 +487,19 @@ pub fn draw_recommendations_table(f: &mut Frame<'_>, app: &App, layout_chunk: Re
   );
   let items = visible
     .iter()
-    .map(|item| track_table_item(item, &columns))
+    .map(|item| track_table_item(item, &columns, app.strings()))
     .collect::<Vec<TableItem>>();
   // match RecommendedContext
   let recommendations_ui = match &app.recommendations_context {
-    Some(RecommendationsContext::Song) => format!(
-      "Recommendations based on Song \'{}\'",
-      app.recommendations_seed
-    ),
-    Some(RecommendationsContext::Artist) => format!(
-      "Recommendations based on Artist \'{}\'",
-      app.recommendations_seed
-    ),
-    None => "Recommendations".to_string(),
+    Some(RecommendationsContext::Song) => app
+      .strings()
+      .screens
+      .recommendations_song(&app.recommendations_seed),
+    Some(RecommendationsContext::Artist) => app
+      .strings()
+      .screens
+      .recommendations_artist(&app.recommendations_seed),
+    None => app.strings().screens.recommendations.to_string(),
   };
   draw_table(
     f,
@@ -530,21 +532,21 @@ pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   );
   let items = visible
     .iter()
-    .map(|item| track_table_item(item, &columns))
+    .map(|item| track_table_item(item, &columns, app.strings()))
     .collect::<Vec<TableItem>>();
 
   let title = if app.is_playlist_track_table_context() {
     if let Some(query) = app.pending_playlist_track_search.as_ref() {
-      format!("Songs (searching: {query}...)")
+      app.strings().screens.songs_searching(query)
     } else {
       app
         .active_playlist_track_filter
         .as_ref()
-        .map(|query| format!("Songs (filtered: {query})"))
-        .unwrap_or_else(|| "Songs".to_string())
+        .map(|query| app.strings().screens.songs_filtered(query))
+        .unwrap_or_else(|| app.strings().screens.songs.to_string())
     }
   } else {
-    "Songs".to_string()
+    app.strings().screens.songs.to_string()
   };
 
   draw_table(
@@ -584,7 +586,7 @@ pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      ("Saved Albums", &header),
+      (app.strings().screens.saved_albums, &header),
       &items,
       selected_song_index,
       offset,
@@ -595,7 +597,7 @@ pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       f,
       app,
       layout_chunk,
-      ("Saved Albums", &header),
+      (app.strings().screens.saved_albums, &header),
       &[],
       selected_song_index,
       0,
@@ -617,22 +619,18 @@ pub fn draw_show_episodes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 
   let title = match &app.episode_table_context {
     EpisodeTableContext::Simplified => match &app.selected_show_simplified {
-      Some(selected_show) => {
-        format!(
-          "{} by {}",
-          selected_show.show.name, selected_show.show.publisher
-        )
-      }
-      None => "Episodes".to_owned(),
+      Some(selected_show) => app
+        .strings()
+        .screens
+        .title_by_artist(&selected_show.show.name, &selected_show.show.publisher),
+      None => app.strings().screens.episodes.to_owned(),
     },
     EpisodeTableContext::Full => match &app.selected_show_full {
-      Some(selected_show) => {
-        format!(
-          "{} by {}",
-          selected_show.show.name, selected_show.show.publisher
-        )
-      }
-      None => "Episodes".to_owned(),
+      Some(selected_show) => app
+        .strings()
+        .screens
+        .title_by_artist(&selected_show.show.name, &selected_show.show.publisher),
+      None => app.strings().screens.episodes.to_owned(),
     },
   };
 
@@ -694,14 +692,14 @@ pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Re
     );
     let items = visible
       .iter()
-      .map(|item| track_table_item(item, &columns))
+      .map(|item| track_table_item(item, &columns, app.strings()))
       .collect::<Vec<TableItem>>();
 
     draw_table(
       f,
       app,
       layout_chunk,
-      ("Recently Played Tracks", &header),
+      (app.strings().screens.recent_tracks, &header),
       &items,
       selected_song_index,
       offset,
@@ -712,7 +710,7 @@ pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Re
       f,
       app,
       layout_chunk,
-      ("Recently Played Tracks", &header),
+      (app.strings().screens.recent_tracks, &header),
       &[],
       selected_song_index,
       0,
@@ -859,6 +857,7 @@ mod tests {
 
   fn folder(name: &str, track_count: u32) -> PlaylistInfo {
     PlaylistInfo {
+      generated_name: None,
       uri: format!("file:///music/{name}"),
       name: name.to_string(),
       owner: "local".to_string(),
@@ -873,6 +872,7 @@ mod tests {
 
   fn track(i: u32) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(format!("spotify:track:{i:022}")),
       name: format!("Track {i}"),
       artists: vec![format!("Artist {i}")],
@@ -913,7 +913,7 @@ mod tests {
     );
     for date in ["1997", "1997-01", "1997-01-20"] {
       assert_eq!(
-        track_table_item(&dated(Some(date)), &columns).format,
+        track_table_item(&dated(Some(date)), &columns, &crate::core::i18n::EN).format,
         ["Track 1", "1997"],
         "{date}"
       );
@@ -925,7 +925,7 @@ mod tests {
     let columns = resolve_columns(TableColumnSet::Songs, 80, &[column("year")]);
     for date in [None, Some(""), Some("0000")] {
       assert_eq!(
-        track_table_item(&dated(date), &columns).format,
+        track_table_item(&dated(date), &columns, &crate::core::i18n::EN).format,
         [""],
         "{date:?}"
       );
@@ -1081,5 +1081,30 @@ mod tests {
   #[test]
   fn show_episodes_draws_an_empty_titled_table_before_data_loads() {
     assert_empty_titled_table(draw_show_episodes, "Episodes");
+  }
+  #[test]
+  fn cached_generated_track_titles_follow_language_in_table_cells_without_renaming_user_tracks() {
+    use crate::core::i18n::Language;
+    use crate::core::plugin_api::GeneratedTrackName;
+    let mut app = App::default();
+    let mut generated = track(0);
+    generated.name = "Unknown Track".into();
+    generated.generated_name = Some(GeneratedTrackName::LocalUnknown);
+    let mut user = generated.clone();
+    user.generated_name = None;
+    let columns = resolve_columns(TableColumnSet::Songs, 80, &[column("title")]);
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      assert_eq!(
+        track_table_item(&generated, &columns, app.strings()).format,
+        [app.strings().status.infra.local_unknown_track]
+      );
+      assert_eq!(
+        track_table_item(&user, &columns, app.strings()).format,
+        ["Unknown Track"]
+      );
+      assert_eq!(generated.name, "Unknown Track");
+    }
   }
 }

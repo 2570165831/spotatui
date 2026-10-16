@@ -413,6 +413,7 @@ fn video_to_track_info(v: &YtVideo) -> TrackInfo {
     .to_string();
 
   TrackInfo {
+    generated_name: None,
     uri: Some(uri_for_video_id(&v.id)),
     name: v.title.trim().to_string(),
     artists: if channel.is_empty() {

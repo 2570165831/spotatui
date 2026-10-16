@@ -375,7 +375,13 @@ impl Network {
     if let Err(e) = load_session_tracks(player, order, 0, 0, true) {
       let mut app = self.app.lock().await;
       app.clear_native_shuffle_session();
-      app.handle_error(anyhow!("Failed to start native playback: {}", e));
+      {
+        let strings = app.strings();
+        app.handle_error_with_message(
+          anyhow!("Failed to start native playback: {}", e),
+          strings.status.infra.native_start_failed(&e.to_string()),
+        )
+      };
       return true;
     }
     if let Some(kind) = fetch {
@@ -485,11 +491,15 @@ impl Network {
       Action::Reload(player, order, index, seek_ms, start_playing) => {
         if let Err(e) = load_session_tracks(&player, order, index, seek_ms, start_playing) {
           clear_pending_reload(&self.app).await;
-          self
-            .app
-            .lock()
-            .await
-            .handle_error(anyhow!("Failed to apply shuffle: {}", e));
+          {
+            let mut app = self.app.lock().await;
+            let message = app
+              .strings()
+              .status
+              .infra
+              .native_shuffle_failed(&e.to_string());
+            app.handle_error_with_message(anyhow!("Failed to apply shuffle: {}", e), message);
+          };
         }
       }
       Action::Build {
@@ -580,7 +590,13 @@ impl Network {
           if let Err(e) = load_session_tracks(&player, order, 0, seek_ms, is_playing) {
             let mut app = self.app.lock().await;
             app.clear_native_shuffle_session();
-            app.handle_error(anyhow!("Failed to apply shuffle: {}", e));
+            {
+              let strings = app.strings();
+              app.handle_error_with_message(
+                anyhow!("Failed to apply shuffle: {}", e),
+                strings.status.infra.native_shuffle_failed(&e.to_string()),
+              )
+            };
           }
         }
       }
@@ -666,7 +682,10 @@ impl Network {
               player.map(|p| (p, session.order.clone(), index))
             }
             _ => {
-              guard.set_status_message("Queue finished", 3);
+              {
+                let strings = guard.strings();
+                guard.set_status_message(strings.status.infra.queue_finished, 3)
+              };
               None
             }
           }
@@ -676,7 +695,10 @@ impl Network {
           // newer session replaced it, leave that one playing untouched;
           // otherwise the session is simply gone, so note the queue finished.
           if guard.native_spotify_shuffle.is_none() {
-            guard.set_status_message("Queue finished", 3);
+            {
+              let strings = guard.strings();
+              guard.set_status_message(strings.status.infra.queue_finished, 3)
+            };
           }
           None
         }
@@ -686,7 +708,10 @@ impl Network {
           if session_matches {
             guard.clear_native_shuffle_session();
           }
-          guard.set_status_message("Queue finished", 3);
+          {
+            let strings = guard.strings();
+            guard.set_status_message(strings.status.infra.queue_finished, 3)
+          };
           None
         }
       };
@@ -702,11 +727,15 @@ impl Network {
       // The queue drained, so resume playback regardless of prior pause state.
       if let Err(e) = load_session_tracks(&player, order, index, 0, true) {
         clear_pending_reload(&self.app).await;
-        self
-          .app
-          .lock()
-          .await
-          .handle_error(anyhow!("Failed to resume playback: {}", e));
+        {
+          let mut app = self.app.lock().await;
+          let message = app
+            .strings()
+            .status
+            .infra
+            .native_resume_failed(&e.to_string());
+          app.handle_error_with_message(anyhow!("Failed to resume playback: {}", e), message);
+        };
       }
     }
   }
@@ -870,6 +899,7 @@ async fn finish_full_context_fetch(
       }
       _ => None,
     };
+    let strings = guard.strings();
     let mut status: Option<String> = None;
     // When the session is suspended behind the queue, the new play order is
     // still folded in but Spirc is not reloaded; this carries the re-pointed
@@ -903,7 +933,7 @@ async fn finish_full_context_fetch(
           // of silently degrading (the queue-suspend path now falls back to
           // the context route, see `suspend_native_spotify_context_for_queue`).
           if session.order.len() <= 1 {
-            status = Some("Shuffle: failed to load the context's track list".to_string());
+            status = Some(strings.status.infra.shuffle_context_failed.to_string());
             convert_suspend_to_context = true;
           }
           // A shuffle-off deferred to fetch completion still needs applying, or
@@ -997,9 +1027,12 @@ async fn finish_full_context_fetch(
             session.order = merged;
             session.index = index;
             if truncated {
-              status = Some(format!(
-                "Large context: shuffling the first {MAX_NATIVE_SHUFFLE_TRACKS} tracks"
-              ));
+              status = Some(
+                strings
+                  .status
+                  .infra
+                  .shuffle_capped(MAX_NATIVE_SHUFFLE_TRACKS),
+              );
             }
             session.pending_reload = Some(PendingNativeShuffleReload { index, seek_ms });
             Some((session.order.clone(), index))

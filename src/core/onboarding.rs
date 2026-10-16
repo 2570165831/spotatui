@@ -11,6 +11,7 @@
 //! The retry loops, validation, and persistence stay with the callers - this
 //! trait is only the presentation boundary.
 
+use crate::core::i18n::{Language, Strings, EN};
 use crate::core::source::Source;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,16 @@ pub(crate) fn confirm_answer(raw: &str) -> OnboardingAnswer {
 }
 
 pub trait Onboarding: Send + Sync {
+  /// UI text for this frontend's resolved language. Scripted and headless
+  /// callers keep the historical English surface unless they opt in.
+  fn strings(&self) -> &'static Strings {
+    &EN
+  }
+
+  /// Select the resolved language after configuration has been loaded.
+  /// Frontends with their own language state may keep that selection instead.
+  fn set_language(&self, _language: Language) {}
+
   /// Whether this frontend can ask questions at all. The terminal frontend
   /// checks stdin and stdout; a windowed frontend answers true while its
   /// event loop runs.

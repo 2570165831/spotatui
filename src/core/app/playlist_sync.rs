@@ -97,7 +97,7 @@ impl App {
   /// `D` on the sync screen: confirm removing the highlighted link.
   pub fn begin_remove_playlist_sync_link(&mut self) {
     let Some(link) = self.selected_playlist_sync_link() else {
-      self.set_status_message("No playlist link is highlighted", 4);
+      self.set_status_message(self.strings().status.app.no_playlist_link, 4);
       return;
     };
     let (id, name) = (link.id.clone(), link.master.name.clone());
@@ -119,19 +119,19 @@ impl App {
   /// `m` on a sidebar playlist: open the mirror picker for it.
   pub fn begin_playlist_sync_picker(&mut self) {
     let Some(master) = self.selected_sidebar_playlist_endpoint() else {
-      self.set_status_message("Highlight a playlist to mirror it", 4);
+      self.set_status_message(self.strings().status.app.highlight_playlist_mirror, 4);
       return;
     };
     let availability = self.availability(Requirement::Capability(Capability::PlaylistSync));
-    if let Some(hint) = availability.hint() {
-      self.set_status_message(format!("Playlist sync: {hint}"), 4);
+    if let Some(hint) = availability.localized_hint(self.strings()) {
+      self.set_status_message(self.strings().status.app.sync_hint(&hint), 4);
       return;
     }
     self.clear_dialog_state();
     self.pending_playlist_sync_master = Some(master);
     if self.playlist_sync_picker_sources().is_empty() {
       self.pending_playlist_sync_master = None;
-      self.set_status_message("No other source can take a mirror of this playlist", 4);
+      self.set_status_message(self.strings().status.app.no_mirror_source, 4);
       return;
     }
     self.push_navigation_stack(
@@ -150,7 +150,11 @@ impl App {
       return;
     };
     self.set_status_message(
-      format!("Mirroring {} onto {}", master.name, mirror.label()),
+      self
+        .strings()
+        .status
+        .app
+        .mirroring(&master.name, self.strings().sidebar.source_label(mirror)),
       8,
     );
     self.dispatch(IoEvent::LinkPlaylist(master, mirror));

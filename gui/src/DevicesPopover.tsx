@@ -1,3 +1,4 @@
+import { deviceKind, EN, type GuiStrings } from "./i18n";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { Action } from "./bindings/Action";
 import type { DeviceInfo } from "./bindings/DeviceInfo";
@@ -5,11 +6,13 @@ import { Glyph } from "./Icon";
 
 /** The device picker above the devices button. Clicks inside its parent, the button's box, are not outside clicks. */
 export function DevicesPopover({
+  s = EN,
   devices,
   current,
   send,
   onClose,
 }: {
+  s?: GuiStrings;
   devices: DeviceInfo[];
   /** The name of the device that plays now. */
   current: string | null;
@@ -51,21 +54,21 @@ export function DevicesPopover({
       ref={root}
       className="devices-popover"
       role="dialog"
-      aria-label="Devices"
+      aria-label={s.devices}
     >
-      <h2>Connect to a device</h2>
+      <h2>{s.connect_device}</h2>
       {active && (
         <div className="device-current">
           <Glyph name="devices" size={28} />
           <span>
-            <strong>Current device</strong>
+            <strong>{s.current_device}</strong>
             <span>{active}</span>
           </span>
         </div>
       )}
-      <h3>Select another device</h3>
+      <h3>{s.select_other_device}</h3>
       {others.length === 0 ? (
-        <p className="device-empty">No other devices found.</p>
+        <p className="device-empty">{s.no_other_devices}</p>
       ) : (
         <ul>
           {others.map((device) => (
@@ -84,7 +87,7 @@ export function DevicesPopover({
                 <Glyph name="devices" size={20} />
                 <span>
                   <strong>{device.name}</strong>
-                  <span>{device.kind}</span>
+                  <span>{deviceKind(device.kind, s)}</span>
                 </span>
               </button>
             </li>

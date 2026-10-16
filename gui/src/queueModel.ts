@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { QueueItemSnapshot } from "./bindings/QueueItemSnapshot";
 import type { TrackInfo } from "./bindings/TrackInfo";
@@ -24,14 +25,17 @@ export function trackLine(track: TrackInfo): QueueLine {
 }
 
 /** A Spotify queue item's row; null for an item with no payload. */
-export function itemLine(item: QueueItemSnapshot): QueueLine | null {
+export function itemLine(
+  item: QueueItemSnapshot,
+  s: GuiStrings = EN,
+): QueueLine | null {
   if (item.track) return trackLine(item.track);
   const episode = item.episode;
   if (!episode) return null;
   return {
     uri: episode.uri,
     title: episode.name,
-    subtitle: episode.show_name || "Podcast episode",
+    subtitle: episode.show_name || s.podcast_episode,
     image: episode.image_url,
     duration_ms: episode.duration_ms,
   };

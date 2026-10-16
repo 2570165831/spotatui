@@ -572,20 +572,21 @@ impl LibraryTarget {
     LibraryTarget::AiDj,
   ];
 
-  /// The sidebar label for this target.
-  pub fn name(self) -> &'static str {
+  /// The sidebar label in the selected language.
+  pub fn localized_name(self, strings: &crate::core::i18n::Strings) -> &'static str {
+    let sidebar = &strings.sidebar;
     match self {
-      LibraryTarget::Discover => "Discover",
-      LibraryTarget::RecentlyPlayed => "Recently Played",
-      LibraryTarget::Friends => "Friends",
-      LibraryTarget::Stats => "Stats",
-      LibraryTarget::PlaylistSync => "Playlist sync",
-      LibraryTarget::LikedSongs => "Liked Songs",
-      LibraryTarget::Albums => "Albums",
-      LibraryTarget::Artists => "Artists",
-      LibraryTarget::Podcasts => "Podcasts",
-      LibraryTarget::LocalFiles => "Local Files",
-      LibraryTarget::AiDj => "AI DJ",
+      LibraryTarget::Discover => sidebar.discover,
+      LibraryTarget::RecentlyPlayed => sidebar.recently_played,
+      LibraryTarget::Friends => sidebar.friends,
+      LibraryTarget::Stats => sidebar.stats,
+      LibraryTarget::PlaylistSync => sidebar.playlist_sync,
+      LibraryTarget::LikedSongs => sidebar.liked_songs,
+      LibraryTarget::Albums => sidebar.albums,
+      LibraryTarget::Artists => sidebar.artists,
+      LibraryTarget::Podcasts => sidebar.podcasts,
+      LibraryTarget::LocalFiles => sidebar.local_files,
+      LibraryTarget::AiDj => sidebar.ai_dj,
     }
   }
 }

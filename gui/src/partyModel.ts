@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { PartyPayload } from "./bindings/PartyPayload";
 import type { PartyRoom } from "./bindings/PartyRoom";
@@ -25,11 +26,15 @@ export function joinRequest(code: string, name: string): Action | null {
 }
 
 /** "You host · 3 listening" counts the host; a guest names the room it follows. */
-export function headline(party: PartyPayload): string {
+export function headline(party: PartyPayload, s: GuiStrings = EN): string {
   const room = party.room;
-  if (!room) return party.phase === "connecting" ? "Connecting…" : "";
-  if (room.host) return `You host · ${room.guests.length + 1} listening`;
-  return `You follow ${room.host_name || "the host"}${room.code ? ` · room ${room.code}` : ""}`;
+  if (!room) return party.phase === "connecting" ? s.connecting : "";
+  if (room.host)
+    return fmt(s.host_listening, { count: room.guests.length + 1 });
+  return (
+    fmt(s.follow_host, { name: room.host_name || s.the_host }) +
+    (room.code ? fmt(s.room_code_suffix, { code: room.code }) : "")
+  );
 }
 
 export interface Listener {
@@ -40,20 +45,21 @@ export interface Listener {
 }
 
 /** You first, then the others; a guest learns only who joined after it. */
-export function listeners(room: PartyRoom): Listener[] {
+export function listeners(room: PartyRoom, s: GuiStrings = EN): Listener[] {
   const others = room.host
-    ? room.guests.map((name) => ({ name, role: "guest" }))
+    ? room.guests.map((name) => ({ name, role: s.guest_role }))
     : [
-        { name: room.host_name || "Host", role: "host" },
-        ...room.guests.map((name) => ({ name, role: "guest" })),
+        { name: room.host_name || s.host, role: s.host_role },
+        ...room.guests.map((name) => ({ name, role: s.guest_role })),
       ];
-  return [{ name: "You", role: room.host ? "host" : "guest" }, ...others].map(
-    (listener) => ({
-      ...listener,
-      initial: listener.name.charAt(0).toUpperCase() || "?",
-      hue: hue(listener.name),
-    }),
-  );
+  return [
+    { name: s.you, role: room.host ? s.host_role : s.guest_role },
+    ...others,
+  ].map((listener) => ({
+    ...listener,
+    initial: listener.name.charAt(0).toUpperCase() || "?",
+    hue: hue(listener.name),
+  }));
 }
 
 function hue(name: string): number {

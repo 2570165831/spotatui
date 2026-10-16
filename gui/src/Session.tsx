@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, sourceLabel, sourceBadge } from "./i18n";
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { NowPlaying } from "./bindings/NowPlaying";
@@ -28,6 +29,7 @@ const NEXT_COVERS = 5;
 
 /** This listening session as a line: what played, what plays, what comes next. */
 export function Session({
+  s = EN,
   plays,
   item,
   position,
@@ -36,6 +38,7 @@ export function Session({
   active,
   send,
 }: {
+  s?: GuiStrings;
   plays: SessionPlay[];
   item: NowPlaying | null;
   position: Position | null;
@@ -109,16 +112,20 @@ export function Session({
   return (
     <div className="session" tabIndex={-1}>
       <div className="session-head">
-        <h1>This session</h1>
-        <span>{headline(plays, item?.uri ?? null)}</span>
-        <kbd>enter replay from here · J K reorder · x remove</kbd>
+        <h1>{s.this_session}</h1>
+        <span>{headline(plays, item?.uri ?? null, s)}</span>
+        <kbd>{s.session_keys}</kbd>
       </div>
 
-      <div className="timeline" aria-label="Timeline">
+      <div className="timeline" aria-label={s.timeline}>
         <div className="lane past">
-          <span className="label">Played</span>
+          <span className="label">{s.played}</span>
           <div className="covers">
-            {firstShown > 0 && <span className="more">+{firstShown} more</span>}
+            {firstShown > 0 && (
+              <span className="more">
+                +{firstShown} {s.more}
+              </span>
+            )}
             {recent.map((entry, index) => {
               const at = firstShown + index;
               const marks = found.filter((mark) => mark.before === at);
@@ -130,10 +137,10 @@ export function Session({
                       type="button"
                       className={`marker ${marker.kind}`}
                       style={{ marginTop: stack * 14 }}
-                      aria-label={markerTitle(marker)}
+                      aria-label={markerTitle(marker, s)}
                       onClick={() => setInspect(marker)}
                     >
-                      <span>{markerLabel(marker)}</span>
+                      <span>{markerLabel(marker, s)}</span>
                     </button>
                   ))}
                   <CoverCard
@@ -153,16 +160,16 @@ export function Session({
                   type="button"
                   className={`marker ${marker.kind}`}
                   style={{ marginTop: stack * 14 }}
-                  aria-label={markerTitle(marker)}
+                  aria-label={markerTitle(marker, s)}
                   onClick={() => setInspect(marker)}
                 >
-                  <span>{markerLabel(marker)}</span>
+                  <span>{markerLabel(marker, s)}</span>
                 </button>
               ))}
           </div>
         </div>
         <div className="lane now">
-          <span className="label">Now playing</span>
+          <span className="label">{s.now_playing}</span>
           {item ? (
             <div className="now-block">
               {item.image_url ? (
@@ -174,15 +181,15 @@ export function Session({
               <span>
                 {item.artists.join(", ")} ·{" "}
                 {clock(Math.min(ms, item.duration_ms || ms))} /{" "}
-                {item.is_live ? "live" : clock(item.duration_ms)}
+                {item.is_live ? s.live : clock(item.duration_ms)}
               </span>
             </div>
           ) : (
-            <p className="empty">Nothing is playing.</p>
+            <p className="empty">{s.nothing_is_playing}</p>
           )}
         </div>
         <div className="lane upcoming">
-          <span className="label">Coming up</span>
+          <span className="label">{s.coming_up}</span>
           <div className="covers">
             {upNext.slice(0, NEXT_COVERS).map((track, index) => (
               <CoverCard
@@ -205,28 +212,28 @@ export function Session({
         <div
           className="marker-dialog"
           role="dialog"
-          aria-label="Marker details"
+          aria-label={s.marker_details}
         >
-          <span className="label">{markerHeading(inspect, plays)}</span>
-          <span>{markerDetail(inspect, plays)}</span>
+          <span className="label">{markerHeading(inspect, plays, s)}</span>
+          <span>{markerDetail(inspect, plays, s)}</span>
           <button type="button" onClick={() => setInspect(null)}>
-            Close
+            {s.close}
           </button>
         </div>
       )}
 
       <div className="session-lists">
-        <section aria-label="Earlier">
+        <section aria-label={s.earlier}>
           <div className="section-head">
-            <h2>Earlier</h2>
-            <kbd>enter replay from here</kbd>
+            <h2>{s.earlier}</h2>
+            <kbd>{s.replay_hint}</kbd>
           </div>
           {newestFirst.length === 0 ? (
-            <p className="empty">Nothing has finished playing yet.</p>
+            <p className="empty">{s.nothing_finished}</p>
           ) : (
             <ol
               role="listbox"
-              aria-label="Earlier"
+              aria-label={s.earlier}
               aria-activedescendant={`earlier-${earlier}`}
               tabIndex={0}
               data-focus
@@ -252,26 +259,26 @@ export function Session({
                       <b>{entry.title}</b>
                       <span>{entry.artists.join(", ")}</span>
                     </span>
-                    {source && <SourceBadge source={source} />}
+                    {source && <SourceBadge s={s} source={source} />}
                   </li>
                 );
               })}
             </ol>
           )}
         </section>
-        <section aria-label="Up next">
+        <section aria-label={s.up_next}>
           <div className="section-head">
-            <h2>Up next</h2>
-            <kbd>J K move · x remove</kbd>
+            <h2>{s.up_next}</h2>
+            <kbd>{s.queue_keys}</kbd>
           </div>
           {upNext.length === 0 ? (
-            <p className="empty">Nothing is queued.</p>
+            <p className="empty">{s.nothing_queued}</p>
           ) : (
             <>
               {native.length > 0 && (
                 <ol
                   role="listbox"
-                  aria-label="Your queue"
+                  aria-label={s.your_queue}
                   aria-activedescendant={`session-q-${next}`}
                   tabIndex={0}
                   data-focus={newestFirst.length === 0 ? true : undefined}
@@ -286,6 +293,7 @@ export function Session({
                 >
                   {native.map((track, index) => (
                     <NextRow
+                      s={s}
                       key={`${index}-${track.uri ?? track.name}`}
                       id={`session-q-${index}`}
                       track={track}
@@ -300,6 +308,7 @@ export function Session({
               <ol className="mirror">
                 {upNext.slice(native.length).map((track, index) => (
                   <NextRow
+                    s={s}
                     key={`${index}-${track.uri ?? track.name}`}
                     track={track}
                     start={starts[native.length + index] ?? null}
@@ -313,7 +322,7 @@ export function Session({
         </section>
       </div>
       <KeyHints
-        hints={["j k move", "enter replay or play", "J K reorder", "x remove"]}
+        hints={[s.hint_move, s.hint_replay_play, s.hint_reorder, s.hint_remove]}
       />
     </div>
   );
@@ -340,6 +349,7 @@ function CoverCard({
 }
 
 function NextRow({
+  s = EN,
   id,
   track,
   start,
@@ -347,6 +357,7 @@ function NextRow({
   movable,
   onPick,
 }: {
+  s?: GuiStrings;
   id?: string;
   track: TrackInfo;
   start: number | null;
@@ -373,38 +384,61 @@ function NextRow({
         <b>{track.name}</b>
         <span>{track.artists.join(", ")}</span>
       </span>
-      {source && <SourceBadge source={source} />}
+      {source && <SourceBadge s={s} source={source} />}
     </li>
   );
 }
 
-function markerLabel(marker: Marker): string {
+function markerLabel(marker: Marker, s: GuiStrings = EN): string {
   if (marker.kind === "source")
-    return `${(marker.from ?? "?").toUpperCase()} → ${(marker.to ?? "?").toUpperCase()}`;
+    return `${marker.from ? sourceBadge(marker.from, s) : "?"} → ${marker.to ? sourceBadge(marker.to, s) : "?"}`;
   return marker.kind === "gap"
-    ? `${marker.minutes} min gap`
-    : `paused ${marker.minutes} min`;
+    ? fmt(s.gap_minutes, { minutes: marker.minutes ?? "undefined" })
+    : fmt(s.paused_minutes, { minutes: marker.minutes ?? "undefined" });
 }
 
-function markerTitle(marker: Marker): string {
-  if (marker.kind === "pause") return `Paused about ${marker.minutes} min`;
-  const what = marker.kind === "source" ? "Source change" : "Gap";
-  return `${what} at ${timeOfDay(marker.at)}`;
+function markerTitle(marker: Marker, s: GuiStrings = EN): string {
+  if (marker.kind === "pause")
+    return fmt(s.paused_about, { minutes: marker.minutes ?? "undefined" });
+  const what = marker.kind === "source" ? s.source_change : s.gap;
+  return fmt(s.marker_at, { what, time: timeOfDay(marker.at) });
 }
 
 /** A pause inside a play has a length but no known clock time, so it names the song. */
-function markerHeading(marker: Marker, plays: SessionPlay[]): string {
+function markerHeading(
+  marker: Marker,
+  plays: SessionPlay[],
+  s: GuiStrings = EN,
+): string {
   if (marker.kind === "pause")
-    return `Paused during ${plays[marker.before - 1]?.title ?? "a song"}`;
-  const what = marker.kind === "source" ? "Source change" : "Gap";
+    return fmt(s.paused_during, {
+      title: plays[marker.before - 1]?.title ?? s.a_song,
+    });
+  const what = marker.kind === "source" ? s.source_change : s.gap;
   return `${what} · ${timeOfDay(marker.at)}`;
 }
 
-function markerDetail(marker: Marker, plays: SessionPlay[]): string {
+function markerDetail(
+  marker: Marker,
+  plays: SessionPlay[],
+  s: GuiStrings = EN,
+): string {
   const after = plays[marker.before];
   if (marker.kind === "pause")
-    return `The song was paused for about ${marker.minutes} min in total.`;
+    return fmt(s.pause_detail, { minutes: marker.minutes ?? "undefined" });
   if (marker.kind === "gap")
-    return `Nothing was recorded for about ${marker.minutes} min: playback stopped, or it played something the history does not keep, such as an episode.${after ? ` Then ${after.title} played.` : ""}`;
-  return `${marker.from} → ${marker.to}.${after ? ` ${after.title} played from ${marker.to}.` : ""}`;
+    return fmt(s.gap_detail, {
+      minutes: marker.minutes ?? "undefined",
+      after: after ? fmt(s.then_played, { title: after.title }) : "",
+    });
+  return fmt(s.source_detail, {
+    from: marker.from ? sourceLabel(marker.from, s) : "undefined",
+    to: marker.to ? sourceLabel(marker.to, s) : "undefined",
+    after: after
+      ? fmt(s.played_from, {
+          title: after.title,
+          source: marker.to ? sourceLabel(marker.to, s) : "undefined",
+        })
+      : "",
+  });
 }

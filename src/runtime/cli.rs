@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 pub(super) fn boot_options(matches: &ArgMatches) -> BootOptions {
   BootOptions {
+    system_language: None,
     config_path: matches.get_one::<String>("config").map(PathBuf::from),
     tick_rate: matches.get_one::<u64>("tick-rate").copied(),
     subcommand: matches.subcommand_name().map(str::to_owned),

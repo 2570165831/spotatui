@@ -1,6 +1,6 @@
 use crate::core::app::{ActiveBlock, App, RecapPromptState, SessionPlay};
 use crate::infra::media_metadata::{
-  current_playback_snapshot, PlaybackItemKind, PlaybackSnapshot, PlaybackSource,
+  tracking_playback_snapshot, PlaybackItemKind, PlaybackSnapshot, PlaybackSource,
 };
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
@@ -318,10 +318,12 @@ const MOVEMENT_TOP: u32 = 10;
 const WEEK_TRACKS: usize = 5;
 
 /// `filtered` is the selected period's qualified listens and `listens` every recorded one.
-pub fn build_stats_data(
+/// Build frontend details from counts and durations in the selected language.
+pub fn build_stats_data_with(
   filtered: &[ListenRecord],
   listens: &[ListenRecord],
   period: RecapPeriod,
+  strings: &crate::core::i18n::Strings,
 ) -> StatsData {
   let now = Local::now();
   let qualified: Vec<ListenRecord> = listens
@@ -334,13 +336,13 @@ pub fn build_stats_data(
     .filter(|record| in_period(record, RecapPeriod::SevenDays, &now))
     .cloned()
     .collect();
-  let top_artists = aggregate_top_artists(filtered, STATS_LIST_LIMIT);
-  let all_time = aggregate_top_artists(&qualified, usize::MAX);
-  let in_period_ranks = aggregate_top_artists(filtered, usize::MAX);
+  let top_artists = aggregate_top_artists_with(filtered, STATS_LIST_LIMIT, strings);
+  let all_time = aggregate_top_artists_with(&qualified, usize::MAX, strings);
+  let in_period_ranks = aggregate_top_artists_with(filtered, usize::MAX, strings);
   StatsData {
     total_plays: filtered.len(),
     total_time_ms: filtered.iter().map(|record| record.listened_ms).sum(),
-    top_tracks: aggregate_top_tracks(filtered, STATS_LIST_LIMIT),
+    top_tracks: aggregate_top_tracks_with(filtered, STATS_LIST_LIMIT, strings),
     artist_ranks: artist_ranks(&top_artists, &all_time),
     movements: if period == RecapPeriod::All {
       Vec::new()
@@ -348,8 +350,8 @@ pub fn build_stats_data(
       artist_movements(&in_period_ranks, &all_time)
     },
     top_artists,
-    top_albums: aggregate_top_albums(filtered, STATS_LIST_LIMIT),
-    days: aggregate_days(filtered),
+    top_albums: aggregate_top_albums_with(filtered, STATS_LIST_LIMIT, strings),
+    days: aggregate_days_with(filtered, strings),
     period_plays: RecapPeriod::ALL_PERIODS
       .iter()
       .map(|&each| {
@@ -360,7 +362,7 @@ pub fn build_stats_data(
         (each, plays)
       })
       .collect(),
-    week_tracks: aggregate_top_tracks(&week, WEEK_TRACKS),
+    week_tracks: aggregate_top_tracks_with(&week, WEEK_TRACKS, strings),
   }
 }
 
@@ -639,7 +641,7 @@ pub fn spawn_history_collector(app: Arc<Mutex<App>>) -> HistoryCollectorHandle {
       // cleared in Settings mid-session, and the collector is only spawned once.
       let (snapshot, latest_token) = if let Ok(app_guard) = app.try_lock() {
         (
-          current_playback_snapshot(&app_guard),
+          tracking_playback_snapshot(&app_guard),
           app_guard.user_config.behavior.sync_token.clone(),
         )
       } else {
@@ -777,15 +779,25 @@ async fn perform_auto_recap_check(app: &Arc<Mutex<App>>) {
     Err(_) => return,
   };
 
+  perform_auto_recap_check_with(app, path, output_path, now, export_history_recap_with).await;
+}
+
+async fn perform_auto_recap_check_with(
+  app: &Arc<Mutex<App>>,
+  path: PathBuf,
+  output_path: PathBuf,
+  now: DateTime<Utc>,
+  export: impl FnOnce(RecapPeriod, &Path, &crate::core::i18n::Strings) -> Result<usize> + Send + 'static,
+) {
+  let strings = app.lock().await.strings();
   // The export reads and renders the whole history file; keep it off the
   // runtime worker threads.
   let export_path = output_path.clone();
-  let result = tokio::task::spawn_blocking(move || {
-    export_history_recap(RecapPeriod::ThirtyDays, &export_path)
-  })
-  .await
-  .map_err(anyhow::Error::from)
-  .and_then(|result| result);
+  let result =
+    tokio::task::spawn_blocking(move || export(RecapPeriod::ThirtyDays, &export_path, strings))
+      .await
+      .map_err(anyhow::Error::from)
+      .and_then(|result| result);
 
   match result {
     Ok(count) => {
@@ -798,12 +810,12 @@ async fn perform_auto_recap_check(app: &Arc<Mutex<App>>) {
         if app_guard.get_current_route().active_block == ActiveBlock::Input {
           // Never steal keystrokes from an input field; fall back to a status
           // message instead of the popup.
+          let strings = app_guard.strings();
           app_guard.set_status_message(
-            format!(
-              "Monthly listening recap ready at {} ({} listens)",
-              output_path.display(),
-              count
-            ),
+            strings
+              .status
+              .infra
+              .monthly_recap_ready(&output_path.display().to_string(), count),
             10,
           );
         } else {
@@ -820,7 +832,16 @@ async fn perform_auto_recap_check(app: &Arc<Mutex<App>>) {
   }
 }
 
+/// CLI exports deliberately retain English regardless of the interface language.
 pub fn export_history_recap(period: RecapPeriod, output_path: &Path) -> Result<usize> {
+  export_history_recap_with(period, output_path, &crate::core::i18n::EN)
+}
+
+pub fn export_history_recap_with(
+  period: RecapPeriod,
+  output_path: &Path,
+  strings: &crate::core::i18n::Strings,
+) -> Result<usize> {
   let listens = load_listens()?;
   let filtered = filter_listens_for_period(&listens, period);
   // The share card is toggleable between the requested period and All Time
@@ -831,7 +852,7 @@ pub fn export_history_recap(period: RecapPeriod, output_path: &Path) -> Result<u
     RecapPeriod::All
   };
   let alt_filtered = filter_listens_for_period(&listens, alt_period);
-  let html = render_history_recap_html(period, &filtered, alt_period, &alt_filtered);
+  let html = render_history_recap_html_with(period, &filtered, alt_period, &alt_filtered, strings);
 
   if let Some(parent) = output_path.parent() {
     fs::create_dir_all(parent)?;
@@ -1153,14 +1174,19 @@ struct CardData {
 }
 
 impl CardData {
-  fn from_listens(period: RecapPeriod, listens: &[ListenRecord]) -> Self {
+  fn from_listens(
+    period: RecapPeriod,
+    listens: &[ListenRecord],
+    strings: &crate::core::i18n::Strings,
+  ) -> Self {
     Self::from_tops(
       period,
-      aggregate_top_tracks(listens, 1).first(),
-      aggregate_top_artists(listens, 1).first(),
-      aggregate_top_albums(listens, 1).first(),
+      aggregate_top_tracks_with(listens, 1, strings).first(),
+      aggregate_top_artists_with(listens, 1, strings).first(),
+      aggregate_top_albums_with(listens, 1, strings).first(),
       listens.len(),
       listens.iter().map(|record| record.listened_ms).sum(),
+      strings,
     )
   }
 
@@ -1172,12 +1198,16 @@ impl CardData {
     top_album: Option<&RankedEntry>,
     plays: usize,
     total_ms: u64,
+    strings: &crate::core::i18n::Strings,
   ) -> Self {
     let top_track_raw = top_track
       .map(|entry| entry.display.as_str())
-      .unwrap_or("No data");
-    let (track_title, track_artist) = if top_track_raw == "No data" {
-      ("No data".to_string(), "No data".to_string())
+      .unwrap_or(strings.recap.no_data);
+    let (track_title, track_artist) = if top_track.is_none() {
+      (
+        strings.recap.no_data.to_string(),
+        strings.recap.no_data.to_string(),
+      )
     } else {
       let (title, artist) = split_track_display(top_track_raw);
       (title.to_string(), artist.to_string())
@@ -1189,22 +1219,22 @@ impl CardData {
       track_artist,
       top_artist: top_artist
         .map(|entry| entry.display.as_str())
-        .unwrap_or("No data")
+        .unwrap_or(strings.recap.no_data)
         .to_string(),
       top_album: top_album
         .map(|entry| entry.display.as_str())
-        .unwrap_or("No data")
+        .unwrap_or(strings.recap.no_data)
         .to_string(),
       plays,
-      time: format_duration(total_ms),
+      time: format_duration_with(total_ms, strings),
     }
   }
 
   /// Render as a JS object literal for the recap page's inline script.
-  fn to_js_object(&self) -> String {
+  fn to_js_object(&self, strings: &crate::core::i18n::Strings) -> String {
     format!(
       "{{ period: {}, track: {}, artist: {}, topArtist: {}, topAlbum: {}, plays: {}, time: {} }}",
-      js_string(period_label(self.period)),
+      js_string(period_label_with(self.period, strings)),
       js_string(&self.track_title),
       js_string(&self.track_artist),
       js_string(&self.top_artist),
@@ -1215,17 +1245,34 @@ impl CardData {
   }
 }
 
+#[cfg(test)]
 fn render_history_recap_html(
   period: RecapPeriod,
   listens: &[ListenRecord],
   alt_period: RecapPeriod,
   alt_listens: &[ListenRecord],
 ) -> String {
-  let top_tracks = aggregate_top_tracks(listens, 5);
-  let top_artists = aggregate_top_artists(listens, 5);
-  let top_albums = aggregate_top_albums(listens, 5);
-  let listening_days = aggregate_days(listens);
-  let listening_hours = aggregate_hours(listens);
+  render_history_recap_html_with(
+    period,
+    listens,
+    alt_period,
+    alt_listens,
+    &crate::core::i18n::EN,
+  )
+}
+
+fn render_history_recap_html_with(
+  period: RecapPeriod,
+  listens: &[ListenRecord],
+  alt_period: RecapPeriod,
+  alt_listens: &[ListenRecord],
+  strings: &crate::core::i18n::Strings,
+) -> String {
+  let top_tracks = aggregate_top_tracks_with(listens, 5, strings);
+  let top_artists = aggregate_top_artists_with(listens, 5, strings);
+  let top_albums = aggregate_top_albums_with(listens, 5, strings);
+  let listening_days = aggregate_days_with(listens, strings);
+  let listening_hours = aggregate_hours_with(listens, strings);
 
   // The primary card's No. 1 entries fall out of the limit-5 lists above; only
   // the alternative period needs its own aggregation.
@@ -1236,16 +1283,17 @@ fn render_history_recap_html(
     top_albums.first(),
     listens.len(),
     listens.iter().map(|record| record.listened_ms).sum(),
+    strings,
   );
-  let alt_card = CardData::from_listens(alt_period, alt_listens);
+  let alt_card = CardData::from_listens(alt_period, alt_listens, strings);
 
   format!(
     r#"<!DOCTYPE html>
-<html lang="en">
+<html lang="{language}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>spotatui recap</title>
+  <title>{page_title}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -1751,7 +1799,7 @@ fn render_history_recap_html(
   <div class="app-container">
     <header class="app-header">
       <h1><span class="brand-logo">spota</span><span class="brand-accent">tui</span></h1>
-      <p>Listening History Recap</p>
+      <p>{recap_title}</p>
       <p class="app-desc">{summary}</p>
     </header>
 
@@ -1776,11 +1824,11 @@ fn render_history_recap_html(
               <div id="cover-art-placeholder" class="cover-placeholder">
                 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
               </div>
-              <img id="cover-art-img" class="cover-img" alt="Cover Art" crossorigin="anonymous">
+              <img id="cover-art-img" class="cover-img" alt="{cover_art}" crossorigin="anonymous">
             </div>
             
             <div class="top-track-card">
-              <span class="rank-badge">NO. 1 TRACK</span>
+              <span class="rank-badge">{first_track}</span>
               <div id="card-track-title" class="track-title">{top_track_title}</div>
               <div id="card-track-artist" class="track-artist">{top_track_artist}</div>
             </div>
@@ -1788,26 +1836,26 @@ fn render_history_recap_html(
             <div class="card-stats-grid">
               <div class="stats-row">
                 <div class="stat-pill">
-                  <span class="stat-label">Qualified Plays</span>
+                  <span class="stat-label">{qualified_plays}</span>
                   <span id="card-plays" class="stat-value">{total_plays}</span>
                 </div>
                 <div class="stat-pill">
-                  <span class="stat-label">Listening Time</span>
+                  <span class="stat-label">{listening_time}</span>
                   <span id="card-time" class="stat-value">{total_time}</span>
                 </div>
               </div>
               <div class="stat-pill full-width">
-                <span class="stat-label">Top Artist</span>
+                <span class="stat-label">{top_artist}</span>
                 <span id="card-top-artist" class="stat-value">{top_artist_name}</span>
               </div>
               <div class="stat-pill full-width">
-                <span class="stat-label">Top Album</span>
+                <span class="stat-label">{top_album}</span>
                 <span id="card-top-album" class="stat-value">{top_album_title}</span>
               </div>
             </div>
             
             <div class="card-footer">
-              <span class="card-footer-left">generated by <strong>spotatui</strong></span>
+              <span class="card-footer-left">{generated_by}<strong>spotatui</strong></span>
               <span class="card-footer-right">github.com/LargeModGames/spotatui</span>
             </div>
           </div>
@@ -1816,41 +1864,41 @@ fn render_history_recap_html(
         <div class="download-container">
           <button class="download-btn" onclick="downloadCard()">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Download Share Card
+            {download}
           </button>
         </div>
       </div>
       
       <!-- Right Column: Detailed Insights Dashboard -->
       <div class="details-column">
-        <div class="details-section-title">Detailed Analytics</div>
+        <div class="details-section-title">{analytics}</div>
         
         <div class="grid">
           <article class="panel">
-            <h2>Top Tracks</h2>
+            <h2>{top_tracks}</h2>
             {top_tracks_html}
           </article>
           <article class="panel">
-            <h2>Top Artists</h2>
+            <h2>{top_artists}</h2>
             {top_artists_html}
           </article>
           <article class="panel">
-            <h2>Top Albums</h2>
+            <h2>{top_albums}</h2>
             {top_albums_html}
           </article>
           <article class="panel">
-            <h2>Recent Plays</h2>
+            <h2>{recent_plays}</h2>
             {recent_html}
           </article>
         </div>
         
         <div class="grid">
           <article class="panel">
-            <h2>Listening by Day</h2>
+            <h2>{by_day}</h2>
             {days_html}
           </article>
           <article class="panel">
-            <h2>Listening by Hour</h2>
+            <h2>{by_hour}</h2>
             {hours_html}
           </article>
         </div>
@@ -1858,7 +1906,7 @@ fn render_history_recap_html(
     </div>
 
     <footer>
-      History is generated from spotatui local listening records and starts when the feature is enabled. Short or skipped plays are stored but excluded from headline recap totals.
+      {footer}
     </footer>
   </div>
 
@@ -1903,7 +1951,7 @@ fn render_history_recap_html(
         return;
       }}
       const card = CARDS[index];
-      if (!card.track || card.track === 'No data') {{
+      if (!card.track || card.track === {no_data_js}) {{
         coverUrls[index] = null;
         applyCover(index);
         return;
@@ -2080,7 +2128,7 @@ fn render_history_recap_html(
 
       ctx.textAlign = 'center';
       ctx.font = '700 10px "JetBrains Mono", monospace';
-      const rankText = 'NO. 1 TRACK';
+      const rankText = {first_track_js};
       const rankW = ctx.measureText(rankText).width + 16;
       ctx.fillStyle = 'rgba(29, 185, 84, 0.1)';
       roundRectPath(ctx, (CARD_W - rankW) / 2, panelY + 14, rankW, 20, 6);
@@ -2099,10 +2147,10 @@ fn render_history_recap_html(
 
       // Stat pills
       const pillW = (CARD_W - 64 - 12) / 2;
-      drawStatPill(ctx, 32, 424, pillW, 54, 'Qualified Plays', String(card.plays));
-      drawStatPill(ctx, 32 + pillW + 12, 424, pillW, 54, 'Listening Time', card.time);
-      drawStatPill(ctx, 32, 490, CARD_W - 64, 54, 'Top Artist', card.topArtist);
-      drawStatPill(ctx, 32, 556, CARD_W - 64, 54, 'Top Album', card.topAlbum);
+      drawStatPill(ctx, 32, 424, pillW, 54, {qualified_plays_js}, String(card.plays));
+      drawStatPill(ctx, 32 + pillW + 12, 424, pillW, 54, {listening_time_js}, card.time);
+      drawStatPill(ctx, 32, 490, CARD_W - 64, 54, {top_artist_js}, card.topArtist);
+      drawStatPill(ctx, 32, 556, CARD_W - 64, 54, {top_album_js}, card.topAlbum);
 
       // Footer
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
@@ -2113,7 +2161,7 @@ fn render_history_recap_html(
       ctx.textAlign = 'left';
       ctx.fillStyle = MUTED;
       ctx.font = '400 11px "Plus Jakarta Sans", sans-serif';
-      ctx.fillText('generated by spotatui', 32, 642);
+      ctx.fillText({generated_by_product_js}, 32, 642);
       ctx.textAlign = 'right';
       ctx.fillStyle = ACCENT;
       ctx.font = '400 11px "JetBrains Mono", monospace';
@@ -2135,7 +2183,7 @@ fn render_history_recap_html(
       btn.disabled = true;
       btn.innerHTML = `
         <svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1 1 21.2 8H18" /></svg>
-        Generating...
+        {generating}
       `;
       btn.style.opacity = '0.7';
 
@@ -2156,7 +2204,7 @@ fn render_history_recap_html(
           link.click();
         }} catch (err) {{
           console.error(err);
-          alert('Could not render image. Please try again!');
+          alert({render_failed_js});
         }}
         restore();
       }}).catch(restore);
@@ -2165,27 +2213,55 @@ fn render_history_recap_html(
 </body>
 </html>
 "#,
-    title = escape_html(period_label(period)),
+    footer = escape_html(strings.recap.footer),
+    recap_title = escape_html(strings.recap.title),
+    download = escape_html(strings.recap.download),
+    analytics = escape_html(strings.recap.analytics),
+    by_hour = escape_html(strings.recap.by_hour),
+    by_day = escape_html(strings.recap.by_day),
+    qualified_plays = escape_html(strings.recap.qualified_plays),
+    page_title = escape_html(strings.recap.page_title),
+    listening_time = escape_html(strings.recap.listening_time),
+    generated_by = escape_html(strings.recap.generated_by),
+    generating = escape_html(strings.recap.generating),
+    recent_plays = escape_html(strings.recap.recent_plays),
+    first_track = escape_html(strings.recap.first_track),
+    top_artists = escape_html(strings.recap.top_artists),
+    top_artist = escape_html(strings.recap.top_artist),
+    top_tracks = escape_html(strings.recap.top_tracks),
+    top_albums = escape_html(strings.recap.top_albums),
+    cover_art = escape_html(strings.recap.cover_art),
+    top_album = escape_html(strings.recap.top_album),
+    first_track_js = js_single_string(strings.recap.first_track),
+    qualified_plays_js = js_single_string(strings.recap.qualified_plays),
+    listening_time_js = js_single_string(strings.recap.listening_time),
+    top_artist_js = js_single_string(strings.recap.top_artist),
+    top_album_js = js_single_string(strings.recap.top_album),
+    generated_by_product_js = js_single_string(strings.recap.generated_by_product),
+    render_failed_js = js_single_string(strings.recap.render_failed),
+    no_data_js = js_single_string(strings.recap.no_data),
+    language = escape_html(strings.recap.language),
+    title = escape_html(period_label_with(period, strings)),
     summary = escape_html(if listens.is_empty() {
-      "No qualified local listening history was recorded for this window yet."
+      strings.recap.empty_summary
     } else {
-      "A shareable HTML snapshot of your qualified local listening history, generated directly from spotatui."
+      strings.recap.summary
     }),
-    alt_title = escape_html(period_label(alt_period)),
+    alt_title = escape_html(period_label_with(alt_period, strings)),
     total_plays = card.plays,
     total_time = escape_html(&card.time),
     top_track_title = escape_html(&card.track_title),
     top_track_artist = escape_html(&card.track_artist),
     top_artist_name = escape_html(&card.top_artist),
     top_album_title = escape_html(&card.top_album),
-    card_js = card.to_js_object(),
-    alt_card_js = alt_card.to_js_object(),
-    top_tracks_html = render_ranked_entries(&top_tracks, "No tracks yet.", true),
-    top_artists_html = render_ranked_entries(&top_artists, "No artists yet.", false),
-    top_albums_html = render_ranked_entries(&top_albums, "No albums yet.", false),
-    recent_html = render_recent_entries(listens),
-    days_html = render_bar_entries(&listening_days),
-    hours_html = render_bar_entries(&listening_hours),
+    card_js = card.to_js_object(strings),
+    alt_card_js = alt_card.to_js_object(strings),
+    top_tracks_html = render_ranked_entries(&top_tracks, strings.recap.no_tracks, true),
+    top_artists_html = render_ranked_entries(&top_artists, strings.recap.no_artists, false),
+    top_albums_html = render_ranked_entries(&top_albums, strings.recap.no_albums, false),
+    recent_html = render_recent_entries(listens, strings),
+    days_html = render_bar_entries(&listening_days, strings),
+    hours_html = render_bar_entries(&listening_hours, strings),
   )
 }
 
@@ -2200,7 +2276,16 @@ pub struct RankedEntry {
   pub parts: Option<(String, String)>,
 }
 
+#[cfg(any(test, feature = "dj-core"))]
 pub fn aggregate_top_tracks(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
+  aggregate_top_tracks_with(listens, limit, &crate::core::i18n::EN)
+}
+
+pub fn aggregate_top_tracks_with(
+  listens: &[ListenRecord],
+  limit: usize,
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<String, (String, String, u64, u64, Option<String>)> = BTreeMap::new();
   for record in listens {
     let key = record
@@ -2226,11 +2311,10 @@ pub fn aggregate_top_tracks(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
       .into_values()
       .map(|(title, artists, listened_ms, plays, uri)| RankedEntry {
         display: format!("{title} - {artists}"),
-        detail: format!(
-          "{} · {}",
-          count_label(plays, "play", "plays"),
-          format_duration(listened_ms)
-        ),
+        detail: strings
+          .status
+          .infra
+          .history_plays(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri,
         parts: Some((title, artists)),
@@ -2249,7 +2333,16 @@ fn split_artists(combo: &str) -> Vec<String> {
     .collect()
 }
 
+#[cfg(any(test, feature = "dj-core"))]
 pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
+  aggregate_top_artists_with(listens, limit, &crate::core::i18n::EN)
+}
+
+pub fn aggregate_top_artists_with(
+  listens: &[ListenRecord],
+  limit: usize,
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
   for record in listens {
     // Spotify credits one artist per entry, so a name such as "Mumford & Sons"
@@ -2282,11 +2375,10 @@ pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<Rank
       .into_iter()
       .map(|(artist, (listened_ms, plays))| RankedEntry {
         display: artist,
-        detail: format!(
-          "{} · {}",
-          count_label(plays, "track hit", "track hits"),
-          format_duration(listened_ms)
-        ),
+        detail: strings
+          .status
+          .infra
+          .history_track_hits(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri: None,
         parts: None,
@@ -2296,7 +2388,16 @@ pub fn aggregate_top_artists(listens: &[ListenRecord], limit: usize) -> Vec<Rank
   )
 }
 
+#[cfg(any(test, feature = "dj-core"))]
 pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<RankedEntry> {
+  aggregate_top_albums_with(listens, limit, &crate::core::i18n::EN)
+}
+
+pub fn aggregate_top_albums_with(
+  listens: &[ListenRecord],
+  limit: usize,
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
   for record in listens {
     if record.album.trim().is_empty() {
@@ -2312,11 +2413,10 @@ pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
       .into_iter()
       .map(|(album, (listened_ms, plays))| RankedEntry {
         display: album,
-        detail: format!(
-          "{} · {}",
-          count_label(plays, "play", "plays"),
-          format_duration(listened_ms)
-        ),
+        detail: strings
+          .status
+          .infra
+          .history_plays(plays, &format_duration_with(listened_ms, strings)),
         value: listened_ms,
         uri: None,
         parts: None,
@@ -2326,11 +2426,23 @@ pub fn aggregate_top_albums(listens: &[ListenRecord], limit: usize) -> Vec<Ranke
   )
 }
 
-pub fn aggregate_days(listens: &[ListenRecord]) -> Vec<RankedEntry> {
-  aggregate_days_in(listens, &Local)
+pub fn aggregate_days_with(
+  listens: &[ListenRecord],
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
+  aggregate_days_in_with(listens, &Local, strings)
 }
 
+#[cfg(test)]
 fn aggregate_days_in<Tz: TimeZone>(listens: &[ListenRecord], tz: &Tz) -> Vec<RankedEntry> {
+  aggregate_days_in_with(listens, tz, &crate::core::i18n::EN)
+}
+
+fn aggregate_days_in_with<Tz: TimeZone>(
+  listens: &[ListenRecord],
+  tz: &Tz,
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<NaiveDate, u64> = BTreeMap::new();
   for record in listens {
     let label = record.ended_at.with_timezone(tz).date_naive();
@@ -2343,7 +2455,7 @@ fn aggregate_days_in<Tz: TimeZone>(listens: &[ListenRecord], tz: &Tz) -> Vec<Ran
     .take(10)
     .map(|(label, listened_ms)| RankedEntry {
       display: label.format("%Y-%m-%d").to_string(),
-      detail: format_duration(listened_ms),
+      detail: format_duration_with(listened_ms, strings),
       value: listened_ms,
       uri: None,
       parts: None,
@@ -2354,7 +2466,10 @@ fn aggregate_days_in<Tz: TimeZone>(listens: &[ListenRecord], tz: &Tz) -> Vec<Ran
     .collect()
 }
 
-fn aggregate_hours(listens: &[ListenRecord]) -> Vec<RankedEntry> {
+fn aggregate_hours_with(
+  listens: &[ListenRecord],
+  strings: &crate::core::i18n::Strings,
+) -> Vec<RankedEntry> {
   let mut totals: BTreeMap<u32, u64> = BTreeMap::new();
   for record in listens {
     let local_hour = record.ended_at.with_timezone(&chrono::Local).hour();
@@ -2364,7 +2479,7 @@ fn aggregate_hours(listens: &[ListenRecord]) -> Vec<RankedEntry> {
   (0..24)
     .map(|hour| RankedEntry {
       display: format!("{hour:02}:00"),
-      detail: format_duration(*totals.get(&hour).unwrap_or(&0)),
+      detail: format_duration_with(*totals.get(&hour).unwrap_or(&0), strings),
       value: *totals.get(&hour).unwrap_or(&0),
       uri: None,
       parts: None,
@@ -2423,23 +2538,26 @@ fn render_ranked_entries(entries: &[RankedEntry], empty_label: &str, split_artis
   format!("<ul class=\"ranked-list\">{items}</ul>")
 }
 
-fn render_recent_entries(listens: &[ListenRecord]) -> String {
+fn render_recent_entries(listens: &[ListenRecord], strings: &crate::core::i18n::Strings) -> String {
   let recent_records = listens.iter().rev().take(5).collect::<Vec<_>>();
 
   if recent_records.is_empty() {
-    return r#"<p class="subtle">No recent plays.</p>"#.to_string();
+    return format!(
+      r#"<p class="subtle">{}</p>"#,
+      escape_html(strings.recap.no_recent)
+    );
   }
 
   let items = recent_records
     .iter()
     .map(|record| {
       let local_time = record.ended_at.with_timezone(&chrono::Local);
-      let time_str = local_time.format("%b %d, %H:%M").to_string();
+      let time_str = local_time.format(strings.recap.recent_date_format).to_string();
       format!(
-        "<li><span class=\"recent-icon\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><polyline points=\"12 6 12 12 16 14\"></polyline></svg></span><div class=\"entry-details\"><strong>{}</strong><div class=\"entry-artist\">{}</div><div class=\"subtle\">listened at {}</div></div></li>",
+        "<li><span class=\"recent-icon\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><polyline points=\"12 6 12 12 16 14\"></polyline></svg></span><div class=\"entry-details\"><strong>{}</strong><div class=\"entry-artist\">{}</div><div class=\"subtle\">{}</div></div></li>",
         escape_html(&record.title),
         escape_html(&record.artists.join(", ")),
-        escape_html(&time_str)
+        escape_html(&strings.recap.listened_at(&time_str))
       )
     })
     .collect::<Vec<_>>()
@@ -2447,9 +2565,12 @@ fn render_recent_entries(listens: &[ListenRecord]) -> String {
   format!("<ul class=\"ranked-list\">{items}</ul>")
 }
 
-fn render_bar_entries(entries: &[RankedEntry]) -> String {
+fn render_bar_entries(entries: &[RankedEntry], strings: &crate::core::i18n::Strings) -> String {
   if entries.is_empty() {
-    return r#"<p class="subtle">No data yet.</p>"#.to_string();
+    return format!(
+      r#"<p class="subtle">{}</p>"#,
+      escape_html(strings.recap.no_data_yet)
+    );
   }
 
   let max_value = entries
@@ -2477,17 +2598,26 @@ fn render_bar_entries(entries: &[RankedEntry]) -> String {
   format!(r#"<div class="bars">{rows}</div>"#)
 }
 
+#[cfg(test)]
 pub fn period_label(period: RecapPeriod) -> &'static str {
+  period_label_with(period, &crate::core::i18n::EN)
+}
+
+pub fn period_label_with(
+  period: RecapPeriod,
+  strings: &crate::core::i18n::Strings,
+) -> &'static str {
   match period {
-    RecapPeriod::SevenDays => "Last 7 Days",
-    RecapPeriod::ThirtyDays => "Last 30 Days",
-    RecapPeriod::Month => "This Month",
-    RecapPeriod::Year => "This Year",
-    RecapPeriod::All => "All Time",
+    RecapPeriod::SevenDays => strings.status.infra.history_week,
+    RecapPeriod::ThirtyDays => strings.status.infra.history_month,
+    RecapPeriod::Month => strings.status.infra.history_this_month,
+    RecapPeriod::Year => strings.status.infra.history_this_year,
+    RecapPeriod::All => strings.status.infra.history_all,
   }
 }
 
 /// "1 play", "2 plays", "0 plays": the singular only for a count of one.
+#[cfg(test)]
 pub(crate) fn count_label(n: u64, one: &str, many: &str) -> String {
   if n == 1 {
     format!("1 {one}")
@@ -2496,14 +2626,14 @@ pub(crate) fn count_label(n: u64, one: &str, many: &str) -> String {
   }
 }
 
-pub fn format_duration(total_ms: u64) -> String {
+pub fn format_duration_with(total_ms: u64, strings: &crate::core::i18n::Strings) -> String {
   let total_minutes = total_ms / 1000 / 60;
   let hours = total_minutes / 60;
   let minutes = total_minutes % 60;
   if hours == 0 {
-    format!("{minutes}m")
+    strings.status.infra.history_minutes(minutes)
   } else {
-    format!("{hours}h {minutes}m")
+    strings.status.infra.history_hours_minutes(hours, minutes)
   }
 }
 
@@ -2520,6 +2650,19 @@ fn escape_html(input: &str) -> String {
 /// `escape_html`, the value round-trips exactly; needed for the recap page's
 /// inline `<script>` data. `</` is escaped so a value can never close the
 /// script tag early.
+/// Preserve the recap's original single-quoted JS literals while escaping table text.
+fn js_single_string(input: &str) -> String {
+  let escaped = input
+    .replace('\\', "\\\\")
+    .replace('\'', "\\'")
+    .replace('<', "\\u003c")
+    .replace('\n', "\\n")
+    .replace('\r', "\\r")
+    .replace('\u{2028}', "\\u2028")
+    .replace('\u{2029}', "\\u2029");
+  format!("'{escaped}'")
+}
+
 fn js_string(input: &str) -> String {
   serde_json::to_string(input)
     .unwrap_or_else(|_| "\"\"".to_string())
@@ -3292,7 +3435,7 @@ mod tests {
   #[test]
   fn stats_data_totals_only_reflect_given_records() {
     let records = vec![record_at(20, 100_000, true), record_at(21, 50_000, true)];
-    let stats = build_stats_data(&records, &records, RecapPeriod::All);
+    let stats = build_stats_data_with(&records, &records, RecapPeriod::All, &crate::core::i18n::EN);
     assert_eq!(stats.total_plays, 2);
     assert_eq!(stats.total_time_ms, 150_000);
     assert_eq!(stats.top_tracks.len(), 2);
@@ -3386,7 +3529,12 @@ mod tests {
     ];
     let filtered = filter_listens_for_period(&listens, RecapPeriod::All);
 
-    let stats = build_stats_data(&filtered, &listens, RecapPeriod::All);
+    let stats = build_stats_data_with(
+      &filtered,
+      &listens,
+      RecapPeriod::All,
+      &crate::core::i18n::EN,
+    );
 
     let plays: Vec<_> = stats.period_plays.iter().map(|(_, plays)| *plays).collect();
     assert_eq!(plays[0], 1);
@@ -3416,6 +3564,50 @@ mod tests {
       Some(("Track 3".to_string(), "Artist".to_string()))
     );
     assert_eq!(tracks[0].display, "Track 3 - Artist");
+  }
+
+  #[test]
+  fn english_recap_html_keeps_the_original_bytes() {
+    let html = render_history_recap_html(RecapPeriod::All, &[], RecapPeriod::ThirtyDays, &[]);
+    // FNV-1a of the complete pre-localization empty export, including JS and CSS.
+    let hash = html.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
+      (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    });
+    assert_eq!(hash, 0x1b2a30a5f7841662);
+  }
+
+  #[test]
+  fn recap_uses_the_supplied_table_in_dom_canvas_and_empty_states() {
+    let strings = crate::core::i18n::Strings {
+      recap: crate::core::i18n::recap::RecapStrings {
+        title: "回顾",
+        first_track: "最常听",
+        qualified_plays: "次数",
+        no_data: "无数据",
+        no_recent: "无记录",
+        no_tracks: "无歌曲",
+        ..crate::core::i18n::recap::EN
+      },
+      ..crate::core::i18n::EN
+    };
+    let html = render_history_recap_html_with(
+      RecapPeriod::All,
+      &[],
+      RecapPeriod::ThirtyDays,
+      &[],
+      &strings,
+    );
+    assert!(html.contains("<p>回顾</p>"));
+    assert!(html.contains("const rankText = '最常听';"));
+    assert!(html.contains("54, '次数', String(card.plays)"));
+    for label in ["无数据", "无记录", "无歌曲"] {
+      assert!(html.contains(label));
+    }
+    assert!(!html.contains("Listening History Recap"));
+    assert_eq!(
+      js_single_string("a'</script>\n"),
+      "'a\\'\\u003c/script>\\n'"
+    );
   }
 
   #[test]
@@ -3498,6 +3690,41 @@ mod tests {
     assert_eq!(js_string("</script>"), r#""<\/script>""#);
   }
 
+  #[tokio::test]
+  async fn automatic_recap_exports_with_the_current_language_before_offering_the_file() {
+    use crate::core::i18n::Language;
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let dir = tempfile::tempdir().unwrap();
+      let output = dir.path().join("recap.html");
+      let stamp = dir.path().join("last-recap");
+      let mut state = App::default();
+      state.user_config.behavior.language = language;
+      state.refresh_language();
+      let strings = state.strings();
+      let app = Arc::new(Mutex::new(state));
+      perform_auto_recap_check_with(
+        &app,
+        stamp.clone(),
+        output.clone(),
+        Utc::now(),
+        move |period, path, active| {
+          assert!(std::ptr::eq(active, strings));
+          assert_eq!(period, RecapPeriod::ThirtyDays);
+          fs::write(
+            path,
+            render_history_recap_html_with(period, &[], RecapPeriod::All, &[], active),
+          )?;
+          Ok(1)
+        },
+      )
+      .await;
+      let html = fs::read_to_string(&output).unwrap();
+      assert!(html.contains(&format!("<p>{}</p>", strings.recap.title)));
+      assert!(stamp.exists());
+      assert!(app.lock().await.recap_prompt().is_some());
+    }
+  }
+
   #[test]
   fn auto_recap_due_on_missing_invalid_or_old_timestamp() {
     let now = 1_800_000_000_i64;
@@ -3511,5 +3738,23 @@ mod tests {
       Some(&(now - 24 * 3600).to_string()),
       now
     ));
+  }
+
+  #[test]
+  fn ranked_details_localize_counts_without_rewriting_titles_or_cli_output() {
+    use crate::core::i18n::{ZH_HANS, ZH_HANT};
+    let mut record = record_at(7, 1_860_000, true);
+    record.title = "{count}".into();
+    let records = [record.clone(), record];
+    let english = aggregate_top_tracks(&records, 10);
+    assert_eq!(english[0].detail, "2 plays · 1h 2m");
+    for strings in [&ZH_HANS, &ZH_HANT] {
+      let tracks = aggregate_top_tracks_with(&records, 10, strings);
+      assert_eq!(tracks[0].display, "{count} - Artist");
+      assert_eq!(tracks[0].uri, english[0].uri);
+      assert_eq!(tracks[0].value, 3_720_000);
+    }
+
+    assert_eq!(period_label(RecapPeriod::Year), "This Year");
   }
 }

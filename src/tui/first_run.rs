@@ -5,6 +5,9 @@
 //! is presented with: a crossterm checkbox picker on a real terminal, a
 //! numbered single-select prompt when stdin is piped.
 
+use crate::core::i18n::Strings;
+#[cfg(test)]
+use crate::core::i18n::EN;
 use crate::core::source::Source;
 use anyhow::{anyhow, Result};
 use crossterm::{
@@ -20,11 +23,14 @@ use std::io::{stdin, stdout, IsTerminal, Write};
 /// / non-interactive stdin falls back to the numbered single-select prompt so
 /// headless and scripted runs never hang on a raw-mode read. `None` means the
 /// user cancelled or confirmed with nothing selected.
-pub fn pick_sources(options: &[Source]) -> Result<Option<Vec<Source>>> {
+pub fn pick_sources_with(
+  options: &[Source],
+  strings: &'static Strings,
+) -> Result<Option<Vec<Source>>> {
   if stdout().is_terminal() && stdin().is_terminal() {
-    interactive_multiselect(options)
+    interactive_multiselect(options, strings)
   } else {
-    numbered_fallback(options).map(Some)
+    numbered_fallback(options, strings).map(Some)
   }
 }
 
@@ -34,9 +40,9 @@ pub fn pick_sources(options: &[Source]) -> Result<Option<Vec<Source>>> {
 ///
 /// Restores the terminal via a [`RawModeGuard`] on every exit path (early return,
 /// `?`, or panic) so a mid-selection error never leaves the terminal in raw mode.
-fn interactive_multiselect(options: &[Source]) -> Result<Option<Vec<Source>>> {
-  println!("\nWelcome to spotatui! Choose your music sources:");
-  println!("You can add or switch sources anytime from the `d` menu.\n");
+fn interactive_multiselect(options: &[Source], strings: &Strings) -> Result<Option<Vec<Source>>> {
+  println!("{}", strings.onboarding.welcome_sources);
+  println!("{}\n", strings.onboarding.switch_sources);
 
   enable_raw_mode()?;
   let _guard = RawModeGuard;
@@ -63,8 +69,8 @@ fn interactive_multiselect(options: &[Source]) -> Result<Option<Vec<Source>>> {
       let checkbox = if checked[index] { "[x]" } else { "[ ]" };
       let line = format!(
         "  {pointer} {checkbox} {} ({})",
-        source.label(),
-        source.note()
+        strings.sidebar.source_label(*source),
+        strings.onboarding.source_note(*source)
       );
       if index == hover {
         print!("{}\r\n", line.cyan().bold());
@@ -73,10 +79,7 @@ fn interactive_multiselect(options: &[Source]) -> Result<Option<Vec<Source>>> {
       }
     }
     print!("\r\n");
-    print!(
-      "  {}\r\n",
-      "↑/↓ move · space select · enter confirm · esc skip".dark_grey()
-    );
+    print!("  {}\r\n", strings.onboarding.picker_keys.dark_grey());
     out.flush()?;
 
     let event = read()?;
@@ -129,34 +132,71 @@ impl Drop for RawModeGuard {
 
 /// Non-interactive fallback (piped stdin): the original numbered single-select
 /// prompt. Returns a single-element `Vec` for a uniform downstream path.
-fn numbered_fallback(options: &[Source]) -> Result<Vec<Source>> {
-  println!("\nWelcome to spotatui! Choose your music source:\n");
+fn numbered_fallback(options: &[Source], strings: &Strings) -> Result<Vec<Source>> {
+  println!("{}", strings.onboarding.welcome_source);
   for (index, source) in options.iter().enumerate() {
-    println!("  {}) {} ({})", index + 1, source.label(), source.note());
+    println!(
+      "  {}) {} ({})",
+      index + 1,
+      strings.sidebar.source_label(*source),
+      strings.onboarding.source_note(*source)
+    );
   }
-  println!("\nYou can add or switch sources anytime from the `d` menu.");
+  println!("\n{}", strings.onboarding.switch_sources);
 
-  let choice = prompt_choice(options.len())?;
+  let choice = prompt_choice(options.len(), strings)?;
   Ok(vec![options[choice - 1]])
 }
 
-fn prompt_choice(max: usize) -> Result<usize> {
+fn prompt_choice(max: usize, strings: &Strings) -> Result<usize> {
   const MAX_RETRIES: u8 = 5;
   let mut retries = 0;
   loop {
-    print!("\nChoose (1-{max}): ");
+    print!("{}", strings.onboarding.choose(max));
     let _ = stdout().flush();
     let mut input = String::new();
     stdin().read_line(&mut input)?;
     match input.trim().parse::<usize>() {
       Ok(n) if (1..=max).contains(&n) => return Ok(n),
       _ => {
-        println!("Invalid choice. Please enter a number between 1 and {max}.");
+        println!("{}", strings.onboarding.invalid_choice(max));
         retries += 1;
         if retries >= MAX_RETRIES {
           return Err(anyhow!("Maximum retries ({MAX_RETRIES}) exceeded."));
         }
       }
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn english_picker_source_text_matches_the_original_domain_labels() {
+    for source in [
+      Source::Spotify,
+      Source::YouTube,
+      Source::Subsonic,
+      Source::Radio,
+      Source::Local,
+      Source::Qobuz,
+      Source::AppleMusic,
+    ] {
+      assert_eq!(EN.sidebar.source_label(source), source.label());
+      assert_eq!(EN.onboarding.source_note(source), source.note());
+    }
+  }
+
+  #[test]
+  fn english_numbered_prompts_keep_their_spacing_and_bounds() {
+    for max in [1, 7, 128] {
+      assert_eq!(EN.onboarding.choose(max), format!("\nChoose (1-{max}): "));
+      assert_eq!(
+        EN.onboarding.invalid_choice(max),
+        format!("Invalid choice. Please enter a number between 1 and {max}.")
+      );
     }
   }
 }

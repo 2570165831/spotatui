@@ -14,7 +14,9 @@ pub mod sync;
 pub mod user;
 pub mod utils;
 
-use crate::core::app::{App, PlaybackOwner, SPOTIFY_NOT_CONNECTED_STATUS};
+#[cfg(test)]
+use crate::core::app::SPOTIFY_NOT_CONNECTED_STATUS;
+use crate::core::app::{App, PlaybackOwner};
 use crate::core::auth::SpotifyLogin;
 use crate::core::plugin_api::{ShowInfo, TrackInfo};
 use crate::core::source::Source;
@@ -397,6 +399,18 @@ pub enum IoEvent {
   DjIndexLibrary,
 }
 
+#[derive(Clone)]
+struct SpotifyPairingPrompt {
+  url: String,
+  code: String,
+}
+
+impl SpotifyPairingPrompt {
+  fn render(&self, strings: &crate::core::i18n::Strings) -> String {
+    strings.status.infra.spotify_pair(&self.url, &self.code)
+  }
+}
+
 pub struct Network {
   /// The cached Spotify login, or `None` when spotatui runs without one (a
   /// free source, or a build without Spotify). Spotify-bound `IoEvent`s stop
@@ -411,7 +425,7 @@ pub struct Network {
   pub party_connection: Option<sync::PartyConnection>,
   pub party_incoming_rx: Option<tokio::sync::mpsc::UnboundedReceiver<sync::SyncMessage>>,
   /// The pairing prompt of an in-app login that waits for the approval in the browser.
-  login_prompt: Option<String>,
+  login_prompt: Option<SpotifyPairingPrompt>,
   /// How many playback polls in a row came back 401. A lone 401 is noise; only
   /// a sustained run means the session is broken and deserves the error route.
   /// Reset by every poll the API answers.
@@ -657,7 +671,16 @@ impl Network {
     if !bypass_auth {
       if self.spotify.is_none() {
         self
-          .show_status_message(SPOTIFY_NOT_CONNECTED_STATUS.to_string(), 6)
+          .show_status_message(
+            self
+              .strings()
+              .await
+              .status
+              .infra
+              .spotify_not_connected
+              .to_string(),
+            6,
+          )
           .await;
         let mut app = self.app.lock().await;
         app.is_loading = false;
@@ -720,7 +743,8 @@ impl Network {
           if app.pending_playlist_open.as_deref() == Some(playlist_id.as_str()) {
             app.pending_playlist_open = None;
           }
-          app.set_status_message("Invalid playlist identifier.", 5);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.playlist_id_invalid, 5);
         }
       }
       IoEvent::SearchPlaylistTracks(playlist_id, query) => {
@@ -1077,11 +1101,9 @@ impl Network {
       // Consumed by infra::apple_music::dispatch; only a build without the
       // Apple Music router gets here.
       IoEvent::AppleMusicHandoff { .. } | IoEvent::AppleMusicPage { .. } => {
-        self
-          .app
-          .lock()
-          .await
-          .set_status_message("Apple Music requires macOS and the apple-music feature", 5);
+        let mut app = self.app.lock().await;
+        let message = app.strings().status.infra.music_requires_macos;
+        app.set_status_message(message, 5);
       }
       IoEvent::AppleMusicVolume { generation, .. } => {
         self.app.lock().await.finish_apple_music_volume(generation);
@@ -1136,10 +1158,15 @@ impl Network {
     // The first hit of a window under the pump: every later event is held
     // back, so a status message is enough. The CLI keeps its exit signal.
     if self.defers_rate_limited && rate_limited {
-      app.set_error_status_message(e.to_string(), 8);
+      let message = app
+        .strings()
+        .status
+        .infra
+        .network_rate_error(&e.to_string());
+      app.set_error_status_message(message, 8);
       return;
     }
-    app.handle_error(e);
+    report_request_error(&mut app, e);
   }
 
   /// Holds a Spotify-bound event back while a rate-limit window is open: queued
@@ -1160,7 +1187,10 @@ impl Network {
     if self.deferred.is_empty() {
       let secs = left.as_secs().max(1);
       self
-        .show_status_message(format!("Spotify rate limit: waiting {secs}s"), secs)
+        .show_status_message(
+          self.strings().await.status.infra.spotify_rate_wait(secs),
+          secs,
+        )
         .await;
     }
     let owner = self.app.lock().await.playback_owner();
@@ -1224,11 +1254,12 @@ impl Network {
   async fn load_listening_stats(&mut self, period: crate::infra::history::RecapPeriod) {
     use crate::infra::history;
 
+    let strings = self.strings().await;
     let result = tokio::task::spawn_blocking(move || {
       let listens = history::load_listens()?;
       let filtered = history::filter_listens_for_period(&listens, period);
       Ok::<_, anyhow::Error>((
-        history::build_stats_data(&filtered, &listens, period),
+        history::build_stats_data_with(&filtered, &listens, period, strings),
         history::compute_streaks(&listens),
       ))
     })
@@ -1237,6 +1268,11 @@ impl Network {
     .and_then(|result| result);
 
     let mut app = self.app.lock().await;
+    // A language change queues a fresh load. Neither data nor failure from
+    // the superseded load may finish that new request's loading lifecycle.
+    if !std::ptr::eq(strings, app.strings()) {
+      return;
+    }
     match result {
       Ok((stats, streaks)) => {
         app.listening_streaks = Some(streaks);
@@ -1244,7 +1280,13 @@ impl Network {
       }
       Err(error) => {
         app.fail_listening_stats();
-        app.handle_error(anyhow!("failed to load listening history: {}", error));
+        {
+          let strings = app.strings();
+          app.handle_error_with_message(
+            anyhow!("failed to load listening history: {}", error),
+            strings.status.infra.history_failed(&error.to_string()),
+          )
+        };
       }
     }
   }
@@ -1254,9 +1296,10 @@ impl Network {
   async fn generate_recap(&mut self, period: crate::infra::history::RecapPeriod) {
     use crate::infra::history;
 
+    let strings = crate::infra::app_strings(&self.app).await;
     let result = tokio::task::spawn_blocking(move || {
       let output_path = history::recap_output_path()?;
-      let count = history::export_history_recap(period, &output_path)?;
+      let count = history::export_history_recap_with(period, &output_path, strings)?;
       Ok::<_, anyhow::Error>((output_path, count))
     })
     .await
@@ -1269,20 +1312,26 @@ impl Network {
           log::warn!("failed to open recap in browser: {}", e);
         }
         let mut app = self.app.lock().await;
+        let strings = app.strings();
         app.set_status_message(
-          format!(
-            "Listening recap generated at {} ({} listens)",
-            output_path.display(),
-            count
-          ),
+          strings
+            .status
+            .infra
+            .recap_created(&output_path.display().to_string(), count),
           5,
         );
       }
       Err(error) => {
         let mut app = self.app.lock().await;
-        app.set_status_message(format!("Failed to generate recap: {}", error), 5);
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.recap_failed(&error.to_string()), 5);
       }
     }
+  }
+
+  /// Snapshot the active table after releasing the app lock.
+  async fn strings(&self) -> &'static crate::core::i18n::Strings {
+    crate::infra::app_strings(&self.app).await
   }
 
   async fn show_status_message(&self, message: String, ttl_secs: u64) {
@@ -1298,7 +1347,7 @@ impl Network {
     // A repeat ask shows the waiting login's code again instead of replacing it.
     if let Some(prompt) = self.login_prompt.clone() {
       self
-        .show_status_message(prompt, LOGIN_TIMEOUT.as_secs())
+        .show_status_message(prompt.render(self.strings().await), LOGIN_TIMEOUT.as_secs())
         .await;
       return;
     }
@@ -1309,7 +1358,15 @@ impl Network {
         Ok(pending) => pending,
         Err(e) => {
           self
-            .show_status_message(format!("Spotify login failed: {e}"), 8)
+            .show_status_message(
+              self
+                .strings()
+                .await
+                .status
+                .infra
+                .spotify_login_failed(&e.to_string()),
+              8,
+            )
             .await;
           return;
         }
@@ -1321,15 +1378,15 @@ impl Network {
       if let Err(e) = open::that_detached(pending.url()) {
         log::warn!("[login] failed to open browser automatically: {e}");
       }
-      let prompt = format!(
-        "Log in to Spotify: open {} and confirm the code {}",
-        pending.url(),
-        pending.code()
-      );
+      let prompt = SpotifyPairingPrompt {
+        url: pending.url().to_string(),
+        code: pending.code().to_string(),
+      };
       self
-        .show_status_message(prompt.clone(), LOGIN_TIMEOUT.as_secs())
+        .show_status_message(prompt.render(self.strings().await), LOGIN_TIMEOUT.as_secs())
         .await;
       self.login_prompt = Some(prompt);
+      let login_app = Arc::clone(&self.app);
       tokio::spawn(async move {
         let finished = async {
           let credentials = pending.finish().await?;
@@ -1337,12 +1394,16 @@ impl Network {
             .await
             .map_err(|reason| anyhow::anyhow!(reason.message()))
         };
-        let event = match tokio::time::timeout(LOGIN_TIMEOUT, finished).await {
+        let outcome = tokio::time::timeout(LOGIN_TIMEOUT, finished).await;
+        let strings = crate::infra::app_strings(&login_app).await;
+        let event = match outcome {
           Ok(Ok(())) => IoEvent::CompleteSpotifyLogin,
-          Ok(Err(e)) => IoEvent::CancelSpotifyLogin(format!("Spotify login failed: {e}")),
-          Err(_) => IoEvent::CancelSpotifyLogin(
-            "Spotify login timed out. Press `d` and pick Spotify to try again.".to_string(),
-          ),
+          Ok(Err(e)) => {
+            IoEvent::CancelSpotifyLogin(strings.status.infra.spotify_login_failed(&e.to_string()))
+          }
+          Err(_) => {
+            IoEvent::CancelSpotifyLogin(strings.status.infra.spotify_login_timeout.to_string())
+          }
         };
         let _ = io_tx.send(event);
       });
@@ -1350,7 +1411,13 @@ impl Network {
     #[cfg(not(feature = "spotify-session"))]
     self
       .show_status_message(
-        "This build of spotatui has no Spotify support".to_string(),
+        self
+          .strings()
+          .await
+          .status
+          .infra
+          .spotify_not_compiled
+          .to_string(),
         6,
       )
       .await;
@@ -1384,7 +1451,13 @@ impl Network {
     }
     self
       .show_status_message(
-        "Spotify connected. Restart spotatui to enable native playback.".to_string(),
+        self
+          .strings()
+          .await
+          .status
+          .infra
+          .spotify_connected
+          .to_string(),
         10,
       )
       .await;
@@ -1402,7 +1475,16 @@ impl Network {
     // would leave a live party the drain has to close again.
     if self.spotify.is_none() {
       self
-        .show_status_message(SPOTIFY_NOT_CONNECTED_STATUS.to_string(), 6)
+        .show_status_message(
+          self
+            .strings()
+            .await
+            .status
+            .infra
+            .spotify_not_connected
+            .to_string(),
+          6,
+        )
         .await;
       return;
     }
@@ -1441,7 +1523,13 @@ impl Network {
       Err(e) => {
         let mut app = self.app.lock().await;
         app.set_party_status(sync::PartyStatus::Disconnected);
-        app.handle_error(anyhow!("Failed to start party: {}", e));
+        {
+          let strings = app.strings();
+          app.handle_error_with_message(
+            anyhow!("Failed to start party: {}", e),
+            strings.status.infra.party_start_failed(&e.to_string()),
+          )
+        };
       }
     }
   }
@@ -1450,7 +1538,16 @@ impl Network {
     // Same requirement as `start_party`.
     if self.spotify.is_none() {
       self
-        .show_status_message(SPOTIFY_NOT_CONNECTED_STATUS.to_string(), 6)
+        .show_status_message(
+          self
+            .strings()
+            .await
+            .status
+            .infra
+            .spotify_not_connected
+            .to_string(),
+          6,
+        )
         .await;
       return;
     }
@@ -1484,7 +1581,13 @@ impl Network {
       Err(e) => {
         let mut app = self.app.lock().await;
         app.set_party_status(sync::PartyStatus::Disconnected);
-        app.handle_error(anyhow!("Failed to join party: {}", e));
+        {
+          let strings = app.strings();
+          app.handle_error_with_message(
+            anyhow!("Failed to join party: {}", e),
+            strings.status.infra.party_join_failed(&e.to_string()),
+          )
+        };
       }
     }
   }
@@ -1574,7 +1677,13 @@ impl Network {
         self.leave_party().await;
         self
           .show_status_message(
-            "Listening Party ended: Spotify is not connected.".to_string(),
+            self
+              .strings()
+              .await
+              .status
+              .infra
+              .party_disconnected
+              .to_string(),
             6,
           )
           .await;
@@ -1616,7 +1725,8 @@ impl Network {
               session.guests.push(name.clone());
             }
           }
-          app.set_status_message(format!("{} joined the party", name), 3);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.party_joined(&name), 3);
         }
         sync::SyncMessage::GuestLeft { name } => {
           let mut app = self.app.lock().await;
@@ -1625,7 +1735,8 @@ impl Network {
               session.guests.remove(pos);
             }
           }
-          app.set_status_message(format!("{} left the party", name), 3);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.party_left(&name), 3);
         }
         sync::SyncMessage::SetControlMode { control_mode } => {
           let mut app = self.app.lock().await;
@@ -1647,7 +1758,8 @@ impl Network {
           let mut app = self.app.lock().await;
           app.set_party_status(sync::PartyStatus::Disconnected);
           app.set_party_session(None);
-          app.set_status_message("Party ended".to_string(), 5);
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.party_ended.to_string(), 5);
         }
         sync::SyncMessage::Error { message } => {
           self.party_connection = None;
@@ -1655,7 +1767,13 @@ impl Network {
           let mut app = self.app.lock().await;
           app.set_party_status(sync::PartyStatus::Disconnected);
           app.set_party_session(None);
-          app.handle_error(anyhow!("Party: {}", message));
+          {
+            let strings = app.strings();
+            app.handle_error_with_message(
+              anyhow!("Party: {}", message),
+              strings.status.infra.party_error(&message),
+            )
+          };
         }
         _ => {}
       }
@@ -1799,8 +1917,75 @@ fn party_yields_to_local_playback(app: &App) -> bool {
     || app.native_parked_here()
 }
 
+/// Keep diagnostics and the CLI byte-identical while giving the UI a localized context.
+fn report_request_error(app: &mut App, error: anyhow::Error) {
+  let message = app
+    .strings()
+    .status
+    .infra
+    .network_error(&requests::error_text(&error, app.language()));
+  app.handle_error_with_message(error, message);
+}
+
 #[cfg(test)]
 mod tests {
+
+  #[tokio::test]
+  async fn speaker_errors_use_the_active_ui_language_without_losing_the_error_route() {
+    use crate::core::i18n::{Language, LocalizedMessage};
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let app = app_without_a_session();
+      {
+        let mut app = app.lock().await;
+        app.user_config.behavior.language = language;
+        app.refresh_language();
+      }
+      let mut network = Network::new(None, &app);
+      network
+        .handle_error(
+          LocalizedMessage::new(|s| s.status.infra.cast_no_reply("LAUNCH {name}")).into(),
+        )
+        .await;
+      let app = app.lock().await;
+      assert!(app.api_error().contains("LAUNCH {name}"));
+      assert_eq!(app.get_current_route().id, crate::core::app::RouteId::Error);
+      assert_eq!(
+        app.api_error(),
+        app
+          .strings()
+          .status
+          .infra
+          .network_error(&app.strings().status.infra.cast_no_reply("LAUNCH {name}"))
+      );
+    }
+  }
+
+  #[tokio::test]
+  async fn a_repeated_login_preserves_the_translated_pairing_prompt_and_literal_code() {
+    use crate::core::i18n::Language;
+    for language in [Language::ZhHans, Language::ZhHant] {
+      let app = app_without_a_session();
+      app.lock().await.user_config.behavior.language = language;
+      app.lock().await.refresh_language();
+      let prompt = app
+        .lock()
+        .await
+        .strings()
+        .status
+        .infra
+        .spotify_pair("https://spotify.com/pair", "A{url}B");
+      let mut network = Network::new(None, &app);
+      network.login_prompt = Some(SpotifyPairingPrompt {
+        url: "https://spotify.com/pair".into(),
+        code: "A{url}B".into(),
+      });
+      network
+        .handle_network_event(IoEvent::BeginSpotifyLogin)
+        .await;
+      assert_eq!(app.lock().await.status_message(), Some(prompt.as_str()));
+      assert!(prompt.contains("A{url}B"));
+    }
+  }
   use super::*;
   use crate::core::app::App;
   use crate::core::user_config::UserConfig;
@@ -2022,7 +2207,10 @@ mod tests {
     let (app, io_rx) = app_with_a_session_and_channel();
     app.lock().await.spotify_connected = false;
     let mut network = Network::new(None, &app);
-    network.login_prompt = Some("pair".to_string());
+    network.login_prompt = Some(SpotifyPairingPrompt {
+      url: "https://spotify.com/pair".into(),
+      code: "ABCD".into(),
+    });
 
     network
       .handle_network_event(IoEvent::CompleteSpotifyLogin)
@@ -2066,7 +2254,10 @@ mod tests {
   async fn a_failed_login_shows_its_reason_once() {
     let app = app_without_a_session();
     let mut network = Network::new(None, &app);
-    network.login_prompt = Some("pair".to_string());
+    network.login_prompt = Some(SpotifyPairingPrompt {
+      url: "https://spotify.com/pair".into(),
+      code: "ABCD".into(),
+    });
 
     network
       .handle_network_event(IoEvent::CancelSpotifyLogin(
@@ -2092,7 +2283,10 @@ mod tests {
     let app = app_without_a_session();
     let mut network = Network::new(None, &app);
     let prompt = "Log in to Spotify: open https://spotify.com/pair and confirm the code ABCD";
-    network.login_prompt = Some(prompt.to_string());
+    network.login_prompt = Some(SpotifyPairingPrompt {
+      url: "https://spotify.com/pair".into(),
+      code: "ABCD".into(),
+    });
     app.lock().await.set_status_message("other", 5);
 
     network
@@ -2142,6 +2336,80 @@ mod tests {
     let (io_tx, io_rx) = std::sync::mpsc::channel();
     let app = App::new(io_tx, UserConfig::new(), Some(SystemTime::now()));
     (Arc::new(Mutex::new(app)), io_rx)
+  }
+
+  #[tokio::test]
+  async fn a_rate_limited_made_for_you_fetch_clears_loading_without_opening_an_error_route() {
+    let (app, _rx) = app_with_a_session_and_channel();
+    let mut network = rate_limited_pump_network(&app).await;
+    app.lock().await.fetch_discover();
+    assert!(app.lock().await.discover_loading());
+    let route = app.lock().await.get_current_route().id.clone();
+    network
+      .finish_made_for_you(Err(
+        requests::SpotifyApiError {
+          status: reqwest::StatusCode::TOO_MANY_REQUESTS,
+          body: "rate limited by Spotify, retry in 30s".into(),
+          localized_body: None,
+          detail: None,
+          endpoint: Some("GET /v1/views/made-for-x".into()),
+        }
+        .into(),
+      ))
+      .await;
+    let app = app.lock().await;
+    assert!(!app.discover_loading());
+    assert_eq!(app.get_current_route().id, route);
+    assert!(app.api_error().is_empty());
+    assert!(app.status_message_is_error());
+    assert!(app.status_message().unwrap().contains("429"));
+  }
+
+  #[tokio::test]
+  async fn a_rate_limited_made_for_you_fetch_keeps_the_cli_failure_signal() {
+    let (app, _rx) = app_with_a_session_and_channel();
+    let mut network = rate_limited_pump_network(&app).await;
+    network.defers_rate_limited = false;
+    network
+      .finish_made_for_you(Err(
+        requests::SpotifyApiError {
+          status: reqwest::StatusCode::TOO_MANY_REQUESTS,
+          body: "rate limited by Spotify, retry in 30s".into(),
+          localized_body: None,
+          detail: None,
+          endpoint: Some("GET /v1/views/made-for-x".into()),
+        }
+        .into(),
+      ))
+      .await;
+    let app = app.lock().await;
+    assert!(!app.api_error().is_empty());
+    assert_eq!(app.get_current_route().id, crate::core::app::RouteId::Error);
+  }
+
+  #[tokio::test]
+  async fn a_waiting_pairing_code_uses_the_language_selected_after_login_started() {
+    use crate::core::i18n::Language;
+    let app = app_without_a_session();
+    let mut network = Network::new(None, &app);
+    network.login_prompt = Some(SpotifyPairingPrompt {
+      url: "https://spotify.com/pair?literal={code}".into(),
+      code: "A{url}B".into(),
+    });
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let expected = {
+        let mut app = app.lock().await;
+        app.user_config.behavior.language = language;
+        app.refresh_language();
+        app
+          .strings()
+          .status
+          .infra
+          .spotify_pair("https://spotify.com/pair?literal={code}", "A{url}B")
+      };
+      network.begin_spotify_login().await;
+      assert_eq!(app.lock().await.status_message(), Some(expected.as_str()));
+    }
   }
 
   #[tokio::test]
@@ -2529,6 +2797,52 @@ mod tests {
     assert_eq!(
       app.display_revisions().get(DisplayDomain::Party),
       before + 1
+    );
+  }
+
+  #[tokio::test]
+  async fn party_auth_status_uses_app_language_without_holding_the_lock() {
+    use crate::core::i18n::Language;
+    let mut state = App::default();
+    state.user_config.behavior.language = Language::ZhHant;
+    state.refresh_language();
+    let app = Arc::new(Mutex::new(state));
+    let mut network = Network::new(None, &app);
+    tokio::time::timeout(
+      std::time::Duration::from_secs(2),
+      network.start_party(sync::ControlMode::HostOnly),
+    )
+    .await
+    .expect("reading the table must release the lock before writing status");
+    assert_eq!(
+      app.lock().await.status_message(),
+      Some(
+        crate::core::i18n::ZH_HANT
+          .status
+          .infra
+          .spotify_not_connected
+      )
+    );
+    {
+      let mut app = app.lock().await;
+      app.user_config.behavior.language = Language::ZhHans;
+      app.refresh_language();
+    }
+    network.start_party(sync::ControlMode::HostOnly).await;
+    assert_eq!(
+      app.lock().await.status_message(),
+      Some(
+        crate::core::i18n::ZH_HANS
+          .status
+          .infra
+          .spotify_not_connected
+      )
+    );
+    app.lock().await.use_english_messages();
+    network.start_party(sync::ControlMode::HostOnly).await;
+    assert_eq!(
+      app.lock().await.status_message(),
+      Some("Spotify not connected. Press `d` and pick Spotify to log in.")
     );
   }
 }

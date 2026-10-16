@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, sourceLabel } from "./i18n";
 import type { SearchPayload } from "./bindings/SearchPayload";
 import type { ShowInfo } from "./bindings/ShowInfo";
 import type { Source } from "./bindings/Source";
@@ -46,8 +47,10 @@ export function year(releaseDate: string | null): string {
 }
 
 /** The scope picker's label. Local has no catalogue search, so it searches Spotify. */
-export function scopeLabel(source: Source): string {
-  return source === "Local" ? "Local has no search · Spotify" : `In ${source}`;
+export function scopeLabel(source: Source, s: GuiStrings = EN): string {
+  return source === "Local"
+    ? s.local_no_search
+    : fmt(s.search_scope, { source: sourceLabel(source, s) });
 }
 
 /** The other compiled sources the query can run in; Local is left out because it searches Spotify. */

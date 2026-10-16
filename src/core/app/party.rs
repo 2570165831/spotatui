@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 const PARTY_NEEDS_SPOTIFY: &str =
   "Listening Party needs Spotify. Press `d` and pick Spotify to log in.";
 
@@ -32,7 +33,7 @@ impl App {
   /// Host a party; needs a Spotify session, the relay drives Spotify playback.
   pub(crate) fn start_party(&mut self) {
     if !self.spotify_connected {
-      self.set_status_message(PARTY_NEEDS_SPOTIFY, 6);
+      self.set_status_message(self.strings().status.app.party_needs_spotify, 6);
       return;
     }
     self.dispatch(IoEvent::StartParty(ControlMode::HostOnly));
@@ -41,7 +42,7 @@ impl App {
   /// Join a party; same session requirement as `start_party`.
   pub(crate) fn join_party(&mut self, code: String, name: String) {
     if !self.spotify_connected {
-      self.set_status_message(PARTY_NEEDS_SPOTIFY, 6);
+      self.set_status_message(self.strings().status.app.party_needs_spotify, 6);
       return;
     }
     self.dispatch(IoEvent::JoinParty { code, name });

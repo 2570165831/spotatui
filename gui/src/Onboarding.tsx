@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useState } from "react";
 import type { OnboardingQuestion } from "./bindings/OnboardingQuestion";
 import type { OnboardingReply } from "./bindings/OnboardingReply";
@@ -6,10 +7,12 @@ import type { Source } from "./bindings/Source";
 
 /** The first-launch questions, answered in the page; a placeholder layout like the rest. */
 export function Onboarding({
+  s = EN,
   view,
   connected,
   onReply,
 }: {
+  s?: GuiStrings;
   view: OnboardingView;
   connected: boolean;
   onReply: (reply: OnboardingReply) => void;
@@ -19,6 +22,7 @@ export function Onboarding({
       <pre className="transcript">{view.transcript}</pre>
       {view.pending && (
         <Question
+          s={s}
           key={view.pending.seq}
           question={view.pending}
           connected={connected}
@@ -30,10 +34,12 @@ export function Onboarding({
 }
 
 function Question({
+  s = EN,
   question: { seq, ask },
   connected,
   onReply,
 }: {
+  s?: GuiStrings;
   question: OnboardingQuestion;
   connected: boolean;
   onReply: (reply: OnboardingReply) => void;
@@ -59,7 +65,7 @@ function Question({
             />
           </label>
           <button type="submit" disabled={!connected}>
-            Continue
+            {s.continue_button}
           </button>
         </form>
       );
@@ -75,7 +81,7 @@ function Question({
               onReply({ seq, answer: { kind: "Confirm", yes: true } })
             }
           >
-            Yes
+            {s.yes}
           </button>
           <button
             disabled={!connected}
@@ -83,7 +89,7 @@ function Question({
               onReply({ seq, answer: { kind: "Confirm", yes: false } })
             }
           >
-            No
+            {s.no}
           </button>
         </div>
       );
@@ -95,11 +101,8 @@ function Question({
             onReply({ seq, answer: { kind: "Sources", picked } });
           }}
         >
-          <h2>Choose your music sources</h2>
-          <p>
-            Leave all unchecked to set up Spotify only; you can add or switch
-            sources later.
-          </p>
+          <h2>{s.choose_sources}</h2>
+          <p>{s.choose_sources_hint}</p>
           {ask.options.map(({ source, label, note }) => (
             <label key={source}>
               <input
@@ -117,7 +120,7 @@ function Question({
             </label>
           ))}
           <button type="submit" disabled={!connected}>
-            Continue
+            {s.continue_button}
           </button>
         </form>
       );

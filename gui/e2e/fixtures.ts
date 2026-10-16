@@ -1,4 +1,5 @@
 import type { EpisodeInfo } from "../src/bindings/EpisodeInfo";
+import strings from "../src/bindings/strings.json" with { type: "json" };
 import type { NowPlaying } from "../src/bindings/NowPlaying";
 import type { PlaylistInfo } from "../src/bindings/PlaylistInfo";
 import type { ResumePointInfo } from "../src/bindings/ResumePointInfo";
@@ -38,7 +39,14 @@ const revisions = {
 
 export const hello: ServerMessage = {
   kind: "hello",
-  payload: { version: "0.0.0-shot", token: "shot", revisions, window: false },
+  payload: {
+    version: "0.0.0-shot",
+    token: "shot",
+    revisions,
+    window: false,
+    language: "en",
+    strings: strings.EN,
+  },
 };
 
 const sourceChoices: [Source, string, string][] = [
@@ -851,99 +859,108 @@ export const settings: ServerMessage[] = [
   {
     kind: "settings",
     rev: 1,
-    payload: [
-      setting(
-        "seek_milliseconds",
-        "playback",
-        "Seek Duration (ms)",
-        "Milliseconds to skip when seeking",
-        { kind: "number", value: 5000 },
-      ),
-      setting(
-        "volume_increment",
-        "playback",
-        "Volume Increment",
-        "Volume change per keypress (0-100)",
-        { kind: "number", value: 10 },
-      ),
-      setting(
-        "stop_after_current_track",
-        "playback",
-        "Stop After Current Track",
-        "Pause playback when the current track finishes",
-        { kind: "bool", value: false },
-      ),
-      setting(
-        "enable_media_keys",
-        "playback",
-        "Media Key Controls",
-        "Let OS media keys, headphone buttons, and remote controls (playerctl, Now Playing) control playback",
-        { kind: "bool", value: true },
-      ),
-      setting(
-        "enable_streaming",
-        "streaming",
-        "Native Streaming",
-        "Play Spotify in spotatui as a Connect device (applies on restart)",
-        { kind: "bool", value: true },
-      ),
-      setting(
-        "streaming_device_name",
-        "streaming",
-        "Streaming Device Name",
-        "The Connect device name other Spotify apps show (applies on restart)",
-        { kind: "text", value: "spotatui" },
-      ),
-      setting(
-        "streaming_bitrate",
-        "streaming",
-        "Streaming Bitrate",
-        "Native streaming quality in kbps (applies on restart)",
-        { kind: "choice", value: "320", options: ["96", "160", "320"] },
-      ),
-      setting(
-        "enable_discord_rpc",
-        "integrations",
-        "Discord Rich Presence",
-        "Show your current track in Discord",
-        { kind: "bool", value: true },
-      ),
-      setting(
-        "subsonic_url",
-        "sources",
-        "Subsonic Server",
-        "Address of your Subsonic or Navidrome server",
-        { kind: "text", value: "https://music.example.net" },
-      ),
-      setting(
-        "subsonic_password",
-        "sources",
-        "Subsonic Password",
-        "Saved in config.yml; SPOTATUI_SUBSONIC_PASSWORD overrides it",
-        { kind: "secret", set: true },
-      ),
-      setting(
-        "local_music_path",
-        "sources",
-        "Music Folder",
-        "The folder Local Files reads",
-        { kind: "text", value: "" },
-      ),
-      setting(
-        "disable_auto_update",
-        "updates",
-        "Disable Auto-Update",
-        "Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself",
-        { kind: "bool", value: false },
-      ),
-      setting(
-        "auto_update_delay",
-        "updates",
-        "Auto-Update Delay",
-        "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'",
-        { kind: "text", value: "0" },
-      ),
-    ],
+    payload: {
+      language: "en",
+      strings: strings.EN,
+      rows: [
+        setting(
+          "seek_milliseconds",
+          "playback",
+          "Seek Duration (ms)",
+          "Milliseconds to skip when seeking",
+          { kind: "number", value: 5000 },
+        ),
+        setting(
+          "volume_increment",
+          "playback",
+          "Volume Increment",
+          "Volume change per keypress (0-100)",
+          { kind: "number", value: 10 },
+        ),
+        setting(
+          "stop_after_current_track",
+          "playback",
+          "Stop After Current Track",
+          "Pause playback when the current track finishes",
+          { kind: "bool", value: false },
+        ),
+        setting(
+          "enable_media_keys",
+          "playback",
+          "Media Key Controls",
+          "Let OS media keys, headphone buttons, and remote controls (playerctl, Now Playing) control playback",
+          { kind: "bool", value: true },
+        ),
+        setting(
+          "enable_streaming",
+          "streaming",
+          "Native Streaming",
+          "Play Spotify in spotatui as a Connect device (applies on restart)",
+          { kind: "bool", value: true },
+        ),
+        setting(
+          "streaming_device_name",
+          "streaming",
+          "Streaming Device Name",
+          "The Connect device name other Spotify apps show (applies on restart)",
+          { kind: "text", value: "spotatui" },
+        ),
+        setting(
+          "streaming_bitrate",
+          "streaming",
+          "Streaming Bitrate",
+          "Native streaming quality in kbps (applies on restart)",
+          {
+            kind: "choice",
+            value: "320",
+            options: ["96", "160", "320"],
+            labels: ["96", "160", "320"],
+          },
+        ),
+        setting(
+          "enable_discord_rpc",
+          "integrations",
+          "Discord Rich Presence",
+          "Show your current track in Discord",
+          { kind: "bool", value: true },
+        ),
+        setting(
+          "subsonic_url",
+          "sources",
+          "Subsonic Server",
+          "Address of your Subsonic or Navidrome server",
+          { kind: "text", value: "https://music.example.net" },
+        ),
+        setting(
+          "subsonic_password",
+          "sources",
+          "Subsonic Password",
+          "Saved in config.yml; SPOTATUI_SUBSONIC_PASSWORD overrides it",
+          { kind: "secret", set: true },
+        ),
+        setting(
+          "local_music_path",
+          "sources",
+          "Music Folder",
+          "The folder Local Files reads",
+          { kind: "text", value: "" },
+        ),
+        setting(
+          "disable_auto_update",
+          "updates",
+          "Disable Auto-Update",
+          "Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself",
+          { kind: "bool", value: false },
+        ),
+        setting(
+          "auto_update_delay",
+          "updates",
+          "Auto-Update Delay",
+          "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'",
+          { kind: "text", value: "0" },
+        ),
+      ],
+    },
   },
   { kind: "update", rev: 1, payload: { state: "ready", version: "0.44.0" } },
 ];

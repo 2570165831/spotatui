@@ -1,3 +1,6 @@
+import { useStringsReader } from "./useStringsReader";
+import { copyLink } from "./pagesModel";
+import { EN, type GuiStrings } from "./i18n";
 import {
   createContext,
   useEffect,
@@ -28,22 +31,32 @@ export const TrackActionsContext = createContext<TrackActions | null>(null);
 
 /** A track's menu at a window point, drawn over the page. */
 export function TrackMenu({
+  s = EN,
   label,
   groups,
   at,
   actions,
   onClose,
 }: {
+  s?: GuiStrings;
   label: string;
   groups: MenuEntry[][];
   at: { x: number; y: number };
   actions: TrackActions;
   onClose: () => void;
 }) {
+  const readStrings = useStringsReader(s);
   const run = (entry: MenuEntry) => {
     if (entry.kind === "action") actions.send(entry.action);
     else if (entry.kind === "open") actions.open(entry.view);
-    else if (entry.kind === "copy") copy(entry.text, entry.done, actions.send);
+    else if (entry.kind === "copy")
+      void copyLink(
+        entry.text,
+        entry.done,
+        actions.send,
+        navigator.clipboard,
+        readStrings,
+      );
     if (entry.kind !== "submenu") onClose();
   };
   return createPortal(
@@ -78,9 +91,12 @@ export function MenuList({
   const [place, setPlace] = useState(at);
   const [sub, setSub] = useState<{
     key: string;
-    entries: MenuEntry[];
     at: { x: number; y: number };
   } | null>(null);
+
+  const submenu = groups
+    .flat()
+    .find((entry) => entry.kind === "submenu" && entry.id === sub?.key);
 
   // The menu stays inside the window, and the first entry takes the keyboard.
   useLayoutEffect(() => {
@@ -116,8 +132,7 @@ export function MenuList({
     if (entry.kind !== "submenu") return;
     const box = button.getBoundingClientRect();
     setSub({
-      key: entry.label,
-      entries: entry.entries,
+      key: entry.id,
       at: { x: box.right - 4, y: box.top - 4 },
     });
   };
@@ -162,14 +177,12 @@ export function MenuList({
           <div key={index} className="menu-group">
             {group.map((entry) => (
               <button
-                key={entry.label}
+                key={entry.id}
                 type="button"
                 role="menuitem"
                 aria-haspopup={entry.kind === "submenu" ? "menu" : undefined}
                 aria-expanded={
-                  entry.kind === "submenu"
-                    ? sub?.key === entry.label
-                    : undefined
+                  entry.kind === "submenu" ? sub?.key === entry.id : undefined
                 }
                 onClick={(event) => {
                   if (entry.kind === "submenu")
@@ -195,11 +208,11 @@ export function MenuList({
           </div>
         ))}
       </div>
-      {sub && (
+      {sub && submenu?.kind === "submenu" && (
         <MenuList
           key={sub.key}
-          label={sub.key}
-          groups={[sub.entries]}
+          label={submenu.label}
+          groups={[submenu.entries]}
           at={sub.at}
           run={run}
           onClose={() => {
@@ -212,11 +225,4 @@ export function MenuList({
       )}
     </>
   );
-}
-
-function copy(text: string, done: string, send: (action: Action) => void) {
-  const failed = () => send({ NotifyError: ["Could not copy the link.", 4] });
-  const write = navigator.clipboard?.writeText(text);
-  if (!write) return failed();
-  write.then(() => send({ Notify: [done, 3] }), failed);
 }

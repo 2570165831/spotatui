@@ -7,10 +7,14 @@ import type { Source } from "./bindings/Source";
 import type { SourcePlaylists } from "./bindings/SourcePlaylists";
 import {
   LibraryPanel,
+  SourceSelect,
+  PlaylistRemovalDialog,
   PlaylistRows,
   ShowRows,
   SortSelect,
 } from "./LibraryPanel";
+import { EN, deviceKind } from "./i18n";
+import { removalTarget, playlistRemoval } from "./libraryModel";
 import { ALBUM_SORTS } from "./libraryModel";
 import type { View } from "./nav";
 import { hostElements } from "./testTree";
@@ -355,4 +359,119 @@ describe("SortSelect", () => {
     });
     expect(onChange).toHaveBeenCalledWith("name");
   });
+});
+
+describe("localized library identities", () => {
+  it("sends raw sources when the visible choices use Chinese labels", () => {
+    const send = vi.fn();
+    const s = { ...EN, source_local: "本地文件", source_radio: "网络电台" };
+    const tree = (
+      <SourceSelect
+        s={s}
+        active="Local"
+        compiled={["Spotify", "Local", "Radio"]}
+        send={send}
+      />
+    );
+    const elements = hostElements(tree);
+    const options = elements.filter((element) => element.type === "option");
+    expect(options.map((element) => element.props.value)).toEqual([
+      "Spotify",
+      "Local",
+      "Radio",
+    ]);
+    expect(options[1].props.children).toBe("本地文件");
+    const select = elements.find((element) => element.type === "select")!;
+    expect(select.props.value).toBe("Local");
+    (select.props.onChange as (event: unknown) => void)({
+      target: { value: options[2].props.value },
+    });
+    expect(send).toHaveBeenCalledWith({ SelectSource: "Radio" });
+  });
+
+  it("renders an open removal question with the current table and the original identity", () => {
+    const removal = playlistRemoval(
+      "Spotify",
+      { uri: "spotify:playlist:mine", name: "Literal {name}" },
+      payload,
+    )!;
+    const target = removalTarget(removal);
+    expect(Object.keys(target).sort()).toEqual([
+      "action",
+      "kind",
+      "name",
+      "uri",
+    ]);
+    const s = {
+      ...EN,
+      delete_library_question: "删除播放列表？",
+      delete_library_body: "删除 {name}？",
+      delete: "删除",
+    };
+    const question = (strings: typeof EN) =>
+      renderToStaticMarkup(
+        <PlaylistRemovalDialog
+          s={strings}
+          target={target}
+          onConfirm={() => {}}
+          onCancel={() => {}}
+        />,
+      );
+    expect(question(EN)).toContain(EN.delete_library_question);
+    expect(question(s)).toContain("删除播放列表？");
+    expect(question(s)).toContain("删除 Literal {name}？");
+    expect(question(s)).not.toContain(EN.delete_library_question);
+    expect(target.action).toEqual({
+      UnfollowPlaylist: "spotify:playlist:mine",
+    });
+  });
+
+  it("translates the lowercase device kinds sent by the protocol", () => {
+    const s = {
+      ...EN,
+      device_cast_audio: "Cast 音频",
+      device_cast_video: "Cast 视频",
+    };
+    expect(deviceKind("castaudio", s)).toBe("Cast 音频");
+    expect(deviceKind("castvideo", s)).toBe("Cast 视频");
+    expect(deviceKind("speaker", s)).toBe("speaker");
+    expect(deviceKind("castaudio", EN)).toBe("castaudio");
+    expect(deviceKind("castvideo", EN)).toBe("castvideo");
+  });
+});
+
+it("displays every known lowercase protocol device kind and leaves unknown kinds literal", () => {
+  const table = {
+    ...EN,
+    device_computer: "电脑",
+    device_tablet: "平板",
+    device_smartphone: "手机",
+    device_smartwatch: "手表",
+    device_speaker: "扬声器",
+    device_tv: "电视",
+    device_avr: "接收器",
+    device_stb: "机顶盒",
+    device_audio_dongle: "音频转接器",
+    device_game_console: "游戏主机",
+    device_automobile: "车载设备",
+    device_unknown: "未知",
+  };
+  for (const [kind, label] of [
+    ["computer", table.device_computer],
+    ["tablet", table.device_tablet],
+    ["smartphone", table.device_smartphone],
+    ["smartwatch", table.device_smartwatch],
+    ["speaker", table.device_speaker],
+    ["tv", table.device_tv],
+    ["avr", table.device_avr],
+    ["stb", table.device_stb],
+    ["audiodongle", table.device_audio_dongle],
+    ["gameconsole", table.device_game_console],
+    ["automobile", table.device_automobile],
+    ["unknown", table.device_unknown],
+  ]) {
+    expect(deviceKind(kind, table)).toBe(label);
+    expect(deviceKind(kind, EN)).toBe(kind);
+  }
+  expect(deviceKind("provider {device}", table)).toBe("provider {device}");
 });

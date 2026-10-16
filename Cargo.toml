@@ -34,6 +34,7 @@ dirs = "7.0"
 clap = { version = "4.6", features = ["cargo"] }
 clap_complete = "4.6"
 unicode-width = "0.2.2"
+unicode-segmentation = { version = "1.12", optional = true }
 backtrace = "0.3.76"
 crossterm = { version = "0.29", optional = true }
 tui-bar-graph = { version = "0.3.3", optional = true }
@@ -142,6 +143,7 @@ arboard = { version = "3.4", features = ["wayland-data-control"] }
 librespot-playback = { version = "=0.8.6", package = "spotatui-librespot-playback", optional = true, default-features = false, features = ["rodio-backend"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
 arboard = "3.4"
 # On Windows we default to rodio for audio output.
 # Without this, librespot-playback falls back to the `pipe` sink which writes raw audio bytes
@@ -173,7 +175,7 @@ telemetry = []
 # The headless CI leg omits it, so any `crate::tui` import from core/infra/cli
 # is a compile error there - that is what keeps a second frontend from silently
 # re-coupling to the terminal one.
-tui = ["dep:ratatui", "dep:crossterm", "dep:tui-bar-graph", "dep:colorgrad"]
+tui = ["dep:unicode-segmentation", "dep:ratatui", "dep:crossterm", "dep:tui-bar-graph", "dep:colorgrad"]
 # The browser frontend: the loopback page server, `run_gui` and the
 # `spotatui-gui` bin shim (which claims the binary name and the Windows
 # console-attach plumbing).

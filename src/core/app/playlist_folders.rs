@@ -25,11 +25,30 @@ pub struct PlaylistFolderNode {
 /// A folder entry for navigation in the playlist panel
 #[derive(Clone, Debug)]
 pub struct PlaylistFolder {
+  /// The server omitted its name; a user title with the same text stays literal.
+  pub generated_name: bool,
   pub name: String,
   /// Folder ID this item is visible in (which folder "page" it appears on)
   pub current_id: usize,
   /// Folder ID this item navigates to when selected
   pub target_id: usize,
+}
+
+impl PlaylistFolder {
+  pub fn display_name<'a>(
+    &'a self,
+    strings: &crate::core::i18n::Strings,
+  ) -> std::borrow::Cow<'a, str> {
+    if !self.generated_name {
+      return std::borrow::Cow::Borrowed(&self.name);
+    }
+    let name = strings.status.infra.unnamed_folder;
+    if self.current_id > self.target_id {
+      std::borrow::Cow::Owned(format!("← {name}"))
+    } else {
+      std::borrow::Cow::Borrowed(name)
+    }
+  }
 }
 
 /// A flattened item for display in the playlist panel
@@ -96,7 +115,7 @@ impl App {
         log::warn!("failed to persist community playlist pin setting: {}", e);
       }
       self.set_status_message(
-        "Community playlist pin hidden (re-enable in Settings)".to_string(),
+        self.strings().status.app.community_pin_hidden.to_string(),
         6,
       );
     }
@@ -188,6 +207,7 @@ mod tests {
   fn group_folders_first_hoists_folders_stably_and_only_when_enabled() {
     fn folder(name: &str) -> PlaylistFolderItem {
       PlaylistFolderItem::Folder(PlaylistFolder {
+        generated_name: false,
         name: name.to_string(),
         current_id: 0,
         target_id: 1,

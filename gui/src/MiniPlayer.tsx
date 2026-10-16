@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useEffect, useRef, type Ref } from "react";
 import type { ShellCommand } from "./areas";
 import type { Action } from "./bindings/Action";
@@ -12,6 +13,7 @@ import { usePosition } from "./usePosition";
 import "./MiniPlayer.css";
 
 export interface MiniPlayerProps {
+  s?: GuiStrings;
   playback: PlaybackPayload | null;
   position: Position | null;
   connected: boolean;
@@ -47,6 +49,7 @@ export function MiniPlayer(props: MiniPlayerProps) {
 
 /** The mini player at a known position, free of hooks. */
 export function MiniCard({
+  s = EN,
   playback,
   elapsed,
   connected,
@@ -61,12 +64,12 @@ export function MiniCard({
   const source = sourceOf(item?.uri ?? null);
   const liked = playback?.liked ?? false;
   return (
-    <section ref={section} className="mini-player" aria-label="Mini player">
+    <section ref={section} className="mini-player" aria-label={s.mini_player}>
       <div className={item ? "mini-card" : "mini-card idle"}>
         <button
           type="button"
           className="icon-button mini-exit"
-          aria-label="Exit mini player"
+          aria-label={s.exit_mini_player}
           aria-keyshortcuts="Shift+T Escape"
           onClick={() => onExit()}
         >
@@ -88,7 +91,7 @@ export function MiniCard({
                 <button
                   type="button"
                   className="like"
-                  aria-label="Like"
+                  aria-label={s.like}
                   aria-pressed={liked}
                   disabled={!connected}
                   onClick={() => send("ToggleSaveCurrentItem")}
@@ -97,23 +100,24 @@ export function MiniCard({
                 </button>
               )}
               {source && source !== "Spotify" && (
-                <SourceBadge source={source} />
+                <SourceBadge s={s} source={source} />
               )}
             </div>
             <div className="transport">
               <Progress
+                s={s}
                 item={item}
                 elapsed={elapsed}
                 connected={connected}
                 send={send}
               />
-              <Transport item={item} connected={connected} send={send} />
+              <Transport s={s} item={item} connected={connected} send={send} />
             </div>
           </>
         ) : (
           <div className="mini-empty">
             <Glyph name="music" size={32} />
-            <p>Nothing playing</p>
+            <p>{s.nothing_playing}</p>
           </div>
         )}
       </div>

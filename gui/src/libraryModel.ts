@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { AlbumInfo } from "./bindings/AlbumInfo";
 import type { ArtistInfo } from "./bindings/ArtistInfo";
@@ -117,8 +118,8 @@ export function playRequest(
 }
 
 /** "1 song", "42 songs". */
-export function songCount(count: number): string {
-  return count === 1 ? "1 song" : `${count} songs`;
+export function songCount(count: number, s: GuiStrings = EN): string {
+  return count === 1 ? s.one_song : fmt(s.songs_count, { count });
 }
 
 /** The cover of a library playlist of any source, by URI. */
@@ -162,7 +163,14 @@ export function createPlaylistAction(
 }
 
 /** A playlist's menu entry and the question it asks before it acts. */
-export interface PlaylistRemoval {
+export interface PlaylistRemovalTarget {
+  uri: string;
+  name: string;
+  action: Action;
+  kind: "delete" | "owned" | "unfollow";
+}
+
+export interface PlaylistRemoval extends PlaylistRemovalTarget {
   uri: string;
   name: string;
   /** The menu entry. */
@@ -179,38 +187,58 @@ export function playlistRemoval(
   source: Source | null,
   row: { uri: string; name: string },
   playlists: SourcePlaylists,
+  s: GuiStrings = EN,
 ): PlaylistRemoval | null {
   const { uri, name } = row;
-  if (source === "YouTube")
-    return {
-      uri,
-      name,
-      label: "Delete",
-      action: { DeletePlaylist: uri },
-      title: "Delete playlist?",
-      body: `This will delete ${name} from spotatui. This cannot be undone.`,
-      confirm: "Delete",
-    };
-  if (source !== "Spotify") return null;
+  if (source !== "YouTube" && source !== "Spotify") return null;
   const info = playlists.spotify.find((playlist) => playlist.uri === uri);
-  // Editable is the ownership signal; a collaborative playlist is editable but not owned.
   const owned =
     playlists.editable.includes(uri) && !(info?.collaborative ?? false);
-  const verb = owned ? "delete" : "remove";
-  return {
+  const target: PlaylistRemovalTarget = {
     uri,
     name,
-    label: owned ? "Delete" : "Remove from Your Library",
-    action: { UnfollowPlaylist: uri },
-    title: owned ? "Delete from Your Library?" : "Remove from Your Library?",
-    body: `This will ${verb} ${name} from Your Library.`,
-    confirm: owned ? "Delete" : "Remove",
+    kind: source === "YouTube" ? "delete" : owned ? "owned" : "unfollow",
+    action:
+      source === "YouTube"
+        ? { DeletePlaylist: uri }
+        : { UnfollowPlaylist: uri },
+  };
+  return { ...target, ...removalText(target, s) };
+}
+
+/** Strip presentation text before retaining a menu or confirmation target. */
+export function removalTarget({
+  uri,
+  name,
+  action,
+  kind,
+}: PlaylistRemovalTarget): PlaylistRemovalTarget {
+  return { uri, name, action, kind };
+}
+
+export function removalText(
+  { kind, name }: PlaylistRemovalTarget,
+  s: GuiStrings = EN,
+) {
+  if (kind === "delete")
+    return {
+      label: s.delete,
+      title: s.delete_playlist_question,
+      body: fmt(s.delete_playlist_body, { name }),
+      confirm: s.delete,
+    };
+  const owned = kind === "owned";
+  return {
+    label: owned ? s.delete : s.remove_from_library,
+    title: owned ? s.delete_library_question : s.remove_library_question,
+    body: fmt(owned ? s.delete_library_body : s.remove_library_body, { name }),
+    confirm: owned ? s.delete : s.remove,
   };
 }
 
 /** Sends a confirmed removal; the open view of that playlist goes home. */
 export function removePlaylist(
-  removal: PlaylistRemoval,
+  removal: PlaylistRemovalTarget,
   view: View,
   send: (action: Action) => void,
   open: OpenView,
@@ -279,24 +307,34 @@ export function libraryTree(
 }
 
 /** The album sort select's options, the values `behavior.default_sort_saved_albums` takes. */
-export const ALBUM_SORTS: { value: string; label: string }[] = [
-  { value: "default", label: "Recently added" },
-  { value: "name", label: "Name (A-Z)" },
-  { value: "name:desc", label: "Name (Z-A)" },
-  { value: "date_added", label: "Date added (oldest first)" },
-  { value: "date_added:desc", label: "Date added (newest first)" },
-  { value: "artist", label: "Artist (A-Z)" },
-  { value: "artist:desc", label: "Artist (Z-A)" },
-  { value: "release_date", label: "Release date (oldest first)" },
-  { value: "release_date:desc", label: "Release date (newest first)" },
-];
+export function albumSorts(
+  s: GuiStrings = EN,
+): { value: string; label: string }[] {
+  return [
+    { value: "default", label: s.sort_recent },
+    { value: "name", label: s.sort_name },
+    { value: "name:desc", label: s.sort_name_desc },
+    { value: "date_added", label: s.sort_date },
+    { value: "date_added:desc", label: s.sort_date_desc },
+    { value: "artist", label: s.sort_artist },
+    { value: "artist:desc", label: s.sort_artist_desc },
+    { value: "release_date", label: s.sort_release },
+    { value: "release_date:desc", label: s.sort_release_desc },
+  ];
+}
+export const ALBUM_SORTS = albumSorts();
 
 /** The artist sort select's options, the values `behavior.default_sort_saved_artists` takes. */
-export const ARTIST_SORTS: { value: string; label: string }[] = [
-  { value: "default", label: "Recently added" },
-  { value: "name", label: "Name (A-Z)" },
-  { value: "name:desc", label: "Name (Z-A)" },
-];
+export function artistSorts(
+  s: GuiStrings = EN,
+): { value: string; label: string }[] {
+  return [
+    { value: "default", label: s.sort_recent },
+    { value: "name", label: s.sort_name },
+    { value: "name:desc", label: s.sort_name_desc },
+  ];
+}
+export const ARTIST_SORTS = artistSorts();
 
 /** A known option's value, else "default". */
 export function sortChoice(

@@ -279,7 +279,14 @@ impl Driver {
     if let Some(player) = app.streaming_player.clone() {
       if let Some(error) = player.take_audio_backend_error() {
         app.pause_native_playback();
-        app.set_status_message(format!("Audio backend failed: {error}"), 15);
+        app.set_status_message(
+          app
+            .strings()
+            .status
+            .app
+            .audio_backend_failed(&error.to_string()),
+          15,
+        );
       }
     }
 
@@ -325,7 +332,7 @@ impl Driver {
     // for Spotify, local files, Subsonic, radio and YouTube through a single
     // path.
     let playing = {
-      let snapshot = crate::infra::media_metadata::current_playback_snapshot(app);
+      let snapshot = crate::infra::media_metadata::tracking_playback_snapshot(app);
 
       self.play_counter.tick(app, snapshot.as_ref());
 
@@ -500,19 +507,19 @@ impl Driver {
               $app.dispatch(IoEvent::ReplayCurrentTrack);
               $app.set_status_message(
                 if paused {
-                  "Audio device changed - playback paused here."
+                  $app.strings().status.app.audio_device_paused
                 } else {
-                  "Audio device changed - playback moved to it."
+                  $app.strings().status.app.audio_device_moved
                 },
                 8,
               );
             }
             Some(Reopen::Retrying) => {
-              $app.set_status_message("Audio output device lost - waiting for a new one.", 8);
+              $app.set_status_message($app.strings().status.app.audio_device_waiting, 8);
             }
             Some(Reopen::GaveUp) => {
               $app.$playback = None;
-              $app.set_status_message("Audio output device disconnected.", 8);
+              $app.set_status_message($app.strings().status.infra.audio_disconnected, 8);
             }
             Some(Reopen::Waiting) | None => {}
           }
@@ -538,7 +545,7 @@ impl Driver {
       .is_some_and(|s| s.player.device_lost())
     {
       app.radio_playback = None;
-      app.set_status_message("Audio output device disconnected - radio stopped.", 8);
+      app.set_status_message(app.strings().status.app.radio_device_lost, 8);
     }
 
     // The native queue slot's own sink. There is no "replay this queued item"
@@ -567,15 +574,15 @@ impl Driver {
             }
             app.set_status_message(
               if paused {
-                "Audio device changed - playback paused here."
+                app.strings().status.app.audio_device_paused
               } else {
-                "Audio device changed - playback moved to it."
+                app.strings().status.app.audio_device_moved
               },
               8,
             );
           }
           Reopen::Retrying => {
-            app.set_status_message("Audio output device lost - waiting for a new one.", 8);
+            app.set_status_message(app.strings().status.app.audio_device_waiting, 8);
           }
           // No device to play on. Hand the slot to the same teardown a drained
           // queue uses: clearing `queue_now` here would strand the suspended
@@ -585,7 +592,7 @@ impl Driver {
               app.queue_slot_desired_playing = false;
             }
             app.dispatch(IoEvent::FinishNativeQueue);
-            app.set_status_message("Audio output device disconnected.", 8);
+            app.set_status_message(app.strings().status.infra.audio_disconnected, 8);
           }
           Reopen::Waiting => {}
         }
@@ -720,7 +727,7 @@ impl Driver {
           app.radio_playback = None;
           app.release_decoded_sink_claim();
           self.radio_stream_started = false;
-          app.set_status_message("Radio stream ended", 4);
+          app.set_status_message(app.strings().status.app.radio_ended, 4);
         }
       }
       None => self.radio_stream_started = false,

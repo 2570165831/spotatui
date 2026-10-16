@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 use crate::core::app::App;
 use crate::core::auth::SpotifyLogin;
-use crate::core::playlist_sync::{Endpoint, SyncReport, SyncTrack};
+use crate::core::playlist_sync::{Endpoint, SyncReason, SyncReport, SyncTrack};
 use crate::core::source::Source;
 use crate::infra::network::IoEvent;
 
@@ -280,7 +280,7 @@ pub(crate) async fn for_source(endpoint: &Endpoint, ctx: &SyncContext) -> Result
     Source::Spotify => ctx
       .spotify
       .map(|_| SourceClient::Spotify(Box::new(spotify::SpotifyClient)))
-      .ok_or_else(|| anyhow!("Spotify is not connected")),
+      .ok_or_else(|| anyhow!(SyncReason::SpotifyNotConnected)),
     #[cfg(feature = "qobuz")]
     Source::Qobuz => Ok(SourceClient::Qobuz(
       crate::infra::qobuz::dispatch::build_sync_source(&ctx.app).await?,
@@ -296,17 +296,37 @@ pub(crate) async fn for_source(endpoint: &Endpoint, ctx: &SyncContext) -> Result
       Arc::clone(&ctx.app),
     ))),
     other => Err(anyhow!(match missing_sync_feature(other) {
-      Some(feature) => format!(
-        "{} is not compiled into this build (feature `{feature}`)",
-        other.label()
-      ),
-      None => format!("{} playlists cannot be synced", other.label()),
+      Some(feature) => SyncReason::SourceNotCompiled {
+        source: other,
+        feature
+      },
+      None => SyncReason::UnsupportedSource(other),
     })),
   }
 }
 
 /// One whole run, including the in-flight guard, the status message and the
 /// `App` bookkeeping.
+fn status_summary(report: &SyncReport, strings: &crate::core::i18n::Strings) -> String {
+  let strings = &strings.status.infra;
+  if let Some(error) = &report.error {
+    return strings.sync_failed(error);
+  }
+  if report.links.is_empty() {
+    return strings.sync_no_links.to_string();
+  }
+  strings.sync_summary(
+    if report.dry_run {
+      strings.sync_dry_run
+    } else {
+      ""
+    },
+    report.added(),
+    report.removed(),
+    report.unmatched(),
+  )
+}
+
 pub async fn run_guarded(
   ctx: SyncContext,
   filter: Option<String>,
@@ -315,11 +335,11 @@ pub async fn run_guarded(
 ) -> SyncReport {
   log::info!("playlist sync: run requested (filter={filter:?}, dry_run={dry_run})");
   if !ctx.app.lock().await.begin_playlist_sync() {
-    ctx
-      .app
-      .lock()
-      .await
-      .set_status_message("Playlist sync already running", 4);
+    {
+      let mut app = ctx.app.lock().await;
+      let message = app.strings().status.infra.sync_busy;
+      app.set_status_message(message, 4);
+    };
     return SyncReport {
       error: Some("Playlist sync already running".to_string()),
       dry_run,
@@ -348,13 +368,17 @@ pub async fn run_guarded(
 
   if !report.links.is_empty() || report.error.is_some() {
     if report.failed() {
-      ctx
-        .app
-        .lock()
-        .await
-        .set_error_status_message(report.summary(), 10);
+      {
+        let mut app = ctx.app.lock().await;
+        let message = status_summary(&report, app.strings());
+        app.set_error_status_message(message, 10);
+      };
     } else {
-      ctx.app.lock().await.set_status_message(report.summary(), 8);
+      {
+        let mut app = ctx.app.lock().await;
+        let message = status_summary(&report, app.strings());
+        app.set_status_message(message, 8);
+      };
     }
   }
   ctx.app.lock().await.finish_playlist_sync(report.clone());
@@ -383,11 +407,15 @@ pub async fn link_guarded(ctx: SyncContext, master: Endpoint, mirror: Source) {
   let path = match crate::core::playlist_sync::store::default_path() {
     Ok(path) => path,
     Err(e) => {
-      ctx
-        .app
-        .lock()
-        .await
-        .set_error_status_message(format!("Playlist link failed: {e:#}"), 10);
+      {
+        let mut app = ctx.app.lock().await;
+        let message = app
+          .strings()
+          .status
+          .infra
+          .sync_link_failed(&SyncReason::from_error(&e).render(app.strings()));
+        app.set_error_status_message(message, 10);
+      };
       return;
     }
   };
@@ -396,21 +424,30 @@ pub async fn link_guarded(ctx: SyncContext, master: Endpoint, mirror: Source) {
   match linked {
     Ok((id, adopted)) => {
       if adopted {
-        ctx.app.lock().await.set_status_message(
-          format!("Using the existing {} playlist \"{name}\"", mirror.label()),
-          6,
-        );
+        {
+          let mut app = ctx.app.lock().await;
+          let message = app
+            .strings()
+            .status
+            .infra
+            .sync_using_playlist(app.strings().sidebar.source_label(mirror), &name);
+          app.set_status_message(message, 6);
+        }
       } else if let Some(event) = refresh_playlists_event(mirror) {
         ctx.app.lock().await.dispatch(event);
       }
       run_guarded(ctx, Some(id), false, true).await;
     }
     Err(e) => {
-      ctx
-        .app
-        .lock()
-        .await
-        .set_error_status_message(format!("Playlist link failed: {e:#}"), 10);
+      {
+        let mut app = ctx.app.lock().await;
+        let message = app
+          .strings()
+          .status
+          .infra
+          .sync_link_failed(&SyncReason::from_error(&e).render(app.strings()));
+        app.set_error_status_message(message, 10);
+      };
     }
   }
 }
@@ -435,8 +472,17 @@ pub fn spawn_remove_link(app: Arc<Mutex<App>>, id: String) {
     };
     let mut app = app.lock().await;
     match outcome {
-      Ok(()) => app.set_status_message("Playlist link removed; the mirror playlists stay", 6),
-      Err(e) => app.set_error_status_message(format!("Removing the link failed: {e:#}"), 10),
+      Ok(()) => {
+        let strings = app.strings();
+        app.set_status_message(strings.status.infra.sync_removed, 6);
+      }
+      Err(e) => {
+        let strings = app.strings();
+        app.set_error_status_message(
+          strings.status.infra.sync_remove_failed(&format!("{e:#}")),
+          10,
+        );
+      }
     }
   });
 }

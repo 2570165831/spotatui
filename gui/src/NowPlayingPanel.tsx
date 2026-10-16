@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { PlaybackPayload } from "./bindings/PlaybackPayload";
 import type { TrackInfo } from "./bindings/TrackInfo";
@@ -8,12 +9,14 @@ import { Cover } from "./ui";
 
 /** The right panel: the playing track large, and the next track in the queue. */
 export function NowPlayingPanel({
+  s = EN,
   playback,
   upNext,
   open,
   send,
   onClose,
 }: {
+  s?: GuiStrings;
   playback: PlaybackPayload | null;
   upNext: TrackInfo[];
   open: OpenView;
@@ -27,15 +30,15 @@ export function NowPlayingPanel({
   const heading =
     item?.album && item.context_uri?.startsWith("spotify:album:")
       ? item.album
-      : "Now playing";
+      : s.now_playing;
   return (
-    <section className="now-panel" aria-label="Now playing view">
+    <section className="now-panel" aria-label={s.now_playing_view}>
       <header className="panel-head">
         <h2>{heading}</h2>
         <button
           type="button"
           className="panel-close"
-          aria-label="Close now playing view"
+          aria-label={s.close_now_playing}
           onClick={onClose}
         >
           <Glyph name="close" />
@@ -58,7 +61,7 @@ export function NowPlayingPanel({
               <button
                 type="button"
                 className="like"
-                aria-label="Like"
+                aria-label={s.like}
                 aria-pressed={liked}
                 onClick={() => send("ToggleSaveCurrentItem")}
               >
@@ -67,8 +70,8 @@ export function NowPlayingPanel({
             )}
           </div>
           {next && (
-            <section className="next-card" aria-label="Next in queue">
-              <h3>Next in queue</h3>
+            <section className="next-card" aria-label={s.next_in_queue}>
+              <h3>{s.next_in_queue}</h3>
               <div className="next-track">
                 <Cover src={next.image_url} size={48} />
                 <span className="next-text">
@@ -80,7 +83,7 @@ export function NowPlayingPanel({
           )}
         </div>
       ) : (
-        <p className="panel-empty">Nothing is playing.</p>
+        <p className="panel-empty">{s.nothing_is_playing}</p>
       )}
     </section>
   );

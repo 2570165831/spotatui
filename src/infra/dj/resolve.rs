@@ -88,16 +88,17 @@ pub struct SkipSets<'a> {
 
 impl ResolveReport {
   /// One-line summary for a status message or an MCP tool result.
-  pub fn summary(&self) -> String {
-    let mut parts = vec![format!("queued {}", self.resolved.len())];
+  pub fn summary_with(&self, strings: &crate::core::i18n::Strings) -> String {
+    let strings = &strings.status.infra;
+    let mut parts = vec![strings.dj_queued(self.resolved.len())];
     if !self.unresolved.is_empty() {
-      parts.push(format!("{} not found", self.unresolved.len()));
+      parts.push(strings.dj_not_found(self.unresolved.len()));
     }
     if !self.in_library.is_empty() {
-      parts.push(format!("{} already yours", self.in_library.len()));
+      parts.push(strings.dj_owned(self.in_library.len()));
     }
     if !self.duplicates.is_empty() {
-      parts.push(format!("{} already queued", self.duplicates.len()));
+      parts.push(strings.dj_duplicate(self.duplicates.len()));
     }
     parts.join(", ")
   }
@@ -392,6 +393,7 @@ mod tests {
   /// build a minimal placeholder for the report-shape tests.
   fn stub_track() -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some("spotify:track:stub".to_string()),
       name: "Stub".to_string(),
       artists: vec!["Stub".to_string()],
@@ -542,7 +544,7 @@ mod tests {
       in_library: vec!["a".into()],
       ..ResolveReport::default()
     };
-    let summary = owned.summary();
+    let summary = owned.summary_with(&crate::core::i18n::EN);
     assert!(summary.contains("1 already yours"));
     assert!(
       !summary.contains("already queued"),
@@ -558,9 +560,13 @@ mod tests {
       resolved: vec![stub_track()],
       ..ResolveReport::default()
     };
-    assert!(report.summary().contains("queued 1"));
+    assert!(report
+      .summary_with(&crate::core::i18n::EN)
+      .contains("queued 1"));
     let _ = std::mem::take(&mut report.resolved);
-    assert!(report.summary().contains("queued 0"));
+    assert!(report
+      .summary_with(&crate::core::i18n::EN)
+      .contains("queued 0"));
   }
 
   #[test]
@@ -571,7 +577,7 @@ mod tests {
       duplicates: vec!["dupe".into()],
       in_library: vec!["owned".into()],
     };
-    let summary = report.summary();
+    let summary = report.summary_with(&crate::core::i18n::EN);
     assert!(summary.contains("queued 1"));
     assert!(summary.contains("1 not found"));
     assert!(summary.contains("1 already queued"));

@@ -5,8 +5,9 @@
 use super::catalog::{full_artists, full_tracks};
 use super::json;
 use super::metadata::get_many;
-use super::router::{api_error, query_value, Paging};
+use super::router::{api_error, localized_api_error, query_value, Paging};
 use super::session::SpotifySession;
+use crate::core::i18n::LocalizedMessage;
 use librespot_core::error::ErrorKind;
 use librespot_metadata::{Album, Show};
 use reqwest::StatusCode;
@@ -168,12 +169,9 @@ async fn search_v2(
       Err(e) => return Err(super::router::upstream_error(e)),
     }
   }
-  Err(api_error(
+  Err(localized_api_error(
     StatusCode::SERVICE_UNAVAILABLE,
-    format!(
-      "Search is unavailable: every known {} hash is retired",
-      query.operation
-    ),
+    LocalizedMessage::new(|s| s.status.infra.search_query_unavailable(query.operation)),
   ))
 }
 

@@ -16,11 +16,14 @@ use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::Mutex;
 
 /// The status line for a session that cannot carry native streaming, if any.
-fn native_streaming_refusal(reason: Unavailable) -> Option<&'static str> {
+fn native_streaming_refusal(
+  reason: Unavailable,
+  strings: &crate::core::i18n::Strings,
+) -> Option<&'static str> {
   match reason {
     Unavailable::NoLogin => None,
-    Unavailable::NotPremium => Some("Spotify Premium is required for playback"),
-    Unavailable::Offline => Some("Could not connect to Spotify: native streaming disabled"),
+    Unavailable::NotPremium => Some(strings.status.runtime.premium_required),
+    Unavailable::Offline => Some(strings.status.runtime.native_offline),
   }
 }
 impl StartupDeviceEvent {
@@ -109,8 +112,9 @@ async fn deferred_streaming_startup_inner(ctx: DeferredStreamingContext) {
   // The session refuses a non-Premium account, so it answers the plan check.
   if let Err(reason) = session::current().await {
     info!("native streaming not started: {}", reason.message());
-    if let Some(message) = native_streaming_refusal(reason) {
-      ctx.app.lock().await.set_status_message(message, 12);
+    let mut app = ctx.app.lock().await;
+    if let Some(message) = native_streaming_refusal(reason, app.strings()) {
+      app.set_status_message(message, 12);
     }
     return;
   }
@@ -143,10 +147,9 @@ async fn deferred_streaming_startup_inner(ctx: DeferredStreamingContext) {
         "failed to initialize streaming: {} - falling back to web api",
         e
       );
-      ctx.app.lock().await.set_status_message(
-        "Native streaming didn't start; using Spotify Connect for now. Restart spotatui to reconnect native playback.",
-        12,
-      );
+      let mut app = ctx.app.lock().await;
+      let message = app.strings().status.runtime.native_start_failed;
+      app.set_status_message(message, 12);
       return;
     }
     Ok(Err(e)) => {
@@ -216,11 +219,13 @@ async fn deferred_streaming_startup_inner(ctx: DeferredStreamingContext) {
     devices_snapshot = Some(devices_vec);
   }
 
+  let strings = ctx.app.lock().await.strings();
   let startup_decision = startup_device_decision(
     ctx.device_startup_behavior,
     saved_device_id,
     devices_snapshot.as_deref(),
     &device_name,
+    strings,
   );
 
   let mut app_mut = ctx.app.lock().await;
@@ -238,9 +243,14 @@ mod tests {
 
   #[test]
   fn only_a_missing_login_starts_without_a_status_line() {
-    assert_eq!(native_streaming_refusal(Unavailable::NoLogin), None);
-    assert!(native_streaming_refusal(Unavailable::NotPremium)
-      .is_some_and(|message| message.contains("Premium")));
-    assert!(native_streaming_refusal(Unavailable::Offline).is_some());
+    assert_eq!(
+      native_streaming_refusal(Unavailable::NoLogin, &crate::core::i18n::EN),
+      None
+    );
+    assert!(
+      native_streaming_refusal(Unavailable::NotPremium, &crate::core::i18n::EN)
+        .is_some_and(|message| message.contains("Premium"))
+    );
+    assert!(native_streaming_refusal(Unavailable::Offline, &crate::core::i18n::EN).is_some());
   }
 }

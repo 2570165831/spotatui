@@ -233,7 +233,8 @@ pub(super) async fn prepare_frontend(boot: Boot) -> FrontendHandles {
       if let Some(message) = startup_notice {
         app_mut.set_status_message(message, 15);
       } else if spotify.is_none() && app_mut.active_source == crate::core::source::Source::Spotify {
-        app_mut.set_status_message(crate::core::app::SPOTIFY_NOT_CONNECTED_STATUS, 8);
+        let message = app_mut.strings().status.app.spotify_not_connected;
+        app_mut.set_status_message(message, 8);
       }
     }
   }
@@ -262,13 +263,19 @@ pub(super) async fn prepare_frontend(boot: Boot) -> FrontendHandles {
           Ok(port) => {
             let mut app_mut = app.lock().await;
             if app_mut.status_message().is_none() {
-              app_mut.set_status_message(format!("MCP server listening on 127.0.0.1:{port}"), 6);
+              let message = app_mut.strings().status.runtime.mcp_listening(port);
+              app_mut.set_status_message(message, 6);
             }
           }
           Err(e) => {
             log::warn!("MCP: could not start the control socket: {e}");
             let mut app_mut = app.lock().await;
-            app_mut.set_error_status_message(format!("MCP server failed to start: {e}"), 8);
+            let message = app_mut
+              .strings()
+              .status
+              .runtime
+              .mcp_start_failed(&e.to_string());
+            app_mut.set_error_status_message(message, 8);
           }
         },
         None => log::warn!("MCP: no IoEvent sender available; control socket not started"),

@@ -208,10 +208,7 @@ impl App {
           if let Some(pending) = self.pending_start_playback.as_mut() {
             if pending.recovery_attempts >= MAX_RECOVERY_ATTEMPTS {
               self.pending_start_playback = None;
-              self.set_status_message(
-                "Native playback did not respond after recovery; request dropped.",
-                8,
-              );
+              self.set_status_message(self.strings().status.app.native_no_response, 8);
             } else {
               pending.recovery_attempts += 1;
               log::warn!(
@@ -229,10 +226,7 @@ impl App {
               .map_or(0, |snapshot| snapshot.recovery_attempts);
             if recovery_attempts >= MAX_RECOVERY_ATTEMPTS {
               self.native_restore_pending = None;
-              self.set_status_message(
-                "Native connection recovered, but playback could not be restored.",
-                8,
-              );
+              self.set_status_message(self.strings().status.app.native_restore_failed, 8);
             } else {
               log::warn!(
                 "native restore generation {} produced no matching player event; forcing recovery attempt {}",

@@ -37,7 +37,12 @@ fn save_config_or_warn(user_config: &UserConfig, onboarding: &dyn Onboarding) ->
     Err(e) => {
       let path = config_file_path_display(user_config);
       log::warn!("could not save {path}: {e}");
-      onboarding.info(&format!("Could not save {path}: {e}"));
+      onboarding.info(
+        &onboarding
+          .strings()
+          .onboarding
+          .config_save_failed(&path, &e.to_string()),
+      );
       false
     }
   }
@@ -124,15 +129,17 @@ async fn apply_selections(
 
   if spotify_selected {
     if selections.len() > 1 {
-      onboarding.info("\nSetting up your other sources, then we'll log in to Spotify...\n");
+      onboarding.info(onboarding.strings().onboarding.setting_up_sources);
     }
     return Ok(true);
   }
 
-  onboarding.info(&format!(
-    "\nStarting spotatui with {} as your source. Press `d` anytime to switch or to log in to Spotify.\n",
-    active.label()
-  ));
+  let strings = onboarding.strings();
+  onboarding.info(
+    &strings
+      .onboarding
+      .starting_source(strings.sidebar.source_label(active)),
+  );
 
   Ok(false)
 }
@@ -188,18 +195,17 @@ async fn configure_source(
 async fn configure_qobuz(onboarding: &dyn Onboarding) -> Result<()> {
   use crate::infra::qobuz::{auth, shared_qobuz_client, QobuzSource};
 
-  onboarding.info(
-    "\nQobuz setup: spotatui logs in through your browser (a paid Qobuz subscription is needed).",
-  );
-  onboarding.progress("Fetching the Qobuz web player constants... ");
+  let strings = &onboarding.strings().onboarding;
+  onboarding.info(strings.qobuz_setup);
+  onboarding.progress(strings.fetching_qobuz_constants);
   let constants = match auth::resolve_constants(&shared_qobuz_client(), None).await {
     Ok(constants) => {
-      onboarding.info("OK");
+      onboarding.info(strings.ok);
       constants
     }
     Err(e) => {
-      onboarding.info(&format!("failed: {e:#}"));
-      onboarding.info("Press `d` in the app and pick Qobuz to try again.");
+      onboarding.info(&strings.failed(&format!("{e:#}")));
+      onboarding.info(strings.qobuz_retry);
       return Ok(());
     }
   };
@@ -207,41 +213,41 @@ async fn configure_qobuz(onboarding: &dyn Onboarding) -> Result<()> {
   let attempt = match auth::LoginAttempt::bind(constants.clone()).await {
     Ok(attempt) => attempt,
     Err(e) => {
-      onboarding.info(&format!("Qobuz login could not start: {e:#}"));
-      onboarding.info("Press `d` in the app and pick Qobuz to try again.");
+      onboarding.info(&strings.qobuz_login_start_failed(&format!("{e:#}")));
+      onboarding.info(strings.qobuz_retry);
       return Ok(());
     }
   };
   let url = attempt.url();
-  onboarding.info("\nAttempting to open this URL in your browser:");
+  onboarding.info(strings.opening_browser);
   onboarding.info(&format!("{url}\n"));
   if let Err(e) = open::that_detached(&url) {
-    onboarding.info(&format!("Failed to open browser automatically: {e}"));
-    onboarding.info("Please manually open the URL above in your browser.");
+    onboarding.info(&strings.browser_open_failed(&e.to_string()));
+    onboarding.info(strings.open_browser_manually);
   }
-  onboarding.info("Waiting for the Qobuz login to complete...");
+  onboarding.info(strings.qobuz_waiting);
 
   let credentials = match attempt.wait().await {
     Ok(credentials) => credentials,
     Err(e) => {
-      onboarding.info(&format!("Qobuz login failed: {e:#}"));
-      onboarding.info("Press `d` in the app and pick Qobuz to try again.");
+      onboarding.info(&strings.qobuz_login_failed(&format!("{e:#}")));
+      onboarding.info(strings.qobuz_retry);
       return Ok(());
     }
   };
   auth::save_login(&credentials)?;
-  onboarding.info("Logged in to Qobuz.");
+  onboarding.info(strings.qobuz_logged_in);
 
   // Best-effort stream check: a failure is not fatal, the login is saved.
-  onboarding.progress("Testing the stream session... ");
+  onboarding.progress(strings.testing_stream);
   let source = QobuzSource::new(
     constants.app_id,
     constants.app_secret,
     credentials.user_auth_token,
   );
   match source.session_start().await {
-    Ok(_) => onboarding.info("OK"),
-    Err(e) => onboarding.info(&format!("failed: {e:#}")),
+    Ok(_) => onboarding.info(strings.ok),
+    Err(e) => onboarding.info(&strings.failed(&format!("{e:#}"))),
   }
   Ok(())
 }
@@ -251,14 +257,11 @@ async fn configure_subsonic(
   user_config: &mut UserConfig,
   onboarding: &dyn Onboarding,
 ) -> Result<()> {
-  onboarding.info("\nSubsonic / Navidrome setup:");
-  let url = prompt_required(
-    onboarding,
-    "Server URL (e.g. https://demo.navidrome.org)",
-    false,
-  )?;
-  let username = prompt_required(onboarding, "Username", false)?;
-  let password = prompt_required(onboarding, "Password", true)?;
+  let strings = &onboarding.strings().onboarding;
+  onboarding.info(strings.subsonic_setup);
+  let url = prompt_required(onboarding, strings.server_url, false)?;
+  let username = prompt_required(onboarding, strings.username, false)?;
+  let password = prompt_required(onboarding, strings.password, true)?;
 
   user_config.behavior.subsonic_url = Some(url.clone());
   user_config.behavior.subsonic_username = Some(username.clone());
@@ -267,19 +270,16 @@ async fn configure_subsonic(
 
   // Best-effort connectivity check: a failure is not fatal (the server may just
   // be temporarily down), the details are already saved.
-  onboarding.progress("Testing connection... ");
+  onboarding.progress(strings.testing_connection);
   let client = crate::infra::subsonic::SubsonicSource::new(url, username, password);
   match client.ping().await {
-    Ok(()) => onboarding.info("OK"),
+    Ok(()) => onboarding.info(strings.ok),
     Err(e) => {
-      onboarding.info(&format!("failed: {e}"));
+      onboarding.info(&strings.failed(&e.to_string()));
       if saved {
-        onboarding.info(&format!(
-          "Saved anyway. Fix the details in {} and relaunch if needed.",
-          config_file_path_display(user_config)
-        ));
+        onboarding.info(&strings.saved_anyway(&config_file_path_display(user_config)));
       } else {
-        onboarding.info("The details are kept for this session only.");
+        onboarding.info(strings.session_only);
       }
     }
   }
@@ -289,13 +289,14 @@ async fn configure_subsonic(
 
 #[cfg(feature = "youtube")]
 fn configure_youtube(user_config: &UserConfig, onboarding: &dyn Onboarding) {
+  let strings = &onboarding.strings().onboarding;
   let ytdlp = user_config
     .behavior
     .ytdlp_path
     .clone()
     .unwrap_or_else(|| "yt-dlp".to_string());
 
-  onboarding.progress("\nChecking for yt-dlp... ");
+  onboarding.progress(strings.checking_ytdlp);
   let mut command = std::process::Command::new(&ytdlp);
   #[cfg(windows)]
   {
@@ -305,37 +306,28 @@ fn configure_youtube(user_config: &UserConfig, onboarding: &dyn Onboarding) {
   match command.arg("--version").output() {
     Ok(output) if output.status.success() => {
       let version = String::from_utf8_lossy(&output.stdout);
-      onboarding.info(&format!("found ({})", version.trim()));
+      onboarding.info(&strings.ytdlp_found(version.trim()));
     }
     _ => {
-      onboarding.info("not found");
-      onboarding.info("YouTube playback needs the `yt-dlp` binary on your PATH.");
-      onboarding
-        .info("Install it (e.g. `pipx install yt-dlp` or your distro package) and relaunch.");
-      onboarding.info(&format!(
-        "If it lives at a custom path, set behavior.ytdlp_path in {}.",
-        config_file_path_display(user_config)
-      ));
+      onboarding.info(strings.ytdlp_not_found);
+      onboarding.info(strings.ytdlp_required);
+      onboarding.info(strings.ytdlp_install);
+      onboarding.info(&strings.ytdlp_custom_path(&config_file_path_display(user_config)));
     }
   }
 }
 
 #[cfg(feature = "local-files")]
 fn configure_local(user_config: &UserConfig, onboarding: &dyn Onboarding) {
+  let strings = &onboarding.strings().onboarding;
   match &user_config.behavior.local_music_path {
     Some(path) => {
-      onboarding.info(&format!("\nLocal files will be read from: {path}"));
-      onboarding.info(&format!(
-        "(Change behavior.local_music_path in {} to use another folder.)",
-        config_file_path_display(user_config)
-      ));
+      onboarding.info(&strings.local_music_path(path));
+      onboarding.info(&strings.change_local_music_path(&config_file_path_display(user_config)));
     }
     None => {
-      onboarding.info("\nNo music folder was detected automatically.");
-      onboarding.info(&format!(
-        "Set behavior.local_music_path in {}.",
-        config_file_path_display(user_config)
-      ));
+      onboarding.info(strings.no_local_music_path);
+      onboarding.info(&strings.set_local_music_path(&config_file_path_display(user_config)));
     }
   }
 }
@@ -356,7 +348,7 @@ fn prompt_required(onboarding: &dyn Onboarding, label: &str, masked: bool) -> Re
     if !trimmed.is_empty() {
       return Ok(trimmed);
     }
-    onboarding.info("  (required)");
+    onboarding.info(onboarding.strings().onboarding.required);
     retries += 1;
     if retries >= MAX_RETRIES {
       return Err(anyhow!("Maximum retries ({MAX_RETRIES}) exceeded."));
@@ -519,5 +511,96 @@ mod tests {
     assert!(shown
       .iter()
       .any(|line| line.starts_with(&format!("Could not save {}: ", config_path.display()))));
+  }
+}
+
+#[cfg(test)]
+mod localization_tests {
+  use super::*;
+  use crate::core::i18n::{Language, Strings};
+  use crate::core::onboarding::{OnboardingAnswer, OnboardingPrompt};
+  use crate::core::test_helpers::ScriptedOnboarding;
+
+  struct LocalizedOnboarding {
+    scripted: ScriptedOnboarding,
+    strings: &'static Strings,
+  }
+
+  impl LocalizedOnboarding {
+    fn new(language: Language, answers: &[&str]) -> Self {
+      Self {
+        scripted: ScriptedOnboarding::with_answers(answers),
+        strings: language.strings(),
+      }
+    }
+  }
+
+  impl Onboarding for LocalizedOnboarding {
+    fn strings(&self) -> &'static Strings {
+      self.strings
+    }
+
+    fn is_interactive(&self) -> bool {
+      self.scripted.is_interactive()
+    }
+
+    fn ask(&self, prompt: &OnboardingPrompt) -> Result<OnboardingAnswer> {
+      self.scripted.ask(prompt)
+    }
+
+    fn info(&self, text: &str) {
+      self.scripted.info(text);
+    }
+
+    fn progress(&self, text: &str) {
+      self.scripted.progress(text);
+    }
+
+    fn prompt_line(&self, prompt: &str) -> Result<String> {
+      self.scripted.prompt_line(prompt)
+    }
+
+    fn prompt_masked(&self, prompt: &str) -> Result<String> {
+      self.scripted.prompt_masked(prompt)
+    }
+
+    fn pick_sources(&self, options: &[Source]) -> Result<Option<Vec<Source>>> {
+      self.scripted.pick_sources(options)
+    }
+  }
+
+  fn config_at(path: std::path::PathBuf) -> UserConfig {
+    let mut config = UserConfig::new();
+    config.path_to_config = Some(crate::core::user_config::UserConfigPaths {
+      config_file_path: path,
+    });
+    config
+  }
+
+  #[tokio::test]
+  async fn localized_source_setup_preserves_the_source_identity() {
+    for (language, expected) in [
+      (Language::En, "\nStarting spotatui with Internet Radio as your source. Press `d` anytime to switch or to log in to Spotify.\n"),
+    ] {
+      let dir = tempfile::tempdir().unwrap();
+      let state_path = dir.path().join("state.yml");
+      let mut config = config_at(dir.path().join("config.yml"));
+      let mut state = RuntimeState::default();
+      let onboarding = LocalizedOnboarding::new(language, &[]);
+
+      // Radio never needs credentials or external work, even when the build
+      // would not offer it in compiled_in_sources().
+      assert!(!apply_selections(
+        vec![Source::Radio],
+        &mut config,
+        &mut state,
+        Some(&state_path),
+        &onboarding,
+      ).await.unwrap());
+
+      assert_eq!(state.active_source, Source::Radio);
+      assert!(state_path.exists());
+      assert!(onboarding.scripted.saw(expected));
+    }
   }
 }

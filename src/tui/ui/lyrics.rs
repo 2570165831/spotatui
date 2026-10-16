@@ -25,17 +25,22 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
   let mut notes: Vec<String> = Vec::new();
   if app.lyrics_status() == LyricsStatus::Found {
     if !app.lyrics_synced() {
-      notes.push("timing estimated".to_string());
+      notes.push(app.strings().screens.timing_estimated.to_string());
     }
     let offset_ms = app.view.lyrics_view.timing_offset_ms;
     if offset_ms != 0 {
-      notes.push(format!("offset {:+.1}s", offset_ms as f64 / 1000.0));
+      notes.push(
+        app
+          .strings()
+          .screens
+          .lyrics_offset(&format!("{:+.1}", offset_ms as f64 / 1000.0)),
+      );
     }
   }
   let title = if notes.is_empty() {
-    " Lyrics ".to_string()
+    app.strings().screens.lyrics_title.to_string()
   } else {
-    format!(" Lyrics ({}) ", notes.join(", "))
+    app.strings().screens.lyrics_notes(&notes.join(", "))
   };
   let block = Block::default()
     .borders(Borders::ALL)
@@ -113,7 +118,7 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   if manual {
     f.render_widget(
-      Paragraph::new("browsing · ↑/↓ scroll · Esc follow")
+      Paragraph::new(app.strings().screens.lyrics_browsing)
         .style(Style::default().fg(theme.hint.into()))
         .alignment(Alignment::Center),
       Rect {
@@ -128,9 +133,18 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
 /// Centered two-line message for the non-Found lyric states.
 fn draw_state_message(f: &mut Frame<'_>, app: &App, inner_area: Rect) {
   let (primary, secondary) = match app.lyrics_status() {
-    LyricsStatus::Loading => ("Fetching lyrics…", "from LRCLIB"),
-    LyricsStatus::NotFound => ("No lyrics for this track", "lyrics provided by LRCLIB"),
-    LyricsStatus::NotStarted => ("Nothing playing", "start a track to see lyrics"),
+    LyricsStatus::Loading => (
+      app.strings().screens.lyrics_loading,
+      app.strings().screens.lyrics_from,
+    ),
+    LyricsStatus::NotFound => (
+      app.strings().screens.lyrics_missing,
+      app.strings().screens.lyrics_credit,
+    ),
+    LyricsStatus::NotStarted => (
+      app.strings().screens.nothing_playing,
+      app.strings().screens.lyrics_start_track,
+    ),
     LyricsStatus::Found => return,
   };
 

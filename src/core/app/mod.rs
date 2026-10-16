@@ -102,6 +102,7 @@ mod help;
 mod keybindings;
 mod layout;
 mod library;
+mod localization;
 mod lyrics;
 mod models;
 mod native_backend;
@@ -110,7 +111,9 @@ mod native_shuffle;
 mod party;
 mod persistence;
 mod playback_routing;
-pub(crate) use playback_routing::{PlaybackOwner, NOTHING_PLAYING_STATUS};
+pub(crate) use playback_routing::PlaybackOwner;
+#[cfg(test)]
+pub(crate) use playback_routing::NOTHING_PLAYING_STATUS;
 mod playlist_folders;
 mod playlist_pages;
 mod playlist_sync;
@@ -203,6 +206,9 @@ pub struct App {
   /// methods should.
   pub view: ViewState,
   pub user_config: UserConfig,
+  strings: &'static crate::core::i18n::Strings,
+  system_language: crate::core::i18n::Language,
+  localize_messages: bool,
   pub runtime_state: RuntimeState,
   pub state_path: Option<PathBuf>,
   pub artists: Vec<crate::core::plugin_api::ArtistInfo>,

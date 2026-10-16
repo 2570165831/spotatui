@@ -111,10 +111,8 @@ impl UserNetwork for Network {
         let err = anyhow!(e);
         if is_rate_limited_error(&err) {
           let mut app = self.app.lock().await;
-          app.set_status_message(
-            "Spotify rate limit hit while loading profile. Retrying automatically.",
-            6,
-          );
+          let strings = app.strings();
+          app.set_status_message(strings.status.infra.spotify_profile_retry, 6);
           return;
         }
         self.handle_error(err).await;
@@ -168,17 +166,9 @@ impl UserNetwork for Network {
     let result = self
       .spotify_get_typed::<MadeForYou>("views/made-for-x", &[])
       .await;
-    match result {
-      Ok(page) => self
-        .app
-        .lock()
-        .await
-        .end_discover_fetch(Some(page.sections)),
-      Err(e) => {
-        self.app.lock().await.end_discover_fetch(None);
-        self.handle_error(anyhow!(e)).await;
-      }
-    }
+    self
+      .finish_made_for_you(result.map(|page| page.sections))
+      .await;
   }
 
   async fn get_recently_played(&mut self, navigate: bool) {
@@ -272,5 +262,18 @@ mod tests {
     include_native_streaming_device(&app, "spotatui", &mut payload);
     assert_eq!(payload.devices.len(), 1);
     assert!(!payload.devices[0].is_active);
+  }
+}
+
+impl Network {
+  /// Complete the fetch through the same pump/CLI error policy as other requests.
+  pub(super) async fn finish_made_for_you(&mut self, result: anyhow::Result<Vec<DiscoverShelf>>) {
+    match result {
+      Ok(shelves) => self.app.lock().await.end_discover_fetch(Some(shelves)),
+      Err(error) => {
+        self.app.lock().await.end_discover_fetch(None);
+        self.handle_error(error).await;
+      }
+    }
   }
 }

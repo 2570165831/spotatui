@@ -116,6 +116,27 @@ CI then checks eight feature combinations on Linux plus one macOS job ([`ci.yml`
 
 Add or update tests when you change behavior, add a line under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) for a change users notice, and add screenshots for a UI change.
 
+## Adding interface text
+
+Add a named field to the appropriate group in `src/core/i18n/` and its English
+`EN` instance, then read it through `app.strings()`. Chinese instances inherit
+new fields with `..EN`, so adding a message requires only English. Keep groups
+plain serializable data. Store named placeholders (`{count}`, `{name}`) in the
+table and add a small typed Rust method calling `format_template`; never build
+a translated sentence by joining English fragments. Preserve keys, config
+values, product names, and user content. Add translations with matching
+placeholder names, using Taiwan terminology for Traditional Chinese.
+
+Run the `reports_entries_still_in_english` test with `--nocapture` for coverage.
+The report is informational; the no-empty-entry and placeholder-parity tests
+are gates. Add a sentinel call for each typed formatter in `template_tests.rs`;
+its inventory check catches missing coverage. The large settings and GUI groups
+keep `en`, `zh_hans`, and `zh_hant` data in sibling files. GUI tests regenerate
+the TypeScript bindings and `gui/src/bindings/strings.json`, which must be
+committed together. The JSON is the browser bootstrap and fixture source.
+The GUI reads the same table and formats its named placeholders; do not add a
+second handwritten translation catalog in TypeScript.
+
 ## If the gates test fails
 
 `cargo test` includes a gates test. It counts how often some code reaches across the layers of the app, for example a key handler that writes a field of `App` directly, and it keeps those numbers in [`tools/gates.count`](tools/gates.count). The numbers may only go down.

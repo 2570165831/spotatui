@@ -19,6 +19,7 @@ pub enum QueueItemSource {
 }
 
 /// Shown when an Apple Music track would go into the cross-source queue.
+#[cfg(test)]
 pub const APPLE_MUSIC_QUEUE_UNSUPPORTED: &str = "Apple Music tracks can't be queued";
 
 /// Classify a queue item by its URI scheme. Anything that is not a local file,

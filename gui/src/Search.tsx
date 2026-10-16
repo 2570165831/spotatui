@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, tabLabel, sourceLabel } from "./i18n";
 import {
   memo,
   useCallback,
@@ -41,6 +42,7 @@ type Send = (action: Action) => void;
 
 /** The Search results: the filter chips, the top result and songs, then shelves per kind. */
 export const Search = memo(function Search({
+  s = EN,
   search,
   waiting,
   source,
@@ -50,6 +52,7 @@ export const Search = memo(function Search({
   open,
   send,
 }: {
+  s?: GuiStrings;
   search: SearchPayload | null;
   /** A search the shell ran has no answer yet. */
   waiting: boolean;
@@ -103,6 +106,7 @@ export const Search = memo(function Search({
   const songs = (full: boolean) =>
     search && (
       <ResultTracks
+        s={s}
         tracks={shown}
         full={full}
         liked={search.liked}
@@ -132,7 +136,7 @@ export const Search = memo(function Search({
     <div ref={page} className="search-page">
       <div ref={bar} className="search-bar">
         {search?.ran && (
-          <div className="search-chips" role="group" aria-label="Result type">
+          <div className="search-chips" role="group" aria-label={s.result_type}>
             {TABS.map((name) => (
               <button
                 key={name}
@@ -141,7 +145,7 @@ export const Search = memo(function Search({
                 disabled={!tabHasResults(search, name)}
                 onClick={() => setTab(name)}
               >
-                {name}
+                {tabLabel(name, s)}
               </button>
             ))}
           </div>
@@ -149,7 +153,7 @@ export const Search = memo(function Search({
         {active && compiled.length > 1 && (
           <select
             className="search-scope"
-            aria-label="Search in"
+            aria-label={s.search_in}
             value={active}
             onChange={(event) => {
               const picked = compiled.find((s) => s === event.target.value);
@@ -160,7 +164,7 @@ export const Search = memo(function Search({
           >
             {compiled.map((choice) => (
               <option key={choice} value={choice}>
-                {scopeLabel(choice)}
+                {scopeLabel(choice, s)}
               </option>
             ))}
           </select>
@@ -168,49 +172,50 @@ export const Search = memo(function Search({
       </div>
       {waiting && (
         <p className="search-note" role="status">
-          Searching…
+          {s.searching}
         </p>
       )}
       {!search?.ran ? (
         !waiting && (
           <div className="search-empty">
             <Glyph name="search" size={48} />
-            <h1>Search for songs, artists, albums and playlists</h1>
-            <p>Type in the search field at the top and press Enter.</p>
-            {active && compiled.length <= 1 && <p>{scopeLabel(active)}</p>}
+            <h1>{s.search_intro}</h1>
+            <p>{s.search_instructions}</p>
+            {active && compiled.length <= 1 && <p>{scopeLabel(active, s)}</p>}
           </div>
         )
       ) : nothing ? (
         <p className="search-note">
-          No results found for “{search.query ?? asked}”.
+          {fmt(s.no_search_results, { query: search.query ?? asked })}
         </p>
       ) : (
         <>
           {tab === "All" && (top || tracks.length > 0) && (
             <div className={top ? "search-lead wide" : "search-lead"}>
               {top && (
-                <section aria-label="Top result">
-                  <h2>Top result</h2>
-                  <TopResult top={top} open={open} send={send} />
+                <section aria-label={s.top_result}>
+                  <h2>{s.top_result}</h2>
+                  <TopResult s={s} top={top} open={open} send={send} />
                 </section>
               )}
               {tracks.length > 0 && (
-                <section aria-label="Songs">
-                  <h2>Songs</h2>
+                <section aria-label={s.songs}>
+                  <h2>{s.songs}</h2>
                   {songs(false)}
                 </section>
               )}
             </div>
           )}
           {tab === "Songs" && (
-            <section className="search-songs" aria-label="Songs">
+            <section className="search-songs" aria-label={s.songs}>
               {songs(true)}
             </section>
           )}
           {(tab === "All" || tab === "Artists") && artists.length > 0 && (
-            <Shelf title="Artists">
+            <Shelf s={s} title={s.artists}>
               {cap(artists).map((artist, index) => (
                 <ArtistCard
+                  s={s}
                   key={`${index}-${artist.uri ?? artist.name}`}
                   artist={artist}
                   open={open}
@@ -220,9 +225,10 @@ export const Search = memo(function Search({
             </Shelf>
           )}
           {(tab === "All" || tab === "Albums") && albums.length > 0 && (
-            <Shelf title="Albums">
+            <Shelf s={s} title={s.albums}>
               {cap(albums).map((album, index) => (
                 <AlbumCard
+                  s={s}
                   key={`${index}-${album.uri ?? album.name}`}
                   album={album}
                   open={open}
@@ -232,9 +238,10 @@ export const Search = memo(function Search({
             </Shelf>
           )}
           {(tab === "All" || tab === "Playlists") && playlists.length > 0 && (
-            <Shelf title="Playlists">
+            <Shelf s={s} title={s.playlists}>
               {cap(playlists).map((playlist, index) => (
                 <PlaylistCard
+                  s={s}
                   key={`${index}-${playlist.uri}`}
                   playlist={playlist}
                   open={open}
@@ -244,20 +251,22 @@ export const Search = memo(function Search({
             </Shelf>
           )}
           {(tab === "All" || tab === "Podcasts") && shows.length > 0 && (
-            <Shelf title="Podcasts">
+            <Shelf s={s} title={s.podcasts}>
               {cap(shows).map((show, index) => (
-                <ShowCard key={`${index}-${show.id}`} show={show} open={open} />
+                <ShowCard
+                  s={s}
+                  key={`${index}-${show.id}`}
+                  show={show}
+                  open={open}
+                />
               ))}
             </Shelf>
           )}
         </>
       )}
       {search?.ran && others.length > 0 && (
-        <section
-          className="search-others"
-          aria-label="Search in another source"
-        >
-          <h2>Search in another source</h2>
+        <section className="search-others" aria-label={s.search_other_source}>
+          <h2>{s.search_other_source}</h2>
           {others.map((other) => (
             <button
               key={other}
@@ -267,15 +276,20 @@ export const Search = memo(function Search({
                 rerun();
               }}
             >
-              <SourceBadge source={other} />
+              <SourceBadge s={s} source={other} />
               <span>
-                Search “{asked}” in {other}
+                {fmt(s.search_other_query, {
+                  query: asked,
+                  source: sourceLabel(other, s),
+                })}
               </span>
             </button>
           ))}
         </section>
       )}
-      <KeyHints hints={["j k move", "enter play", "q queue", "/ search"]} />
+      <KeyHints
+        hints={[s.hint_move, s.hint_play, s.hint_queue, s.hint_search]}
+      />
     </div>
   );
 });
@@ -314,10 +328,12 @@ function albumLine(album: AlbumInfo): string {
 }
 
 function TopResult({
+  s = EN,
   top,
   open,
   send,
 }: {
+  s?: GuiStrings;
   top: Top;
   open: OpenView;
   send: Send;
@@ -344,13 +360,16 @@ function TopResult({
         />
         <span className="search-top-name">{name}</span>
         <span className="search-top-kind">
-          <span className="search-kind">{artist ? "Artist" : "Album"}</span>
+          <span className="search-kind">{artist ? s.artist : s.album}</span>
           {!artist && albumLine(top.album)}
         </span>
       </button>
       {uri && (
         <span className="search-top-play">
-          <PlayButton label={`Play ${name}`} onClick={() => play(uri, send)} />
+          <PlayButton
+            label={fmt(s.play_named, { name: name })}
+            onClick={() => play(uri, send)}
+          />
         </span>
       )}
     </div>
@@ -358,19 +377,22 @@ function TopResult({
 }
 
 function ArtistCard({
+  s = EN,
   artist,
   open,
   send,
 }: {
+  s?: GuiStrings;
   artist: ArtistInfo;
   open: OpenView;
   send: Send;
 }) {
   return (
     <Card
+      s={s}
       image={artist.image_url}
       title={artist.name}
-      subtitle="Artist"
+      subtitle={s.artist}
       round
       onOpen={() => openArtist(artist, open, send)}
       onPlay={artist.uri ? () => play(artist.uri, send) : undefined}
@@ -379,16 +401,19 @@ function ArtistCard({
 }
 
 function AlbumCard({
+  s = EN,
   album,
   open,
   send,
 }: {
+  s?: GuiStrings;
   album: AlbumInfo;
   open: OpenView;
   send: Send;
 }) {
   return (
     <Card
+      s={s}
       image={album.image_url}
       title={album.name}
       subtitle={albumLine(album)}
@@ -399,10 +424,12 @@ function AlbumCard({
 }
 
 function PlaylistCard({
+  s = EN,
   playlist,
   open,
   send,
 }: {
+  s?: GuiStrings;
   playlist: PlaylistInfo;
   open: OpenView;
   send: Send;
@@ -410,9 +437,12 @@ function PlaylistCard({
   const spotify = sourceOf(playlist.uri) === "Spotify";
   return (
     <Card
+      s={s}
       image={playlist.image_url}
       title={playlist.name}
-      subtitle={playlist.owner ? `By ${playlist.owner}` : "Playlist"}
+      subtitle={
+        playlist.owner ? fmt(s.by_owner, { owner: playlist.owner }) : s.playlist
+      }
       onOpen={() =>
         spotify
           ? open({
@@ -428,12 +458,21 @@ function PlaylistCard({
   );
 }
 
-function ShowCard({ show, open }: { show: ShowInfo; open: OpenView }) {
+function ShowCard({
+  s = EN,
+  show,
+  open,
+}: {
+  s?: GuiStrings;
+  show: ShowInfo;
+  open: OpenView;
+}) {
   return (
     <Card
+      s={s}
       image={show.image_url}
       title={show.name}
-      subtitle={show.publisher || "Podcast"}
+      subtitle={show.publisher || s.podcast}
       onOpen={() => {
         const view = showView(show);
         if (view) open(view);
@@ -443,6 +482,7 @@ function ShowCard({ show, open }: { show: ShowInfo; open: OpenView }) {
 }
 
 const ResultTracks = memo(function ResultTracks({
+  s = EN,
   tracks,
   full,
   liked,
@@ -451,6 +491,7 @@ const ResultTracks = memo(function ResultTracks({
   onCursor,
   send,
 }: {
+  s?: GuiStrings;
   tracks: TrackInfo[];
   /// The Songs view: a numbered table with the album column.
   full: boolean;
@@ -501,8 +542,8 @@ const ResultTracks = memo(function ResultTracks({
       {full && (
         <div className="search-row head" aria-hidden="true">
           <span className="n">#</span>
-          <span>Title</span>
-          <span className="album">Album</span>
+          <span>{s.title}</span>
+          <span className="album">{s.album}</span>
           <span />
           <span className="time">
             <Glyph name="clock" />
@@ -512,7 +553,7 @@ const ResultTracks = memo(function ResultTracks({
       <div
         ref={list}
         role="listbox"
-        aria-label="Songs"
+        aria-label={s.songs}
         aria-activedescendant={cursor >= 0 ? `search-${cursor}` : undefined}
         tabIndex={0}
         data-focus
@@ -543,7 +584,7 @@ const ResultTracks = memo(function ResultTracks({
                 <Cover src={track.image_url} size={40} />
                 <span className="words">
                   <b>
-                    {now && <span className="sr-only">Playing: </span>}
+                    {now && <span className="sr-only">{s.playing_label} </span>}
                     {track.name}
                   </b>
                   <span>{track.artists.join(", ")}</span>
@@ -554,12 +595,12 @@ const ResultTracks = memo(function ResultTracks({
                 {mine && (
                   <>
                     <Glyph name="heart" size={16} filled />
-                    <span className="sr-only">Liked</span>
+                    <span className="sr-only">{s.liked}</span>
                   </>
                 )}
               </span>
               <span className="time">
-                {track.duration_ms > 0 ? clock(track.duration_ms) : "live"}
+                {track.duration_ms > 0 ? clock(track.duration_ms) : s.live}
               </span>
             </div>
           );

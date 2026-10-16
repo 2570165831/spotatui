@@ -1,7 +1,8 @@
 //! Spotify's Made For You page through Pathfinder's persisted `browsePage` query.
 
-use super::router::api_error;
+use super::router::localized_api_error;
 use super::session::SpotifySession;
+use crate::core::i18n::LocalizedMessage;
 use librespot_core::error::ErrorKind;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
@@ -57,13 +58,16 @@ pub async fn made_for_you(session: &SpotifySession) -> anyhow::Result<Value> {
       Err(e) => return Err(super::router::upstream_error(e)),
     }
   }
-  Err(api_error(
+  Err(localized_api_error(
     StatusCode::SERVICE_UNAVAILABLE,
-    if refused {
-      "Spotify did not send the Made For You page"
-    } else {
-      "Made For You is unavailable: every known browsePage hash is retired"
-    },
+    LocalizedMessage::new(|s| {
+      if refused {
+        s.status.infra.made_for_you_missing
+      } else {
+        s.status.infra.made_for_you_unavailable
+      }
+      .to_string()
+    }),
   ))
 }
 

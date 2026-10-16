@@ -30,6 +30,7 @@ fn startup_device_decision(
   saved_device_id: Option<String>,
   devices_snapshot: Option<&[rspotify::model::device::Device]>,
   native_device_name: &str,
+  strings: &crate::core::i18n::Strings,
 ) -> StartupDeviceDecision {
   if startup_behavior != StartupBehavior::Play {
     return StartupDeviceDecision {
@@ -101,7 +102,12 @@ fn startup_device_decision(
       }
     )
   )
-  .then(|| format!("Saved device unavailable; using {}", native_device_name));
+  .then(|| {
+    strings
+      .status
+      .runtime
+      .saved_device_unavailable(native_device_name)
+  });
 
   StartupDeviceDecision {
     event,
@@ -146,6 +152,7 @@ mod tests {
       saved_device_id,
       devices_snapshot,
       NATIVE_NAME,
+      &crate::core::i18n::EN,
     )
     .event
   }
@@ -247,6 +254,7 @@ mod tests {
       Some(EXTERNAL_ID.to_string()),
       Some(&devices),
       NATIVE_NAME,
+      &crate::core::i18n::EN,
     );
 
     assert_eq!(
@@ -271,6 +279,7 @@ mod tests {
       Some(EXTERNAL_ID.to_string()),
       Some(&devices),
       NATIVE_NAME,
+      &crate::core::i18n::EN,
     );
 
     assert_eq!(
@@ -293,6 +302,7 @@ mod tests {
       Some(EXTERNAL_ID.to_string()),
       None,
       NATIVE_NAME,
+      &crate::core::i18n::EN,
     );
 
     assert_eq!(

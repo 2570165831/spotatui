@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Source } from "./bindings/Source";
 import type { SyncLinkView } from "./bindings/SyncLinkView";
 import type { UnmatchReason } from "./bindings/UnmatchReason";
@@ -39,20 +40,20 @@ export function unmatchedTotal(links: SyncLinkView[]): number {
 }
 
 /** The terminal's wording for why a track has no mirror. */
-export function reasonText(reason: UnmatchReason): string {
-  if (reason === "NoCandidate") return "no match";
-  if (reason === "NotSyncable") return "cannot sync";
-  return `search failed: ${reason.SearchFailed}`;
+export function reasonText(reason: UnmatchReason, s: GuiStrings = EN): string {
+  if (reason === "NoCandidate") return s.no_match;
+  if (reason === "NotSyncable") return s.cannot_sync;
+  return fmt(s.search_failed, { error: reason.SearchFailed });
 }
 
 /** The newest mirror run of a link, as a local `YYYY-MM-DD hh:mm`. */
-export function lastSync(link: SyncLinkView): string {
+export function lastSync(link: SyncLinkView, s: GuiStrings = EN): string {
   const stamps = link.mirrors
     .map((mirror) => mirror.last_run)
     .filter((stamp): stamp is string => stamp !== null)
     .map((stamp) => Date.parse(stamp))
     .filter((ms) => !Number.isNaN(ms));
-  if (stamps.length === 0) return "never";
+  if (stamps.length === 0) return s.never;
   const date = new Date(Math.max(...stamps));
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;

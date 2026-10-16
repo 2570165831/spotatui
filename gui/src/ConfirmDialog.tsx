@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { KeyboardEvent } from "react";
 import "./Dialog.css";
 
@@ -21,12 +22,14 @@ export function trapTab(event: KeyboardEvent<HTMLElement>) {
 
 /** A yes-or-no question before a destructive step; Cancel takes the focus. */
 export function ConfirmDialog({
+  s = EN,
   title,
   body,
   confirm,
   onConfirm,
   onCancel,
 }: {
+  s?: GuiStrings;
   title: string;
   body: string;
   /** The confirm button's label. */
@@ -61,7 +64,7 @@ export function ConfirmDialog({
             autoFocus
             onClick={onCancel}
           >
-            Cancel
+            {s.cancel}
           </button>
           <button type="button" className="dialog-confirm" onClick={onConfirm}>
             {confirm}

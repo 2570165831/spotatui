@@ -271,12 +271,28 @@ pub async fn handle_add_friend_by_code(network: &mut Network, friend_code: Strin
     Ok(_) => {
       handle_get_friends(network).await;
       network
-        .show_status_message(format!("Added friend (code: {})", friend_code), 4)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_added_code(&friend_code),
+          4,
+        )
         .await;
     }
     Err(e) => {
       network
-        .show_status_message(format!("Could not add friend: {}", e), 5)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_add_failed(&e.to_string()),
+          5,
+        )
         .await;
     }
   }
@@ -291,12 +307,29 @@ pub async fn handle_add_friend_by_user_id(network: &mut Network, user_id: String
     Ok(_) => {
       handle_get_friends(network).await;
       network
-        .show_status_message("Added friend".to_string(), 4)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_added
+            .to_string(),
+          4,
+        )
         .await;
     }
     Err(e) => {
       network
-        .show_status_message(format!("Could not add friend: {}", e), 5)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_add_failed(&e.to_string()),
+          5,
+        )
         .await;
     }
   }
@@ -311,12 +344,29 @@ pub async fn handle_unfollow_friend(network: &mut Network, user_id: String) {
     Ok(_) => {
       handle_get_friends(network).await;
       network
-        .show_status_message("Unfollowed".to_string(), 3)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_unfollowed
+            .to_string(),
+          3,
+        )
         .await;
     }
     Err(e) => {
       network
-        .show_status_message(format!("Failed to unfollow: {}", e), 5)
+        .show_status_message(
+          network
+            .strings()
+            .await
+            .status
+            .infra
+            .friend_unfollow_failed(&e.to_string()),
+          5,
+        )
         .await;
     }
   }

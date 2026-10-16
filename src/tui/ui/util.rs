@@ -101,6 +101,18 @@ pub fn draw_selectable_list<S>(
   f.render_stateful_widget(list, layout_chunk, &mut state);
 }
 
+#[cfg(feature = "cover-art")]
+pub fn cover_art_status(app: &App) -> &'static str {
+  use crate::core::art::CoverArtStatus;
+  let strings = &app.strings().screens;
+  match app.cover_art.status {
+    CoverArtStatus::Loading => strings.cover_loading,
+    CoverArtStatus::Unavailable => strings.cover_source_unavailable,
+    CoverArtStatus::Failed => strings.cover_failed,
+    CoverArtStatus::Loaded | CoverArtStatus::NotStarted => strings.cover_empty,
+  }
+}
+
 pub fn create_artist_string(artists: &[SimplifiedArtist]) -> String {
   artists
     .iter()
@@ -130,14 +142,32 @@ pub fn join_artist_names(artists: &[crate::core::plugin_api::ArtistRef]) -> Stri
 // the many draw-fn callers keep their `util::` paths.
 pub use crate::core::format::{display_track_progress, millis_to_minutes};
 
-pub fn truncate_text(s: &str, max_chars: usize) -> String {
-  if s.chars().count() <= max_chars {
-    s.to_string()
-  } else {
-    let mut truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
-    truncated.push('…');
-    truncated
+/// Truncate at extended grapheme boundaries and measure the complete prefix.
+/// Variation selectors and joined emoji can change a preceding character's width.
+pub fn truncate_text(s: &str, width: usize) -> String {
+  use unicode_segmentation::UnicodeSegmentation;
+  use unicode_width::UnicodeWidthStr;
+  if s.width() <= width {
+    return s.to_string();
   }
+  if width == 0 {
+    return String::new();
+  }
+  let mut end = 0;
+  for (start, grapheme) in s.grapheme_indices(true) {
+    let next = start + grapheme.len();
+    if s[..next].width() + "…".width() > width {
+      break;
+    }
+    end = next;
+  }
+  format!("{}…", &s[..end])
+}
+
+/// Pad translated labels to a minimum number of terminal cells.
+pub fn pad_to_width(text: &str, width: usize) -> String {
+  use unicode_width::UnicodeWidthStr;
+  format!("{text}{}", " ".repeat(width.saturating_sub(text.width())))
 }
 
 // `percentage` param needs to be between 0 and 1
@@ -166,6 +196,48 @@ pub fn get_track_progress_percentage(song_progress_ms: u128, track_duration: Dur
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn truncation_keeps_complete_graphemes_within_the_cell_budget() {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    for text in [
+      "abcdefghijklmnopqr#\u{FE0F}x",
+      "a\u{301}bcd",
+      "家人👨‍👩‍👧‍👦音乐",
+      "👍🏽🎵abc",
+      "中文测试",
+      "abcdefgh",
+    ] {
+      for width in 0..=24 {
+        let truncated = truncate_text(text, width);
+        assert!(
+          truncated.width() <= width,
+          "{text:?} at {width}: {truncated:?}"
+        );
+        if truncated != text && width > 0 {
+          let prefix = truncated.strip_suffix('…').unwrap();
+          assert!(text.starts_with(prefix));
+          assert!(
+            prefix.is_empty()
+              || text
+                .grapheme_indices(true)
+                .any(|(i, g)| i + g.len() == prefix.len())
+          );
+        }
+        let padded = super::super::help::padded_help_cell(text, width);
+        assert_eq!(padded.width(), width, "{text:?}: {padded:?}");
+      }
+    }
+    assert_eq!(
+      truncate_text("abcdefghijklmnopqr#\u{FE0F}x", 20),
+      "abcdefghijklmnopqr…"
+    );
+    assert_eq!(truncate_text("a\u{301}bc", 2), "a\u{301}…");
+    assert_eq!(truncate_text("abcdef", 4), "abc…");
+    assert_eq!(truncate_text("English", 7), "English");
+    assert_eq!(super::super::help::padded_help_cell("abc", 5), "abc  ");
+  }
 
   #[test]
   fn join_artist_names_test() {
@@ -242,5 +314,18 @@ mod tests {
     let truncated = truncate_text("héllo wörld", 5);
     assert_eq!(truncated, "héll…");
     assert_eq!(truncated.chars().count(), 5);
+  }
+  #[test]
+  fn truncation_and_padding_use_terminal_cells_for_chinese() {
+    use unicode_width::UnicodeWidthStr;
+    assert_eq!(truncate_text("中文歌曲", 5), "中文…");
+    assert_eq!(truncate_text("中文", 0), "");
+    assert_eq!(truncate_text("中文", 1), "…");
+    assert_eq!(truncate_text("中文", 4), "中文");
+    assert_eq!(pad_to_width("播放", 7), "播放   ");
+    assert_eq!(pad_to_width("Playing", 7), "Playing");
+    for width in 0..8 {
+      assert!(truncate_text("中文歌曲", width).width() <= width);
+    }
   }
 }

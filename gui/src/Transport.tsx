@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { NowPlaying } from "./bindings/NowPlaying";
 import { clock } from "./format";
@@ -5,10 +6,12 @@ import { Glyph } from "./Icon";
 
 /** Shuffle, previous, play or pause, next and repeat for the playing item. */
 export function Transport({
+  s = EN,
   item,
   connected,
   send,
 }: {
+  s?: GuiStrings;
   item: NowPlaying | null;
   connected: boolean;
   send: (action: Action) => void;
@@ -20,7 +23,7 @@ export function Transport({
       <button
         type="button"
         className="icon-button"
-        aria-label="Shuffle"
+        aria-label={s.shuffle}
         aria-pressed={item?.shuffle ?? false}
         disabled={!connected}
         onClick={() => send("ToggleShuffle")}
@@ -30,7 +33,7 @@ export function Transport({
       <button
         type="button"
         className="icon-button"
-        aria-label="Previous"
+        aria-label={s.previous}
         disabled={!connected}
         onClick={() => send("PreviousTrack")}
       >
@@ -39,7 +42,7 @@ export function Transport({
       <button
         type="button"
         className="play-toggle"
-        aria-label={playing ? "Pause" : "Play"}
+        aria-label={playing ? s.pause : s.play}
         disabled={!connected}
         onClick={() => send("TogglePlayback")}
       >
@@ -48,7 +51,7 @@ export function Transport({
       <button
         type="button"
         className="icon-button"
-        aria-label="Next"
+        aria-label={s.next}
         disabled={!connected}
         onClick={() => send("NextTrack")}
       >
@@ -57,7 +60,7 @@ export function Transport({
       <button
         type="button"
         className="icon-button"
-        aria-label={repeat === "track" ? "Repeat one" : "Repeat"}
+        aria-label={repeat === "track" ? s.repeat_one : s.repeat}
         aria-pressed={repeat !== "off"}
         disabled={!connected}
         onClick={() => send("CycleRepeat")}
@@ -71,11 +74,13 @@ export function Transport({
 
 /** The elapsed time, the seek slider and the length of the playing item. */
 export function Progress({
+  s = EN,
   item,
   elapsed,
   connected,
   send,
 }: {
+  s?: GuiStrings;
   item: NowPlaying | null;
   elapsed: number;
   connected: boolean;
@@ -83,14 +88,14 @@ export function Progress({
 }) {
   const duration = item?.duration_ms ?? 0;
   const ms = duration ? Math.min(elapsed, duration) : elapsed;
-  const length = item?.is_live ? "live" : clock(duration);
+  const length = item?.is_live ? s.live : clock(duration);
   return (
     <div className="progress">
       <span>{clock(ms)}</span>
       <Meter
-        label="Seek"
+        label={s.seek}
         ratio={duration ? ms / duration : 0}
-        text={`${clock(ms)} of ${length}`}
+        text={fmt(s.seek_position, { position: clock(ms), length })}
         disabled={!connected || !duration}
         onPick={(ratio) => send({ SeekTo: Math.round(ratio * duration) })}
         onStep={(up) => send(up ? "SeekForward" : "SeekBackward")}

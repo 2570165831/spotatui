@@ -61,16 +61,16 @@ pub(crate) enum PlaybarControl {
 
 impl PlaybarControl {
   /// The built-in (default) label for this control.
-  const fn default_label(self) -> &'static str {
+  fn default_label(self, strings: &crate::core::i18n::screens::ScreenStrings) -> &'static str {
     match self {
-      Self::Prev => "[Prev]",
-      Self::PlayPause => "[Play/Pause]",
-      Self::Next => "[Next]",
-      Self::Shuffle => "[Shuffle]",
-      Self::Repeat => "[Repeat]",
-      Self::Like => "[Like]",
-      Self::VolumeDown => "[Vol-]",
-      Self::VolumeUp => "[Vol+]",
+      Self::Prev => strings.control_prev,
+      Self::PlayPause => strings.control_play,
+      Self::Next => strings.control_next,
+      Self::Shuffle => strings.control_shuffle,
+      Self::Repeat => strings.control_repeat,
+      Self::Like => strings.control_like,
+      Self::VolumeDown => strings.control_vol_down,
+      Self::VolumeUp => strings.control_vol_up,
     }
   }
 
@@ -94,10 +94,11 @@ impl PlaybarControl {
   fn label(
     self,
     behavior: &crate::core::user_config::BehaviorConfig,
+    strings: &crate::core::i18n::screens::ScreenStrings,
   ) -> std::borrow::Cow<'static, str> {
     match behavior.playbar_control_labels.get(self.config_key()) {
       Some(override_label) => std::borrow::Cow::Owned(override_label.clone()),
-      None => std::borrow::Cow::Borrowed(self.default_label()),
+      None => std::borrow::Cow::Borrowed(self.default_label(strings)),
     }
   }
 }
@@ -172,11 +173,12 @@ fn playbar_layout_areas(app: &App, layout_chunk: Rect) -> PlaybarLayoutAreas {
         crate::tui::cover_art::size_for(cover_layout.image_area, &app.cover_art)
       {
         let cover_layout = cover_layout.with_rendered_size(rendered_size);
-        let (artist_area, controls_area, progress_area) = split_cover_playbar_rows(
+        let (artist_area, controls_area, progress_area) = split_cover_playbar_rows_localized(
           other,
           cover_layout.text_area,
           cover_layout.image_area,
           &app.user_config.behavior,
+          &app.strings().screens,
         );
 
         return PlaybarLayoutAreas {
@@ -290,11 +292,12 @@ fn bottom_aligned_rect_within(bounds: Rect, size: Rect) -> Rect {
 }
 
 #[cfg(feature = "cover-art")]
-fn split_cover_playbar_rows(
+fn split_cover_playbar_rows_localized(
   inner: Rect,
   text_area: Rect,
   image_area: Rect,
   behavior: &crate::core::user_config::BehaviorConfig,
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> (Rect, Rect, Rect) {
   if inner.width == 0 || inner.height == 0 || text_area.width == 0 || text_area.height == 0 {
     let empty = Rect::new(text_area.x, text_area.y, text_area.width, 0);
@@ -316,27 +319,35 @@ fn split_cover_playbar_rows(
     )
   };
 
-  let controls_area =
-    cover_playbar_controls_area(inner, text_area, image_area, progress_area, behavior);
+  let controls_area = cover_playbar_controls_area_localized(
+    inner,
+    text_area,
+    image_area,
+    progress_area,
+    behavior,
+    strings,
+  );
   let artist_area = cover_playbar_artist_area(text_area, image_area, controls_area, progress_area);
 
   (artist_area, controls_area, progress_area)
 }
 
 #[cfg(feature = "cover-art")]
-fn cover_playbar_controls_area(
+fn cover_playbar_controls_area_localized(
   inner: Rect,
   text_area: Rect,
   image_area: Rect,
   progress_area: Rect,
   behavior: &crate::core::user_config::BehaviorConfig,
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> Rect {
   // Reserve room for the full control row: this only decides *whether* a controls
   // row fits, and which controls actually apply depends on the owning source
   // (`playbar_supported_controls`), which this layout pass has no `App` to ask.
   // Sizing for the widest case keeps the row appearing in exactly the same
   // situations as before, just with fewer buttons drawn in it.
-  let required_width = playbar_controls_required_width(behavior, &PLAYBAR_CONTROLS);
+  let required_width =
+    playbar_controls_required_width_localized(behavior, &PLAYBAR_CONTROLS, strings);
   let controls_y = progress_area.y.saturating_sub(1);
   let image_bottom = image_area.y.saturating_add(image_area.height);
 
@@ -459,16 +470,17 @@ fn playbar_supported_controls_for(
   controls
 }
 
-fn playbar_control_hitboxes_in_area(
+fn playbar_control_hitboxes_in_area_localized(
   controls_area: Rect,
   behavior: &crate::core::user_config::BehaviorConfig,
   controls: &[PlaybarControl],
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> Vec<PlaybarControlHitbox> {
   if controls_area.width == 0 || controls_area.height == 0 {
     return Vec::new();
   }
 
-  let required_width = playbar_controls_required_width(behavior, controls);
+  let required_width = playbar_controls_required_width_localized(behavior, controls, strings);
   let start_x = if controls_area.width > required_width {
     controls_area
       .x
@@ -483,7 +495,7 @@ fn playbar_control_hitboxes_in_area(
   let mut hitboxes = Vec::with_capacity(controls.len());
 
   for control in controls.iter().copied() {
-    let label = control.label(behavior);
+    let label = control.label(behavior, strings);
     let width = unicode_width::UnicodeWidthStr::width(label.as_ref()) as u16;
     if x.saturating_add(width) > right {
       break;
@@ -503,16 +515,17 @@ fn playbar_control_hitboxes_in_area(
   hitboxes
 }
 
-fn playbar_controls_required_width(
+fn playbar_controls_required_width_localized(
   behavior: &crate::core::user_config::BehaviorConfig,
   controls: &[PlaybarControl],
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> u16 {
   controls
     .iter()
     .enumerate()
     .fold(0u16, |width, (idx, control)| {
       width.saturating_add(u16::from(idx > 0)).saturating_add(
-        unicode_width::UnicodeWidthStr::width(control.label(behavior).as_ref()) as u16,
+        unicode_width::UnicodeWidthStr::width(control.label(behavior, strings).as_ref()) as u16,
       )
     })
 }
@@ -526,10 +539,11 @@ pub(crate) fn playbar_control_hitboxes(
   }
 
   let controls_area = playbar_layout_areas(app, playbar_area).controls_area;
-  playbar_control_hitboxes_in_area(
+  playbar_control_hitboxes_in_area_localized(
     controls_area,
     &app.user_config.behavior,
     &playbar_supported_controls(app),
+    &app.strings().screens,
   )
   .into_iter()
   .map(|hitbox| (hitbox.control, hitbox.rect))
@@ -706,15 +720,50 @@ pub(crate) fn playbar_progress_line(app: &App, playbar_area: Rect) -> Option<Pla
   })
 }
 
+fn render_playbar_template(app: &App, source: bool, values: &[&str]) -> String {
+  use crate::core::user_config::{FormatConfig, FORMAT_KEYS};
+  static DEFAULTS: std::sync::OnceLock<FormatConfig> = std::sync::OnceLock::new();
+  let defaults = DEFAULTS.get_or_init(FormatConfig::default_templates);
+  let (configured, default, localized) = if source {
+    (
+      &app.user_config.format.playbar_status_source,
+      &defaults.playbar_status_source,
+      app.strings().screens.playbar_source_status,
+    )
+  } else {
+    (
+      &app.user_config.format.playbar_status,
+      &defaults.playbar_status,
+      app.strings().screens.playbar_status,
+    )
+  };
+  if configured == default {
+    let named: Vec<_> = FORMAT_KEYS
+      .iter()
+      .copied()
+      .zip(values.iter().copied())
+      .collect();
+    let mut rendered = crate::core::i18n::format_template(localized, &named);
+    crate::core::format::strip_line_controls(&mut rendered);
+    rendered
+  } else {
+    configured.render(values)
+  }
+}
+
 fn draw_playbar_controls(f: &mut Frame<'_>, app: &App, controls_area: Rect) {
   let controls_style = Style::default().fg(app.user_config.theme.playbar_text.into());
-  for hitbox in playbar_control_hitboxes_in_area(
+  for hitbox in playbar_control_hitboxes_in_area_localized(
     controls_area,
     &app.user_config.behavior,
     &playbar_supported_controls(app),
+    &app.strings().screens,
   ) {
     let control = Paragraph::new(Span::styled(
-      hitbox.control.label(&app.user_config.behavior).into_owned(),
+      hitbox
+        .control
+        .label(&app.user_config.behavior, &app.strings().screens)
+        .into_owned(),
       controls_style,
     ));
     f.render_widget(control, hitbox.rect);
@@ -749,7 +798,7 @@ fn draw_cover_art_content(f: &mut Frame<'_>, app: &App, area: Rect) {
   if !app.cover_art.available() {
     // No image is loaded: show an explicit message for the current state rather
     // than a blank pane, so "no art" always reads as a deliberate outcome.
-    let message = crate::tui::cover_art::status_message(app.cover_art.status);
+    let message = super::util::cover_art_status(app);
     let p = Paragraph::new(message)
       .style(Style::default().fg(app.user_config.theme.inactive.into()))
       .alignment(Alignment::Center);
@@ -895,8 +944,8 @@ fn draw_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     return;
   };
   let view = LocalPlaybarView {
-    source_label: "Local",
-    name: local.name.clone(),
+    source_label: app.strings().screens.local_source_short,
+    name: local.display_name(app.strings()).to_owned(),
     artists: local.artists.clone(),
     is_playing: !local.player.is_paused(),
     position_ms: local.player.position().as_millis(),
@@ -948,7 +997,7 @@ fn draw_qobuz_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let view = LocalPlaybarView {
     source_label: "Qobuz",
     name: if qobuz.advancing {
-      format!("{name} (loading\u{2026})")
+      app.strings().screens.loading_track(&name)
     } else {
       name
     },
@@ -1008,7 +1057,7 @@ fn draw_radio_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     }
   });
   let view = LocalPlaybarView {
-    source_label: "Radio",
+    source_label: app.strings().screens.radio_source_short,
     name: radio.station.name.clone(),
     artists,
     is_playing: !radio.player.is_paused(),
@@ -1031,7 +1080,11 @@ fn draw_radio_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: &LocalPlaybarView) {
   let playbar_areas = playbar_layout_areas(app, layout_chunk);
 
-  let play_title = if view.is_playing { "Playing" } else { "Paused" };
+  let play_title = if view.is_playing {
+    app.strings().screens.playing
+  } else {
+    app.strings().screens.paused
+  };
 
   let current_route = app.get_current_route();
   let highlight_state = (
@@ -1057,34 +1110,48 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
   // — label included — disappears instead of leaking a blank control.
   use crate::infra::queue::RepeatMode;
   let (shuffle_text, repeat_text) = if view.show_modes {
-    let shuffle = if app.decoded_shuffle { "On" } else { "Off" };
+    let shuffle = if app.decoded_shuffle {
+      app.strings().screens.on
+    } else {
+      app.strings().screens.off
+    };
     let repeat = match app.decoded_repeat {
-      RepeatMode::Off => "Off",
-      RepeatMode::Track => "Track",
-      RepeatMode::Context => "All",
+      RepeatMode::Off => app.strings().screens.off,
+      RepeatMode::Track => app.strings().screens.repeat_track,
+      RepeatMode::Context => app.strings().screens.repeat_all,
     };
     (
-      format!(" | Shuffle: {shuffle:<3}"),
-      format!(" | Repeat: {repeat:<5}"),
+      app
+        .strings()
+        .screens
+        .shuffle_segment(&super::util::pad_to_width(shuffle, 3)),
+      app
+        .strings()
+        .screens
+        .repeat_segment(&super::util::pad_to_width(repeat, 5)),
     )
   } else {
     (String::new(), String::new())
   };
   // Build the title from the configurable playbar_status_source template.
-  let title = app.user_config.format.playbar_status_source.render(&[
-    // state — left-aligned to 7 cols (matches `{:-7}`)
-    &format!("{:<7}", play_title),
-    // device / source / queue
-    "",
-    view.source_label,
-    &queue_label,
-    // shuffle / repeat — self-contained ` | Label: value` segments (or empty)
-    &shuffle_text,
-    &repeat_text,
-    // volume — left-aligned to 2 (matches `{:-2}`)
-    &format!("{:<2}", view.volume_percent),
-    "",
-  ]);
+  let title = render_playbar_template(
+    app,
+    true,
+    &[
+      // state — left-aligned to 7 cols (matches `{:-7}`)
+      &super::util::pad_to_width(play_title, 7),
+      // device / source / queue
+      "",
+      view.source_label,
+      &queue_label,
+      // shuffle / repeat — self-contained ` | Label: value` segments (or empty)
+      &shuffle_text,
+      &repeat_text,
+      // volume — left-aligned to 2 (matches `{:-2}`)
+      &format!("{:<2}", view.volume_percent),
+      "",
+    ],
+  );
   let mut title_spans = vec![Span::styled(
     title,
     get_color(highlight_state, app.user_config.theme),
@@ -1143,10 +1210,10 @@ fn render_local_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect, view: 
   let (perc, song_progress_label) = if view.live {
     (
       100,
-      format!(
-        "LIVE \u{2022} {}",
-        super::util::millis_to_minutes(view.position_ms)
-      ),
+      app
+        .strings()
+        .screens
+        .live_elapsed(&super::util::millis_to_minutes(view.position_ms)),
     )
   } else {
     let duration_std = std::time::Duration::from_millis(view.duration_ms);
@@ -1196,9 +1263,10 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     let snapshot = crate::infra::media_metadata::current_playback_snapshot(app);
     let view = LocalPlaybarView {
       source_label: "Apple Music",
-      name: snapshot
-        .as_ref()
-        .map_or_else(|| "Waiting for Music…".into(), |s| s.metadata.title.clone()),
+      name: snapshot.as_ref().map_or_else(
+        || app.strings().screens.waiting_music.into(),
+        |s| s.metadata.title.clone(),
+      ),
       artists: snapshot
         .as_ref()
         .map_or_else(String::new, |s| s.primary_artist()),
@@ -1227,14 +1295,20 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .uri
       .as_deref()
       .map(crate::core::queue::queue_item_source)
-      .map(crate::core::queue::source_label)
-      .unwrap_or("Queue");
+      .map(|source| match source {
+        crate::core::queue::QueueItemSource::LocalFile => app.strings().screens.local_source_short,
+        other => crate::core::queue::source_label(other),
+      })
+      .unwrap_or(app.strings().screens.queue);
     // `advancing` spans the download/decode window (the slot is published
     // before the fetch), so surface it instead of a silent frozen bar.
     let name = if d.advancing {
-      format!("{} (loading\u{2026})", d.track.name)
+      app
+        .strings()
+        .screens
+        .loading_track(d.track.display_name(app.strings()))
     } else {
-      d.track.name.clone()
+      d.track.display_name(app.strings()).to_owned()
     };
     let view = LocalPlaybarView {
       source_label,
@@ -1261,7 +1335,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   if let Some(crate::infra::queue::QueueNowPlaying::Spotify { track }) = app.queue_now.as_ref() {
     let view = LocalPlaybarView {
       source_label: "Spotify",
-      name: track.name.clone(),
+      name: track.display_name(app.strings()).to_owned(),
       artists: track.artists.join(", "),
       is_playing: app.native_is_playing.unwrap_or(true),
       position_ms: app.song_progress_ms,
@@ -1328,18 +1402,22 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .filter(|_| app.is_streaming_active)
         .unwrap_or(current_playback_context.is_playing);
 
-      let play_title = if is_playing { "Playing" } else { "Paused" };
+      let play_title = if is_playing {
+        app.strings().screens.playing
+      } else {
+        app.strings().screens.paused
+      };
 
       let shuffle_text = if current_playback_context.shuffle_state {
-        "On"
+        app.strings().screens.on
       } else {
-        "Off"
+        app.strings().screens.off
       };
 
       let repeat_text = match current_playback_context.repeat_state {
-        RepeatState::Off => "Off",
-        RepeatState::Track => "Track",
-        RepeatState::Context => "All",
+        RepeatState::Off => app.strings().screens.off,
+        RepeatState::Track => app.strings().screens.repeat_track,
+        RepeatState::Context => app.strings().screens.repeat_all,
       };
 
       // Build the title from the configurable playbar_status template.
@@ -1348,32 +1426,36 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       let party_segment = if let Some(session) = app.party_session() {
         match session.role {
           crate::infra::network::sync::PartyRole::Host => {
-            format!(" | Party: {} listeners", session.guests.len())
+            app.strings().screens.party_listeners(session.guests.len())
           }
           crate::infra::network::sync::PartyRole::Guest => {
-            format!(" | Party: following {}", session.host_name)
+            app.strings().screens.party_following(&session.host_name)
           }
         }
       } else {
         String::new()
       };
-      let title = app.user_config.format.playbar_status.render(&[
-        // state — left-aligned to 7 cols (matches `{:-7}`)
-        &format!("{:<7}", play_title),
-        // device
-        &current_playback_context.device.name,
-        // source / queue — unused in the Spotify template
-        "",
-        "",
-        // shuffle — left-aligned to 3 (matches `{:-3}`)
-        &format!("{:<3}", shuffle_text),
-        // repeat — left-aligned to 5 (matches `{:-5}`)
-        &format!("{:<5}", repeat_text),
-        // volume — left-aligned to 2 (matches `{:-2}`)
-        &format!("{:<2}", app.desired_volume()),
-        // party — pre-composed optional segment
-        &party_segment,
-      ]);
+      let title = render_playbar_template(
+        app,
+        false,
+        &[
+          // state — left-aligned to 7 cols (matches `{:-7}`)
+          &super::util::pad_to_width(play_title, 7),
+          // device
+          &current_playback_context.device.name,
+          // source / queue — unused in the Spotify template
+          "",
+          "",
+          // shuffle — left-aligned to 3 (matches `{:-3}`)
+          &super::util::pad_to_width(shuffle_text, 3),
+          // repeat — left-aligned to 5 (matches `{:-5}`)
+          &super::util::pad_to_width(repeat_text, 5),
+          // volume — left-aligned to 2 (matches `{:-2}`)
+          &format!("{:<2}", app.desired_volume()),
+          // party — pre-composed optional segment
+          &party_segment,
+        ],
+      );
 
       let current_route = app.get_current_route();
       let highlight_state = (
@@ -1490,7 +1572,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       // The loud-failure guard: a frontend that stops driving the tick would
       // otherwise freeze this label at its last value indefinitely.
       let song_progress_label = if app.playback_position_ms().is_none() {
-        "position stale (tick loop stopped)".to_string()
+        app.strings().screens.position_stale.to_string()
       } else {
         display_track_progress(progress_ms, duration_std)
       };
@@ -1563,21 +1645,20 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       drew_playbar = true;
     } else if app.is_streaming_active && app.native_device_id.is_some() {
       let shuffle_text = if current_playback_context.shuffle_state {
-        "On"
+        app.strings().screens.on
       } else {
-        "Off"
+        app.strings().screens.off
       };
       let repeat_text = match current_playback_context.repeat_state {
-        RepeatState::Off => "Off",
-        RepeatState::Track => "Track",
-        RepeatState::Context => "All",
+        RepeatState::Off => app.strings().screens.off,
+        RepeatState::Track => app.strings().screens.repeat_track,
+        RepeatState::Context => app.strings().screens.repeat_all,
       };
-      let title = format!(
-        "Ready   ({} | Shuffle: {:-3} | Repeat: {:-5} | Volume: {:-2}%)",
-        current_playback_context.device.name,
-        shuffle_text,
-        repeat_text,
-        app.desired_volume()
+      let title = app.strings().screens.ready_status(
+        &current_playback_context.device.name,
+        &super::util::pad_to_width(shuffle_text, 3),
+        &super::util::pad_to_width(repeat_text, 5),
+        &format!("{:-2}", app.desired_volume()),
       );
       let current_route = app.get_current_route();
       let highlight_state = (
@@ -1612,7 +1693,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 
       f.render_widget(title_block, layout_chunk);
       f.render_widget(
-        Paragraph::new("No active playback")
+        Paragraph::new(app.strings().screens.no_playback)
           .style(Style::default().fg(app.user_config.theme.playbar_text.into())),
         artist_area,
       );
@@ -1632,7 +1713,10 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().bg(app.user_config.theme.playbar_background.into()))
-        .title(Span::styled(format!("Status: {}", message), msg_style))
+        .title(Span::styled(
+          app.strings().screens.status_title(message),
+          msg_style,
+        ))
         .border_style(Style::default().fg(app.user_config.theme.inactive.into()));
       f.render_widget(title_block, layout_chunk);
     }
@@ -1656,22 +1740,20 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
     .margin(2),
   );
 
-  let move_instructions = format!(
-    "Use `{}`/`{}` or arrow keys to move, `Tab` to switch panels, <Enter> to select.",
-    app.user_config.keys.move_down, app.user_config.keys.move_up,
+  let move_instructions = app.strings().screens.device_navigation(
+    &app.user_config.keys.move_down.to_string(),
+    &app.user_config.keys.move_up.to_string(),
   );
   let instructions_text: Vec<Line> = vec![
-    Line::from(Span::raw(
-      "Choose your music source and Spotify playback device.",
-    )),
+    Line::from(Span::raw(app.strings().screens.choose_source_device)),
     Line::from(Span::raw(move_instructions)),
+    Line::from(Span::raw(app.strings().screens.choices_cached)),
     Line::from(Span::raw(
-      "Your choices are cached so you can jump straight back in when you next open `spotatui`.",
+      app
+        .strings()
+        .screens
+        .reopen_devices(&app.user_config.keys.manage_devices.to_string()),
     )),
-    Line::from(Span::raw(format!(
-      "Reopen this screen any time by pressing `{}`.",
-      app.user_config.keys.manage_devices
-    ))),
   ];
 
   let instructions = Paragraph::new(instructions_text)
@@ -1679,7 +1761,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
     .wrap(Wrap { trim: true })
     .block(
       Block::default().borders(Borders::NONE).title(Span::styled(
-        "Welcome to spotatui!",
+        app.strings().screens.welcome_spotatui,
         Style::default()
           .fg(app.user_config.theme.active.into())
           .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
@@ -1703,7 +1785,11 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
       } else {
         " "
       };
-      let suffix = if is_active { "  (active)" } else { "" };
+      let suffix = if is_active {
+        app.strings().screens.source_active
+      } else {
+        ""
+      };
       let style = if is_active {
         Style::default()
           .fg(app.user_config.theme.active.into())
@@ -1712,7 +1798,12 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
         app.user_config.theme.base_style()
       };
       ListItem::new(Span::styled(
-        format!("{} {}{}", marker, s.label(), suffix),
+        format!(
+          "{} {}{}",
+          marker,
+          app.strings().sidebar.source_label(*s),
+          suffix
+        ),
         style,
       ))
     })
@@ -1727,7 +1818,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
     .block(
       Block::default()
         .title(Span::styled(
-          "Source",
+          app.strings().screens.source,
           Style::default().fg(source_border.into()),
         ))
         .borders(Borders::ALL)
@@ -1757,9 +1848,9 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
     app.user_config.theme.inactive
   };
   let devices_title = if non_spotify_active {
-    "Devices (Spotify only)"
+    app.strings().screens.spotify_devices
   } else {
-    "Devices"
+    app.strings().screens.devices
   };
   let device_text_style = if non_spotify_active {
     Style::default().fg(app.user_config.theme.inactive.into())
@@ -1767,7 +1858,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
     app.user_config.theme.base_style()
   };
 
-  let no_device_message = Span::raw("No devices found: Make sure a device is active");
+  let no_device_message = Span::raw(app.strings().screens.no_devices);
   let items: Vec<ListItem> = match app.devices() {
     Some(payload) if !payload.devices.is_empty() => payload
       .devices
@@ -1803,6 +1894,35 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
       Line::from("▶ ").style(Style::default().fg(app.user_config.theme.active.into())),
     );
   f.render_stateful_widget(device_list, devices_area, &mut state);
+}
+
+#[cfg(all(test, feature = "cover-art"))]
+fn split_cover_playbar_rows(
+  inner: Rect,
+  text_area: Rect,
+  image_area: Rect,
+  behavior: &crate::core::user_config::BehaviorConfig,
+) -> (Rect, Rect, Rect) {
+  split_cover_playbar_rows_localized(
+    inner,
+    text_area,
+    image_area,
+    behavior,
+    &crate::core::i18n::screens::EN,
+  )
+}
+#[cfg(test)]
+fn playbar_control_hitboxes_in_area(
+  area: Rect,
+  behavior: &crate::core::user_config::BehaviorConfig,
+  controls: &[PlaybarControl],
+) -> Vec<PlaybarControlHitbox> {
+  playbar_control_hitboxes_in_area_localized(
+    area,
+    behavior,
+    controls,
+    &crate::core::i18n::screens::EN,
+  )
 }
 
 #[cfg(test)]
@@ -2395,5 +2515,112 @@ mod tests {
       content.contains("pressing `D`"),
       "reopen hint should name the rebound key: {content}"
     );
+  }
+  #[test]
+  fn translated_control_hitboxes_use_cell_width_and_keep_user_overrides() {
+    use crate::core::i18n::screens::{ZH_HANS, ZH_HANT};
+    let mut behavior = App::default().user_config.behavior;
+    let controls = [
+      PlaybarControl::Prev,
+      PlaybarControl::PlayPause,
+      PlaybarControl::Next,
+    ];
+    for strings in [&ZH_HANS, &ZH_HANT] {
+      let area = Rect::new(4, 3, 100, 1);
+      let hitboxes =
+        playbar_control_hitboxes_in_area_localized(area, &behavior, &controls, strings);
+      assert_eq!(hitboxes.len(), controls.len());
+      for hitbox in &hitboxes {
+        let label = hitbox.control.label(&behavior, strings);
+        assert_eq!(
+          usize::from(hitbox.rect.width),
+          UnicodeWidthStr::width(label.as_ref())
+        );
+        assert!(hitbox.rect.right() <= area.right());
+      }
+      for pair in hitboxes.windows(2) {
+        assert_eq!(pair[0].rect.right() + 1, pair[1].rect.x);
+      }
+    }
+    behavior
+      .playbar_control_labels
+      .insert("prev".into(), "[我自己的 Prev]".into());
+    assert_eq!(
+      PlaybarControl::Prev.label(&behavior, &ZH_HANS),
+      "[我自己的 Prev]"
+    );
+    assert_eq!(
+      PlaybarControl::Prev.label(&behavior, &ZH_HANT),
+      "[我自己的 Prev]"
+    );
+  }
+
+  #[test]
+  fn playbar_templates_translate_only_defaults_and_keep_placeholder_values_literal() {
+    use crate::core::i18n::Language;
+    use crate::core::user_config::FORMAT_KEYS;
+    let mut app = App::default();
+    let values = ["Playing", "Desk {volume}", "", "", "Off", "Off", "50", ""];
+    assert_eq!(
+      render_playbar_template(&app, false, &values),
+      "Playing (Desk {volume} | Shuffle: Off | Repeat: Off | Volume: 50%)"
+    );
+    app.user_config.behavior.language = Language::ZhHant;
+    app.refresh_language();
+    let title = render_playbar_template(&app, false, &values);
+
+    assert!(title.contains("Desk {volume}"));
+    app.user_config.format.playbar_status =
+      crate::core::format::Template::parse("Volume: {volume}% / {device}", FORMAT_KEYS).unwrap();
+    assert_eq!(
+      render_playbar_template(&app, false, &values),
+      "Volume: 50% / Desk {volume}"
+    );
+  }
+
+  #[test]
+  fn default_playbar_strips_controls_like_the_original_template_in_text_width_and_cells() {
+    use crate::core::user_config::FORMAT_KEYS;
+    use ratatui::{buffer::Buffer, widgets::Widget};
+    use unicode_width::UnicodeWidthStr;
+    let app = App::default();
+    let values = [
+      "Playing",
+      "Desk\tSpeaker\nX\rY",
+      "",
+      "",
+      "Off",
+      "Off",
+      "50",
+      "",
+    ];
+    let baseline = crate::core::format::Template::parse(
+      "{state} ({device} | Shuffle: {shuffle} | Repeat: {repeat} | Volume: {volume}%){party}",
+      FORMAT_KEYS,
+    )
+    .unwrap()
+    .render(&values);
+    assert_eq!(
+      baseline,
+      "Playing (DeskSpeakerXY | Shuffle: Off | Repeat: Off | Volume: 50%)"
+    );
+    assert_eq!(baseline.width(), 66);
+    let current = render_playbar_template(&app, false, &values);
+    assert_eq!(current, baseline);
+    assert_eq!(current.width(), baseline.width());
+    let render = |title: &str| {
+      let area = Rect::new(0, 0, 100, 3);
+      let mut buffer = Buffer::empty(area);
+      Block::bordered()
+        .title(Line::from(vec![Span::raw(title), Span::raw(" | MESSAGE")]))
+        .render(area, &mut buffer);
+      buffer
+    };
+    assert_eq!(render(&current), render(&baseline));
+    let mut party_values = values;
+    party_values[7] = " | Host\tName\nX\rY";
+    let party = render_playbar_template(&app, false, &party_values);
+    assert!(party.ends_with(" | HostNameXY"));
+    assert!(!party.contains(['\n', '\r', '\t']));
   }
 }

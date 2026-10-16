@@ -44,10 +44,11 @@ pub async fn route_queue_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
       event,
       IoEvent::AdvanceNativeQueue | IoEvent::FinishNativeQueue
     ) {
-      app
-        .lock()
-        .await
-        .set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      {
+        let mut guard = app.lock().await;
+        let message = guard.strings().status.infra.music_queue_unsupported;
+        guard.set_status_message(message, 4);
+      }
       return true;
     }
     return false;
@@ -79,7 +80,10 @@ pub async fn route_queue_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
   if let IoEvent::Repeat(_) = event {
     let mut guard = app.lock().await;
     if guard.queue_owns_playback() {
-      guard.set_status_message("Repeat does not apply to this source", 2);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.queue_repeat_unsupported, 2)
+      };
       return true;
     }
   }
@@ -91,7 +95,10 @@ pub async fn route_queue_event(app: &Arc<Mutex<App>>, event: &IoEvent) -> bool {
   if let IoEvent::Shuffle(_) = event {
     let mut guard = app.lock().await;
     if guard.queue_owns_playback() {
-      guard.set_status_message("Shuffle does not apply to this source", 2);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.queue_shuffle_unsupported, 2)
+      };
       return true;
     }
   }
@@ -285,17 +292,31 @@ async fn advance_native_queue(app: &Arc<Mutex<App>>) {
 /// then advances to the next item.
 async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
   let Some(uri) = track.uri.clone() else {
-    set_status(app, "Skipped a queued track with no URI".to_string()).await;
+    set_status(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .queue_no_uri
+        .to_string(),
+    )
+    .await;
     return false;
   };
   let source = queue_item_source(&uri);
+  let strings = crate::infra::app_strings(app).await;
+  let source_name = match source {
+    QueueItemSource::LocalFile => strings.status.infra.queue_local_source,
+    _ => source_label(source),
+  };
   if !source_available(source) {
     set_status(
       app,
-      format!(
-        "{} playback isn't available in this build",
-        source_label(source)
-      ),
+      strings
+        .status
+        .infra
+        .source_playback_unavailable(source_name),
     )
     .await;
     return false;
@@ -316,7 +337,12 @@ async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
     QueueItemSource::AppleMusic => {
       set_status(
         app,
-        crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED.to_string(),
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .music_queue_unsupported
+          .to_string(),
       )
       .await;
       false
@@ -328,10 +354,10 @@ async fn try_play_queued(app: &Arc<Mutex<App>>, track: &TrackInfo) -> bool {
     _ => {
       set_status(
         app,
-        format!(
-          "{} playback isn't available in this build",
-          source_label(source)
-        ),
+        strings
+          .status
+          .infra
+          .source_playback_unavailable(source_name),
       )
       .await;
       false
@@ -357,7 +383,15 @@ async fn play_queued_local(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str) 
       true
     }
     Err(e) => {
-      set_status(app, format!("Cannot play {}: {e}", track.name)).await;
+      let mut guard = app.lock().await;
+      let strings = guard.strings();
+      guard.set_status_message(
+        strings
+          .status
+          .infra
+          .queue_play_failed(track.display_name(strings), &e.to_string()),
+        4,
+      );
       false
     }
   }
@@ -424,7 +458,10 @@ async fn play_queued_youtube(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str
   let fetch_id = publish_pending_decoded(app, &player, track).await;
   {
     let mut guard = app.lock().await;
-    guard.set_status_message(format!("Fetching {}\u{2026}", track.name), 30);
+    {
+      let strings = guard.strings();
+      guard.set_status_message(strings.status.infra.fetching(&track.name), 30)
+    };
   }
   let source = crate::infra::youtube::dispatch::build_source(app).await;
   // Fetch off the IoEvent pump: awaiting yt-dlp here would freeze every other
@@ -461,10 +498,11 @@ async fn play_queued_spotify(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str
   if !playable {
     set_status(
       app,
-      format!(
-        "Native streaming isn't connected; skipped \"{}\"",
-        track.name
-      ),
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .queue_skip_disconnected(&track.name),
     )
     .await;
     return false;
@@ -518,7 +556,15 @@ async fn play_queued_spotify(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str
       guard.queue_now = None;
       guard.native_is_playing = Some(false);
     }
-    set_status(app, format!("Cannot play {}: {e}", track.name)).await;
+    set_status(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .queue_play_failed(&track.name, &e.to_string()),
+    )
+    .await;
     return false;
   }
   {
@@ -526,7 +572,10 @@ async fn play_queued_spotify(app: &Arc<Mutex<App>>, track: &TrackInfo, uri: &str
     // Re-arm the intent the release cleared, so a stall inside this load
     // still escalates to a rebuild.
     guard.set_native_playback_intent(true);
-    guard.set_status_message(format!("\u{266a} {} (queue)", track.name), 4);
+    {
+      let strings = guard.strings();
+      guard.set_status_message(strings.status.infra.queue_playing(&track.name), 4)
+    };
     preload_next_queued_spotify(&guard);
   }
   true
@@ -571,7 +620,15 @@ pub async fn replay_published_spotify_slot(app: &Arc<Mutex<App>>) -> bool {
   };
   player.activate();
   if let Err(e) = player.load_uri_paused(&uri).await {
-    set_status(app, format!("Cannot restore {}: {e}", track.name)).await;
+    set_status(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .queue_restore_failed(&track.name, &e.to_string()),
+    )
+    .await;
     return false;
   }
   app.lock().await.native_is_playing = Some(false);
@@ -664,7 +721,16 @@ async fn finish_decoded_fetch(
   let (tmp, quality) = match result {
     Ok(fetched) => fetched,
     Err(e) => {
-      guard.set_status_message(format!("Cannot play {track_name}: {e}"), 4);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(
+          strings
+            .status
+            .infra
+            .queue_play_failed(track_name, &e.to_string()),
+          4,
+        )
+      };
       guard.dispatch(IoEvent::AdvanceNativeQueue);
       return;
     }
@@ -684,7 +750,16 @@ async fn finish_decoded_fetch(
     return;
   }
   if let Err(e) = staged {
-    guard.set_status_message(format!("Cannot play {track_name}: {e}"), 4);
+    {
+      let strings = guard.strings();
+      guard.set_status_message(
+        strings
+          .status
+          .infra
+          .queue_play_failed(track_name, &e.to_string()),
+        4,
+      )
+    };
     guard.dispatch(IoEvent::AdvanceNativeQueue);
     return;
   }
@@ -698,7 +773,10 @@ async fn finish_decoded_fetch(
     d.quality = quality;
     d.advancing = false;
   }
-  guard.set_status_message(format!("\u{266a} {track_name} (queue)"), 4);
+  {
+    let strings = guard.strings();
+    guard.set_status_message(strings.status.infra.queue_playing(track_name), 4)
+  };
 }
 
 /// Publish the decoded queue slot and announce the track. Only the local-file
@@ -713,8 +791,8 @@ async fn publish_decoded(
   #[cfg(not(feature = "queue-download"))] _tempfile: Option<()>,
 ) {
   use crate::infra::queue::{DecodedQueuePlayback, QueueNowPlaying};
-  let name = track.name.clone();
   let mut guard = app.lock().await;
+  let name = track.display_name(guard.strings()).to_owned();
   // A user pause, or a device removal, holds the next item paused.
   if guard.queue_slot_desired_playing {
     player.resume();
@@ -730,7 +808,10 @@ async fn publish_decoded(
     abort_handle: None,
     quality: None,
   }));
-  guard.set_status_message(format!("\u{266a} {name} (queue)"), 4);
+  {
+    let strings = guard.strings();
+    guard.set_status_message(strings.status.infra.queue_playing(&name), 4)
+  };
 }
 
 /// Acquire an output-device player for the queue slot, in priority order:
@@ -756,11 +837,27 @@ async fn acquire_queue_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>>
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(p)) => Some(Arc::new(p)),
     Ok(Err(e)) => {
-      set_status(app, format!("No audio output for queue playback: {e}")).await;
+      set_status(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .queue_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_status(app, format!("Audio output init failed: {e}")).await;
+      set_status(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -882,7 +979,10 @@ async fn resume_or_finish(app: &Arc<Mutex<App>>, end: QueueEnd) {
   if let Some(dead) = queue_player.as_ref().filter(|p| p.device_lost()) {
     let mut guard = app.lock().await;
     if drop_context_sharing(&mut guard, suspended.as_ref(), dead) {
-      guard.set_status_message("Audio output device disconnected.".to_string(), 8);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.audio_disconnected.to_string(), 8)
+      };
       return;
     }
   }
@@ -902,10 +1002,11 @@ async fn resume_or_finish(app: &Arc<Mutex<App>>, end: QueueEnd) {
       #[cfg(feature = "audio-decode-queue")]
       if let Some(player) = queue_player {
         player.stop();
-        app
-          .lock()
-          .await
-          .set_status_message("Queue finished".to_string(), 3);
+        {
+          let mut guard = app.lock().await;
+          let message = guard.strings().status.infra.queue_finished;
+          guard.set_status_message(message, 3);
+        };
       }
       // No decoded context resumes, so the queue's hold on the sink ends here.
       app.lock().await.release_decoded_sink_claim();
@@ -940,10 +1041,11 @@ async fn resume_or_finish(app: &Arc<Mutex<App>>, end: QueueEnd) {
       }
       // A station cannot resume paused, so it stays off.
       if !playing {
-        app
-          .lock()
-          .await
-          .set_status_message("Playback is paused - radio not resumed.".to_string(), 8);
+        {
+          let mut guard = app.lock().await;
+          let message = guard.strings().status.infra.radio_not_resumed;
+          guard.set_status_message(message, 8);
+        };
       } else if let Some(uri) = station.uri.clone() {
         let mut guard = app.lock().await;
         // Seed the browse table so the radio start path resolves the station.
@@ -1311,6 +1413,7 @@ mod tests {
   ))]
   fn track(uri: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: Some(uri.to_string()),
       name: name.to_string(),
       artists: vec!["Artist".to_string()],

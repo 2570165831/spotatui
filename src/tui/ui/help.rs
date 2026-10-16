@@ -1,5 +1,11 @@
 use crate::core::app::App;
 
+/// Truncate and pad a help-table cell by terminal columns, not UTF-8 bytes or
+/// scalar values. Wide Chinese characters must not consume the next column.
+pub(super) fn padded_help_cell(text: &str, width: usize) -> String {
+  super::util::pad_to_width(&super::util::truncate_text(text, width), width)
+}
+
 /// Return Help rows matching the active filter.
 /// Whitespace-separated terms are ANDed and matching is case-insensitive unless
 /// a term contains an uppercase ASCII character.

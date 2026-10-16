@@ -328,15 +328,21 @@ mod tests {
       playlists: 3,
       ..DjLibrary::default()
     };
-    assert!(full.summary().contains("12 track(s) across 3 playlist(s)"));
-    assert!(!full.summary().contains("stopped at"));
+    assert!(full
+      .summary_with(&crate::core::i18n::EN)
+      .contains("12 track(s) across 3 playlist(s)"));
+    assert!(!full
+      .summary_with(&crate::core::i18n::EN)
+      .contains("stopped at"));
 
     let capped = DjLibrary {
       truncated: true,
       ..full
     };
     assert!(
-      capped.summary().contains("not filtered"),
+      capped
+        .summary_with(&crate::core::i18n::EN)
+        .contains("not filtered"),
       "a partial index has to say so, or the filter looks broken"
     );
   }

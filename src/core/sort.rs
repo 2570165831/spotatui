@@ -30,19 +30,6 @@ pub enum SortField {
 }
 
 impl SortField {
-  /// Get display name for the sort field
-  pub fn display_name(&self) -> &'static str {
-    match self {
-      SortField::Default => "Default",
-      SortField::Name => "Name",
-      SortField::DateAdded => "Date Added",
-      SortField::Artist => "Artist",
-      SortField::Duration => "Duration",
-      SortField::Album => "Album",
-      SortField::ReleaseDate => "Release Date",
-    }
-  }
-
   /// Get the keyboard shortcut for this field
   pub fn shortcut(&self) -> Option<char> {
     match self {
@@ -396,6 +383,7 @@ mod tests {
 
   fn track(name: &str, artist: Option<&str>, album: &str, duration_ms: u64) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       uri: None,
       name: name.to_string(),
       artists: artist.map(|a| vec![a.to_string()]).unwrap_or_default(),

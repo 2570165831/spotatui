@@ -9,6 +9,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 /// Shown once per visit to the visualizer when the capture cannot open.
+#[cfg(test)]
 pub(super) const AUDIO_CAPTURE_UNAVAILABLE: &str =
   "Visualizer can't capture system audio - see the log for details.";
 const AUDIO_CAPTURE_UNAVAILABLE_TTL_SECS: u64 = 8;
@@ -87,11 +88,11 @@ impl<C: Send + 'static> VizCapture<C> {
 
     if let Slot::Failed { reported: false } = self.slot {
       app.set_status_message(
-        AUDIO_CAPTURE_UNAVAILABLE,
+        app.strings().status.app.capture_unavailable,
         AUDIO_CAPTURE_UNAVAILABLE_TTL_SECS,
       );
-      let shown =
-        app.status_message() == Some(AUDIO_CAPTURE_UNAVAILABLE) && !app.status_message_is_error();
+      let shown = app.status_message() == Some(app.strings().status.app.capture_unavailable)
+        && !app.status_message_is_error();
       self.slot = Slot::Failed { reported: shown };
     }
 
@@ -125,6 +126,14 @@ mod tests {
   use std::sync::mpsc::channel;
   use std::sync::Arc;
   use std::time::{Duration, Instant};
+
+  #[test]
+  fn audio_capture_status_fixture_matches_the_english_catalog() {
+    assert_eq!(
+      AUDIO_CAPTURE_UNAVAILABLE,
+      crate::core::i18n::EN.status.app.capture_unavailable
+    );
+  }
 
   fn app() -> App {
     let (tx, _rx) = channel();

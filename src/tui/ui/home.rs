@@ -22,10 +22,16 @@ struct ChangelogCacheKey {
   banner: Color,
   active: Color,
   changelog_width: u16,
+  log_location: &'static str,
+  report_bugs: &'static str,
 }
 
 impl ChangelogCacheKey {
-  fn from_theme(theme: &crate::core::user_config::Theme, changelog_width: u16) -> Self {
+  fn from_theme(
+    theme: &crate::core::user_config::Theme,
+    changelog_width: u16,
+    strings: &crate::core::i18n::screens::ScreenStrings,
+  ) -> Self {
     Self {
       text: theme.text.into(),
       hint: theme.hint.into(),
@@ -33,6 +39,8 @@ impl ChangelogCacheKey {
       banner: theme.banner.into(),
       active: theme.active.into(),
       changelog_width,
+      log_location: strings.log_location,
+      report_bugs: strings.report_bugs,
     }
   }
 }
@@ -57,7 +65,7 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 
   let welcome = Block::default()
     .title(Span::styled(
-      "Welcome!",
+      app.strings().screens.welcome,
       get_color(highlight_state, app.user_config.theme),
     ))
     .style(app.user_config.theme.base_style())
@@ -80,8 +88,12 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       Style::default().fg(app.user_config.theme.banner.into()),
     )
   };
-  let base_changelog_lines =
-    get_changelog_cache(&app.user_config.theme, changelog_area.width, &app.log_path);
+  let base_changelog_lines = get_changelog_cache(
+    &app.user_config.theme,
+    changelog_area.width,
+    &app.log_path,
+    &app.strings().screens,
+  );
 
   // Contains the banner
   let top_text = Paragraph::new(banner_text)
@@ -96,20 +108,23 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   if let Some(streaks) = &app.listening_streaks {
     if streaks.current_days > 0 {
       let mut spans = vec![Span::styled(
-        format!("{}-day listening streak", streaks.current_days),
+        app.strings().screens.listening_streak(streaks.current_days),
         Style::default().fg(app.user_config.theme.active.into()),
       )];
       if streaks.today_ms > 0 {
         spans.push(Span::styled(
-          format!(
-            " · {} today",
-            crate::infra::history::format_duration(streaks.today_ms)
-          ),
+          app
+            .strings()
+            .screens
+            .listened_today(&crate::infra::history::format_duration_with(
+              streaks.today_ms,
+              app.strings(),
+            )),
           Style::default().fg(app.user_config.theme.hint.into()),
         ));
       } else {
         spans.push(Span::styled(
-          " · listen today to keep it!",
+          app.strings().screens.streak_keep,
           Style::default().fg(app.user_config.theme.hint.into()),
         ));
       }
@@ -119,17 +134,21 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let counter_message = if cfg!(feature = "telemetry") {
     if app.user_config.behavior.enable_global_song_count {
       match app.global_song_count {
-        Some(count) => format!("Global songs played with spotatui: {}", count),
+        Some(count) => app.strings().screens.global_counter(&count.to_string()),
         None if app.global_song_count_failed => {
-          "Global song counter unavailable right now.".to_string()
+          app.strings().screens.global_counter_unavailable.to_string()
         }
-        None => "Loading global song count...".to_string(),
+        None => app.strings().screens.global_counter_loading.to_string(),
       }
     } else {
-      "Global song counter disabled (Settings -> Behavior).".to_string()
+      app.strings().screens.global_counter_disabled.to_string()
     }
   } else {
-    "Global song counter unavailable (telemetry disabled in this build).".to_string()
+    app
+      .strings()
+      .screens
+      .global_counter_build_disabled
+      .to_string()
   };
 
   let counter_style = Style::default().fg(app.user_config.theme.hint.into());
@@ -138,7 +157,7 @@ pub fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     counter_style,
   )]));
   changelog_lines.push(Line::from(vec![Span::styled(
-    "Join the community on Discord: https://spotatui.com/discord",
+    app.strings().screens.discord_community,
     Style::default().fg(app.user_config.theme.active.into()),
   )]));
   changelog_lines.push(Line::from(""));
@@ -185,22 +204,24 @@ fn get_changelog_cache(
   theme: &crate::core::user_config::Theme,
   changelog_width: u16,
   log_path: &str,
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> Arc<Vec<Line<'static>>> {
   let cache = CHANGELOG_CACHE.get_or_init(|| {
     let changelog = get_clean_changelog();
-    let key = ChangelogCacheKey::from_theme(theme, changelog_width);
+    let key = ChangelogCacheKey::from_theme(theme, changelog_width, strings);
     Mutex::new(ChangelogCache {
       changelog_lines: Arc::new(build_changelog_lines(
         changelog,
         theme,
         changelog_width,
         log_path,
+        strings,
       )),
       key,
     })
   });
   let mut cache = cache.lock().expect("changelog cache lock failed");
-  let key = ChangelogCacheKey::from_theme(theme, changelog_width);
+  let key = ChangelogCacheKey::from_theme(theme, changelog_width, strings);
   if cache.key != key {
     let changelog = get_clean_changelog();
     cache.changelog_lines = Arc::new(build_changelog_lines(
@@ -208,6 +229,7 @@ fn get_changelog_cache(
       theme,
       changelog_width,
       log_path,
+      strings,
     ));
     cache.key = key;
   }
@@ -580,6 +602,7 @@ fn build_changelog_lines(
   theme: &crate::core::user_config::Theme,
   max_width: u16,
   log_path: &str,
+  strings: &crate::core::i18n::screens::ScreenStrings,
 ) -> Vec<Line<'static>> {
   let mut lines: Vec<Line<'static>> = vec![];
   let max_width = usize::from(max_width);
@@ -601,7 +624,7 @@ fn build_changelog_lines(
   push_wrapped(
     &mut lines,
     &[StyledSegment {
-      text: format!("Log located in {}", log_path),
+      text: strings.log_location(log_path),
       style: Style::default().fg(theme.hint.into()),
     }],
   );
@@ -609,9 +632,7 @@ fn build_changelog_lines(
   push_wrapped(
     &mut lines,
     &[StyledSegment {
-      text:
-        "Please report any bugs or missing features to https://github.com/LargeModGames/spotatui"
-          .to_string(),
+      text: strings.report_bugs.to_string(),
       style: Style::default().fg(theme.hint.into()),
     }],
   );
@@ -661,4 +682,25 @@ fn build_changelog_lines(
   }
 
   lines
+}
+
+#[cfg(test)]
+mod localization_cache_tests {
+  use super::*;
+  #[test]
+  fn changing_only_the_bug_report_text_refreshes_the_home_cache() {
+    let theme = crate::core::user_config::UserConfig::new().theme;
+    let english = crate::core::i18n::screens::EN;
+    let translated = crate::core::i18n::screens::ScreenStrings {
+      report_bugs: "报告问题",
+      ..english
+    };
+    let first = get_changelog_cache(&theme, 200, "example.log", &english);
+    let second = get_changelog_cache(&theme, 200, "example.log", &translated);
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(second.iter().any(|line| line.to_string() == "报告问题"));
+    assert!(!second
+      .iter()
+      .any(|line| line.to_string() == english.report_bugs));
+  }
 }

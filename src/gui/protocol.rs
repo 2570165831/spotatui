@@ -5,6 +5,7 @@
 use crate::core::action::Action;
 use crate::core::app::{App, DiscoverShelf, DisplayDomain, DisplayRevisions, SessionPlay};
 use crate::core::first_run::compiled_in_sources;
+use crate::core::i18n::{Language, Strings};
 use crate::core::playlist_sync::Unmatched;
 use crate::core::plugin_api::{
   device_list, recently_played_snapshot, route_name, AlbumInfo, ArtistInfo, DeviceInfo,
@@ -136,7 +137,7 @@ pub(crate) enum ServerMessage {
   /// The settings rows the page offers, in display order.
   Settings {
     rev: u64,
-    payload: Vec<SettingRow>,
+    payload: SettingsPayload,
   },
   /// The desktop shell's updater; `null` without one.
   Update {
@@ -152,9 +153,17 @@ pub(crate) enum ServerMessage {
 
 #[derive(Serialize)]
 #[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
+pub(crate) struct SettingsPayload {
+  rows: Vec<SettingRow>,
+  language: Language,
+  strings: Option<&'static Strings>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(all(test, feature = "gui"), derive(ts_rs::TS))]
 pub(crate) struct SettingRow {
   id: String,
-  /// `playback`, `streaming`, `integrations`, `library`, `sources` or `updates`.
+  /// `interface`, `playback`, `streaming`, `integrations`, `library`, `sources` or `updates`.
   group: &'static str,
   name: String,
   description: String,
@@ -178,6 +187,8 @@ pub(crate) enum SettingRowValue {
   Choice {
     value: String,
     options: Vec<String>,
+    // Display labels in the same order; the page sends the raw option back.
+    labels: Vec<String>,
   },
   /// A password, set with a `Text` input; the page never gets it back.
   Secret {
@@ -185,42 +196,36 @@ pub(crate) enum SettingRowValue {
   },
 }
 
-/// The Behavior rows the page offers: (id, group, a description for the desktop app).
+/// The Behavior rows the page offers: (id, group). Description overrides below
+/// retain the wording specific to the desktop app.
 /// The other rows only mean something in a terminal.
-const GUI_SETTINGS: &[(&str, &str, Option<&str>)] = &[
-  ("behavior.seek_milliseconds", "playback", None),
-  ("behavior.volume_increment", "playback", None),
-  ("behavior.stop_after_current_track", "playback", None),
-  ("behavior.keepawake_enabled", "playback", None),
-  ("behavior.enable_media_keys", "playback", None),
-  ("behavior.enable_streaming", "streaming", None),
-  ("behavior.streaming_device_name", "streaming", None),
-  ("behavior.streaming_bitrate", "streaming", None),
-  ("behavior.streaming_audio_cache", "streaming", None),
-  ("behavior.streaming_autoplay", "streaming", None),
+const GUI_SETTINGS: &[(&str, &str)] = &[
+  ("behavior.seek_milliseconds", "playback"),
+  ("behavior.volume_increment", "playback"),
+  ("behavior.stop_after_current_track", "playback"),
+  ("behavior.keepawake_enabled", "playback"),
+  ("behavior.enable_media_keys", "playback"),
+  ("behavior.language", "interface"),
+  ("behavior.enable_streaming", "streaming"),
+  ("behavior.streaming_device_name", "streaming"),
+  ("behavior.streaming_bitrate", "streaming"),
+  ("behavior.streaming_audio_cache", "streaming"),
+  ("behavior.streaming_autoplay", "streaming"),
   #[cfg(feature = "discord-rpc")]
-  ("behavior.enable_discord_rpc", "integrations", None),
-  ("behavior.enable_global_song_count", "integrations", None),
-  ("behavior.enable_lyrics", "integrations", None),
-  ("behavior.default_sort_playlist_tracks", "library", None),
-  ("behavior.default_sort_saved_albums", "library", None),
-  ("behavior.default_sort_saved_artists", "library", None),
-  ("behavior.subsonic_url", "sources", None),
-  ("behavior.subsonic_username", "sources", None),
-  ("behavior.subsonic_password", "sources", None),
-  ("behavior.local_music_path", "sources", None),
-  ("behavior.ytdlp_path", "sources", None),
-  ("behavior.qobuz_quality", "sources", None),
-  (
-    "behavior.disable_auto_update",
-    "updates",
-    Some("Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself"),
-  ),
-  (
-    "behavior.auto_update_delay",
-    "updates",
-    Some("How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'"),
-  ),
+  ("behavior.enable_discord_rpc", "integrations"),
+  ("behavior.enable_global_song_count", "integrations"),
+  ("behavior.enable_lyrics", "integrations"),
+  ("behavior.default_sort_playlist_tracks", "library"),
+  ("behavior.default_sort_saved_albums", "library"),
+  ("behavior.default_sort_saved_artists", "library"),
+  ("behavior.subsonic_url", "sources"),
+  ("behavior.subsonic_username", "sources"),
+  ("behavior.subsonic_password", "sources"),
+  ("behavior.local_music_path", "sources"),
+  ("behavior.ytdlp_path", "sources"),
+  ("behavior.qobuz_quality", "sources"),
+  ("behavior.disable_auto_update", "updates"),
+  ("behavior.auto_update_delay", "updates"),
 ];
 
 /// The page's rows a phone leaves out: keyboard steps, a desktop sleep lock, and the player it always runs.
@@ -240,6 +245,8 @@ pub(crate) struct HelloPayload {
   revisions: DisplayRevisions,
   /// A desktop shell can shrink its window to the mini player.
   window: bool,
+  language: Language,
+  strings: &'static Strings,
 }
 
 #[derive(Serialize)]
@@ -620,6 +627,7 @@ pub(crate) fn hello(
   revisions: DisplayRevisions,
   token: Option<String>,
   window: bool,
+  language: Language,
 ) -> ServerMessage {
   ServerMessage::Hello {
     payload: HelloPayload {
@@ -627,6 +635,8 @@ pub(crate) fn hello(
       token,
       revisions,
       window,
+      language,
+      strings: language.strings(),
     },
   }
 }
@@ -642,21 +652,21 @@ pub(crate) fn tick(app: &App) -> ServerMessage {
 }
 
 /// Every channel whose revision moved since `sent`.
-pub(crate) fn diff(sent: &DisplayRevisions, app: &App) -> Vec<ServerMessage> {
+pub(crate) fn diff(sent: &DisplayRevisions, app: &App, language: Language) -> Vec<ServerMessage> {
   let now = app.display_revisions();
   DisplayDomain::ALL
     .into_iter()
     .filter(|domain| now.get(*domain) != sent.get(*domain))
-    .filter_map(|domain| channel_message(app, domain, now.get(domain)))
+    .filter_map(|domain| channel_message(app, domain, now.get(domain), Some(language)))
     .collect()
 }
 
 /// Every channel once.
-pub(crate) fn resync(app: &App) -> Vec<ServerMessage> {
+pub(crate) fn resync(app: &App, language: Option<Language>) -> Vec<ServerMessage> {
   let now = app.display_revisions();
   DisplayDomain::ALL
     .into_iter()
-    .filter_map(|domain| channel_message(app, domain, now.get(domain)))
+    .filter_map(|domain| channel_message(app, domain, now.get(domain), language))
     .collect()
 }
 
@@ -664,7 +674,12 @@ pub(crate) fn encode(message: &ServerMessage) -> String {
   serde_json::to_string(message).expect("a protocol message serializes")
 }
 
-fn channel_message(app: &App, domain: DisplayDomain, rev: u64) -> Option<ServerMessage> {
+fn channel_message(
+  app: &App,
+  domain: DisplayDomain,
+  rev: u64,
+  language: Option<Language>,
+) -> Option<ServerMessage> {
   Some(match domain {
     DisplayDomain::Route => ServerMessage::Route {
       rev,
@@ -712,8 +727,11 @@ fn channel_message(app: &App, domain: DisplayDomain, rev: u64) -> Option<ServerM
         rev,
         payload: Box::new(QueuePayload {
           spotify,
-          native: native.clone(),
-          now: now.clone(),
+          native: native
+            .iter()
+            .map(|track| track.displayed(app.strings()))
+            .collect(),
+          now: now.as_ref().map(|track| track.displayed(app.strings())),
         }),
       }
     }
@@ -777,7 +795,11 @@ fn channel_message(app: &App, domain: DisplayDomain, rev: u64) -> Option<ServerM
         rev,
         payload: Box::new(TrackTablePayload {
           uri: view.uri.clone(),
-          tracks: view.tracks.clone(),
+          tracks: view
+            .tracks
+            .iter()
+            .map(|track| track.displayed(app.strings()))
+            .collect(),
           has_more: view.has_more,
           positions: view.positions.clone(),
           radio: view.radio.clone(),
@@ -798,7 +820,11 @@ fn channel_message(app: &App, domain: DisplayDomain, rev: u64) -> Option<ServerM
     },
     DisplayDomain::Settings => ServerMessage::Settings {
       rev,
-      payload: settings(app),
+      payload: SettingsPayload {
+        rows: settings(app),
+        language: app.language(),
+        strings: (language != Some(app.language())).then(|| app.strings()),
+      },
     },
     DisplayDomain::Update => ServerMessage::Update {
       rev,
@@ -849,9 +875,9 @@ fn settings_for(app: &App, phone: bool) -> Vec<SettingRow> {
   let items = app.behavior_setting_items();
   GUI_SETTINGS
     .iter()
-    .filter(|(_, group, _)| *group != "updates" || app.update_status().is_some())
-    .filter(|(id, _, _)| !(phone && PHONE_HIDDEN_SETTINGS.contains(id)))
-    .filter_map(|(id, group, description)| {
+    .filter(|(_, group)| *group != "updates" || app.update_status().is_some())
+    .filter(|(id, _)| !(phone && PHONE_HIDDEN_SETTINGS.contains(id)))
+    .filter_map(|(id, group)| {
       let item = items
         .iter()
         .find(|item| item.id == *id && app.setting_offered(item))?;
@@ -864,6 +890,17 @@ fn settings_for(app: &App, phone: bool) -> Vec<SettingRow> {
         SettingValue::Cycle(value, options) => SettingRowValue::Choice {
           value: value.clone(),
           options: options.iter().map(|option| option.to_string()).collect(),
+          labels: options
+            .iter()
+            .map(|option| {
+              app
+                .strings()
+                .gui
+                .sort_option_label(id, option)
+                .unwrap_or_else(|| app.strings().settings.option_label(id, option))
+                .to_string()
+            })
+            .collect(),
         },
         SettingValue::Secret(value) => SettingRowValue::Secret {
           set: !value.is_empty(),
@@ -874,7 +911,11 @@ fn settings_for(app: &App, phone: bool) -> Vec<SettingRow> {
         id: item.id.clone(),
         group,
         name: item.name.clone(),
-        description: description.map_or_else(|| item.description.clone(), str::to_string),
+        description: match *id {
+          "behavior.disable_auto_update" => app.strings().gui.update_checks_description.to_string(),
+          "behavior.auto_update_delay" => app.strings().gui.update_delay_description.to_string(),
+          _ => item.description.clone(),
+        },
         value,
       })
     })
@@ -898,6 +939,7 @@ fn artist(app: &App) -> ArtistPayload {
 fn playlist_sync(app: &App) -> PlaylistSyncPayload {
   use crate::core::playlist_sync::LinkOutcome;
   let report = app.playlist_sync_last_report();
+  let status = &app.strings().status.infra;
   PlaylistSyncPayload {
     links: app
       .playlist_sync_links()
@@ -918,13 +960,30 @@ fn playlist_sync(app: &App) -> PlaylistSyncPayload {
               last_run: mirror.last_run.clone(),
             })
             .collect(),
-          last_line: last.map(|run| run.line()),
+          last_line: last.map(|run| run.line_with(app.strings())),
           last_failed: last.is_some_and(|run| matches!(run.outcome, LinkOutcome::Failed(_))),
         }
       })
       .collect(),
     running: app.playlist_sync_in_flight(),
-    last_summary: report.map(|report| report.summary()),
+    last_summary: report.map(|report| {
+      if let Some(error) = &report.error {
+        status.sync_failed(error)
+      } else if report.links.is_empty() {
+        status.sync_no_links.to_string()
+      } else {
+        status.sync_summary(
+          if report.dry_run {
+            status.sync_dry_run
+          } else {
+            ""
+          },
+          report.added(),
+          report.removed(),
+          report.unmatched(),
+        )
+      }
+    }),
     last_failed: report.is_some_and(|report| report.failed()),
   }
 }
@@ -1077,7 +1136,10 @@ fn search(app: &App) -> SearchPayload {
   SearchPayload {
     ran: results.tracks.is_some(),
     query: results.query.clone(),
-    tracks: items(&results.tracks),
+    tracks: items(&results.tracks)
+      .iter()
+      .map(|track| track.displayed(app.strings()))
+      .collect(),
     artists: items(&results.artists),
     albums: items(&results.albums),
     playlists: items(&results.playlists),
@@ -1101,11 +1163,40 @@ fn liked(app: &App) -> LikedSongs {
 fn playlists(app: &App) -> SourcePlaylists {
   SourcePlaylists {
     spotify: app.all_playlists().clone(),
-    local: app.local_playlists().clone(),
+    local: app
+      .local_playlists()
+      .iter()
+      .map(|playlist| PlaylistInfo {
+        name: playlist.display_name(app.strings()).to_string(),
+        ..playlist.clone()
+      })
+      .collect(),
     subsonic: app.subsonic_playlists().clone(),
-    qobuz: app.qobuz_playlists().clone(),
+    qobuz: app
+      .qobuz_playlists()
+      .iter()
+      .map(|playlist| PlaylistInfo {
+        name: app
+          .strings()
+          .sidebar
+          .playlist_label(Source::Qobuz, &playlist.uri, &playlist.name)
+          .to_string(),
+        ..playlist.clone()
+      })
+      .collect(),
     youtube: app.youtube_playlists().clone(),
-    apple_music: app.apple_music_playlists().to_vec(),
+    apple_music: app
+      .apple_music_playlists()
+      .iter()
+      .map(|playlist| PlaylistInfo {
+        name: app
+          .strings()
+          .sidebar
+          .playlist_label(Source::AppleMusic, &playlist.uri, &playlist.name)
+          .to_string(),
+        ..playlist.clone()
+      })
+      .collect(),
     radio: app.radio_stations().clone(),
     saved_albums: saved_albums(app),
     saved_albums_has_more: last_page_has_next(&app.library().saved_albums.pages),
@@ -1125,19 +1216,37 @@ fn playlists(app: &App) -> SourcePlaylists {
       .map(|playlist| playlist.uri.clone())
       .collect(),
     folders: app.playlist_folder_nodes().as_ref().map(|nodes| {
-      fn convert(node: &crate::core::app::PlaylistFolderNode) -> LibraryNode {
+      fn convert(
+        node: &crate::core::app::PlaylistFolderNode,
+        strings: &crate::core::i18n::Strings,
+        language: crate::core::i18n::Language,
+      ) -> LibraryNode {
         match node.node_type {
           crate::core::app::PlaylistFolderNodeType::Folder => LibraryNode::Folder {
-            name: node.name.clone().unwrap_or_default(),
+            name: node.name.clone().unwrap_or_else(|| {
+              // English preserves the original protocol's blank missing-name label.
+              if language == crate::core::i18n::Language::En {
+                String::new()
+              } else {
+                strings.status.infra.unnamed_folder.to_string()
+              }
+            }),
             uri: node.uri.clone(),
-            children: node.children.iter().map(convert).collect(),
+            children: node
+              .children
+              .iter()
+              .map(|node| convert(node, strings, language))
+              .collect(),
           },
           crate::core::app::PlaylistFolderNodeType::Playlist => LibraryNode::Playlist {
             uri: node.uri.clone(),
           },
         }
       }
-      nodes.iter().map(convert).collect()
+      nodes
+        .iter()
+        .map(|node| convert(node, app.strings(), app.language()))
+        .collect()
     }),
   }
 }
@@ -1229,6 +1338,125 @@ pub(crate) fn pushed(messages: &[ServerMessage], kind: &str) -> serde_json::Valu
 
 #[cfg(test)]
 mod tests {
+
+  #[test]
+  fn cached_generated_track_titles_follow_language_in_track_and_queue_payloads() {
+    use crate::core::i18n::Language;
+    use crate::core::plugin_api::GeneratedTrackName;
+    let (mut app, _rx) = app();
+    let mut generated =
+      crate::core::test_helpers::queued_track("file:///generated.mp3", "Unknown Track");
+    generated.generated_name = Some(GeneratedTrackName::LocalUnknown);
+    let user = crate::core::test_helpers::queued_track("file:///user.mp3", "Unknown Track");
+    app.track_table.tracks = vec![generated.clone(), user.clone()];
+    app.native_queue = vec![generated, user];
+    app.note_display_changes();
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let before = app.display_revisions();
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let messages = resync(&app, None);
+      let rows = pushed(&messages, "track_table");
+      let queue = pushed(&messages, "queue");
+      for tracks in [&rows["payload"]["tracks"], &queue["payload"]["native"]] {
+        assert_eq!(
+          tracks[0]["name"],
+          app.strings().status.infra.local_unknown_track
+        );
+        assert_eq!(tracks[1]["name"], "Unknown Track");
+        assert_eq!(tracks[0]["generated_name"], "LocalUnknown");
+      }
+      assert_eq!(app.track_table.tracks[0].name, "Unknown Track");
+      if language != Language::En {
+        assert!(
+          app.display_revisions().get(DisplayDomain::TrackTable)
+            > before.get(DisplayDomain::TrackTable)
+        );
+        assert!(
+          app.display_revisions().get(DisplayDomain::Queue) > before.get(DisplayDomain::Queue)
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn cached_generated_library_names_follow_language_changes_without_renaming_user_items() {
+    use crate::core::app::{PlaylistFolderNode, PlaylistFolderNodeType};
+    use crate::core::i18n::Language;
+    use crate::core::plugin_api::GeneratedPlaylistName;
+    let mut app = App::default();
+    let mut root = crate::core::test_helpers::playlist_info("root", "(root)", "local", false);
+    root.generated_name = Some(GeneratedPlaylistName::LocalRoot);
+    *app.local_playlists_mut() = vec![
+      root,
+      crate::core::test_helpers::playlist_info("literal", "(root)", "local", false),
+    ];
+    *app.playlist_folder_nodes_mut() = Some(vec![
+      PlaylistFolderNode {
+        name: None,
+        node_type: PlaylistFolderNodeType::Folder,
+        uri: "generated".into(),
+        children: vec![],
+      },
+      PlaylistFolderNode {
+        name: Some("Unnamed Folder".into()),
+        node_type: PlaylistFolderNodeType::Folder,
+        uri: "literal".into(),
+        children: vec![],
+      },
+    ]);
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let payload = playlists(&app);
+      assert_eq!(
+        payload.local[0].name,
+        app.strings().status.infra.local_root_folder
+      );
+      assert_eq!(payload.local[1].name, "(root)");
+      let folders = serde_json::to_value(payload.folders).unwrap();
+      assert_eq!(
+        folders[0]["name"],
+        if language == Language::En {
+          ""
+        } else {
+          app.strings().status.infra.unnamed_folder
+        }
+      );
+      assert_eq!(folders[1]["name"], "Unnamed Folder");
+      assert_eq!(app.local_playlists()[0].name, "(root)");
+    }
+  }
+
+  #[test]
+  fn gui_library_sort_choices_keep_main_labels_and_raw_tokens_in_every_language() {
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let (mut app, _rx) = app();
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let rows = settings(&app);
+      let row = rows
+        .iter()
+        .find(|row| row.id == "behavior.default_sort_playlist_tracks")
+        .unwrap();
+      assert_eq!(row.group, "library");
+      let SettingRowValue::Choice {
+        options, labels, ..
+      } = &row.value
+      else {
+        panic!("sort is a choice")
+      };
+      let index = options
+        .iter()
+        .position(|option| option == "name:desc")
+        .unwrap();
+      assert_eq!(labels[index], app.strings().gui.sort_title_desc);
+      assert_eq!(options[index], "name:desc");
+      if language == Language::En {
+        assert_eq!(labels[index], "Title (Z-A)");
+      }
+    }
+  }
   use super::*;
   use crate::core::action::{ListTarget, NavTarget};
   use crate::core::pagination::Paged;
@@ -1249,7 +1477,7 @@ mod tests {
       panic!("not an action");
     };
     app.apply(*action);
-    diff(&before, app)
+    diff(&before, app, Language::En)
   }
 
   fn action_frame(action: Action) -> String {
@@ -1260,7 +1488,7 @@ mod tests {
   fn resync_sends_every_channel_once_in_domain_order() {
     let (app, _rx) = app();
 
-    let kinds: Vec<_> = resync(&app)
+    let kinds: Vec<_> = resync(&app, None)
       .iter()
       .map(|message| serde_json::to_value(message).unwrap()["kind"].clone())
       .collect();
@@ -1305,6 +1533,7 @@ mod tests {
   fn a_track_queued_from_the_page_pushes_the_queue_channel() {
     let (mut app, _rx) = app();
     let track = TrackInfo {
+      generated_name: None,
       uri: Some("subsonic:track:1".to_string()),
       name: "One".to_string(),
       artists: vec![],
@@ -1394,7 +1623,7 @@ mod tests {
     });
 
     assert_eq!(
-      pushed(&diff(&before, &app), "devices")["payload"][0]["name"],
+      pushed(&diff(&before, &app, Language::En), "devices")["payload"][0]["name"],
       "Kitchen"
     );
   }
@@ -1403,6 +1632,7 @@ mod tests {
     Paged {
       items: (offset..offset + limit)
         .map(|n| TrackInfo {
+          generated_name: None,
           uri: Some(format!("spotify:track:{n}")),
           name: format!("Track {n}"),
           artists: vec![],
@@ -1431,13 +1661,16 @@ mod tests {
   fn a_loaded_liked_songs_page_pushes_the_liked_channel_and_not_the_library() {
     let (mut app, _rx) = app();
     let before = app.display_revisions();
-    assert_eq!(pushed(&resync(&app), "liked")["payload"]["loaded"], false);
+    assert_eq!(
+      pushed(&resync(&app, None), "liked")["payload"]["loaded"],
+      false
+    );
 
     app
       .saved_tracks_mut()
       .upsert_page_by_offset(liked_page(0, 1, 3, true));
 
-    let messages = diff(&before, &app);
+    let messages = diff(&before, &app, Language::En);
     let liked = &pushed(&messages, "liked")["payload"];
     assert_eq!(liked["tracks"][0]["name"], "Track 0");
     assert_eq!(liked["total"], 3);
@@ -1485,7 +1718,7 @@ mod tests {
 
     *app.subsonic_playlists_mut() = vec![playlist_info("p1", "Mix", "me", false)];
 
-    let playlists = &pushed(&diff(&before, &app), "library")["payload"];
+    let playlists = &pushed(&diff(&before, &app, Language::En), "library")["payload"];
     assert_eq!(playlists["subsonic"][0]["name"], "Mix");
     assert_eq!(playlists["spotify"], serde_json::json!([]));
   }
@@ -1494,7 +1727,7 @@ mod tests {
   fn a_search_before_any_query_reports_it_has_not_run() {
     let (app, _rx) = app();
 
-    let search = &pushed(&resync(&app), "search")["payload"];
+    let search = &pushed(&resync(&app, None), "search")["payload"];
 
     assert_eq!(search["ran"], false);
     assert_eq!(search["tracks"], serde_json::json!([]));
@@ -1525,7 +1758,10 @@ mod tests {
       query: Some("kygo".to_string()),
       ..Default::default()
     });
-    let landed = &pushed(&diff(&DisplayRevisions::default(), &app), "search")["payload"];
+    let landed = &pushed(
+      &diff(&DisplayRevisions::default(), &app, Language::En),
+      "search",
+    )["payload"];
     assert_eq!(landed["ran"], true);
     assert_eq!(landed["query"], "kygo");
     assert_eq!(landed["tracks"][0]["name"], "Track 0");
@@ -1535,7 +1771,7 @@ mod tests {
     app.liked_song_ids_set_mut().insert("0".to_string());
     app.note_display_changes();
 
-    let search = &pushed(&diff(&before, &app), "search")["payload"];
+    let search = &pushed(&diff(&before, &app, Language::En), "search")["payload"];
     assert_eq!(search["liked"], serde_json::json!(["0"]));
     assert_eq!(search["query"], "kygo");
     let marked = app.display_revisions();
@@ -1602,7 +1838,7 @@ mod tests {
 
     app.land_listening_stats(app.stats_period, stats_data());
 
-    let stats = &pushed(&diff(&before, &app), "stats")["payload"];
+    let stats = &pushed(&diff(&before, &app, Language::En), "stats")["payload"];
     assert_eq!(stats["loaded"], true);
     assert_eq!(stats["top_artists"][0]["all_time_rank"], 4);
     assert_eq!(stats["top_tracks"][0]["title"], "Freeze");
@@ -1644,7 +1880,7 @@ mod tests {
     let (mut app, _rx) = app();
     app.spotify_connected = false;
 
-    let party = &pushed(&resync(&app), "party")["payload"];
+    let party = &pushed(&resync(&app, None), "party")["payload"];
 
     assert_eq!(party["phase"], "disconnected");
     assert!(party["room"].is_null());
@@ -1666,7 +1902,7 @@ mod tests {
       host_name: "Host".to_string(),
     }));
 
-    let party = &pushed(&diff(&before, &app), "party")["payload"];
+    let party = &pushed(&diff(&before, &app, Language::En), "party")["payload"];
     assert_eq!(party["phase"], "hosting");
     assert_eq!(party["room"]["code"], "ABC123");
     assert_eq!(party["room"]["guests"][0], "Sam");
@@ -1691,7 +1927,7 @@ mod tests {
       false,
     );
 
-    let lyrics = &pushed(&diff(&before, &app), "lyrics")["payload"];
+    let lyrics = &pushed(&diff(&before, &app, Language::En), "lyrics")["payload"];
     assert_eq!(lyrics["status"], "found");
     assert_eq!(lyrics["synced"], false);
     assert_eq!(lyrics["lines"][1]["at_ms"], 5000);
@@ -1716,12 +1952,12 @@ mod tests {
     app.album_table_context = AlbumTableContext::Simplified;
     app.bump_display(DisplayDomain::Album);
 
-    let payload = &pushed(&diff(&before, &app), "album")["payload"];
+    let payload = &pushed(&diff(&before, &app, Language::En), "album")["payload"];
     assert_eq!(payload["saved"], false);
 
     let before = app.display_revisions();
     app.saved_album_ids_set_mut().insert("21".to_string());
-    let payload = &pushed(&diff(&before, &app), "album")["payload"];
+    let payload = &pushed(&diff(&before, &app, Language::En), "album")["payload"];
     assert_eq!(payload["saved"], true);
     assert_eq!(payload["album"]["name"], "21");
   }
@@ -1730,7 +1966,7 @@ mod tests {
   fn a_fetched_album_rides_the_album_channel_with_its_page_of_tracks() {
     use crate::core::app::{AlbumTableContext, SelectedAlbum};
     let (mut app, _rx) = app();
-    assert!(pushed(&resync(&app), "album")["payload"]["album"].is_null());
+    assert!(pushed(&resync(&app, None), "album")["payload"]["album"].is_null());
     let before = app.display_revisions();
 
     app.selected_album_simplified = Some(SelectedAlbum {
@@ -1745,7 +1981,7 @@ mod tests {
     app.album_table_context = AlbumTableContext::Simplified;
     app.bump_display(DisplayDomain::Album);
 
-    let album = &pushed(&diff(&before, &app), "album")["payload"]["album"];
+    let album = &pushed(&diff(&before, &app, Language::En), "album")["payload"]["album"];
     assert_eq!(album["name"], "21");
     assert_eq!(album["tracks"][1]["name"], "Track 1");
     assert_eq!(album["total_tracks"], 11);
@@ -1767,7 +2003,7 @@ mod tests {
         ..Default::default()
       });
 
-    let library = &pushed(&diff(&before, &app), "library")["payload"];
+    let library = &pushed(&diff(&before, &app, Language::En), "library")["payload"];
     assert_eq!(library["followed_artists"][0]["name"], "Avicii");
   }
 
@@ -1775,7 +2011,7 @@ mod tests {
   fn a_fetched_artist_rides_the_artist_channel_with_its_follow_state() {
     use crate::core::app::{Artist, ArtistBlock};
     let (mut app, _rx) = app();
-    assert!(pushed(&resync(&app), "artist")["payload"]["page"].is_null());
+    assert!(pushed(&resync(&app, None), "artist")["payload"]["page"].is_null());
     let before = app.display_revisions();
 
     app.artist = Some(Artist {
@@ -1799,7 +2035,7 @@ mod tests {
     });
     app.bump_display(DisplayDomain::Artist);
 
-    let payload = &pushed(&diff(&before, &app), "artist")["payload"];
+    let payload = &pushed(&diff(&before, &app, Language::En), "artist")["payload"];
     assert_eq!(payload["page"]["name"], "Kygo");
     assert_eq!(payload["page"]["image_url"], "https://i.scdn.co/image/kygo");
     assert_eq!(payload["page"]["top_tracks"][1]["name"], "Track 1");
@@ -1808,7 +2044,7 @@ mod tests {
 
     let before = app.display_revisions();
     app.followed_artist_ids_set_mut().insert("kygo".to_string());
-    let page = &pushed(&diff(&before, &app), "artist")["payload"]["page"];
+    let page = &pushed(&diff(&before, &app, Language::En), "artist")["payload"]["page"];
     assert_eq!(page["following"], true);
   }
 
@@ -1832,7 +2068,7 @@ mod tests {
     app.store_saved_albums_page(page(1, "Second"), false);
     app.store_saved_albums_page(page(0, "First"), false);
 
-    let albums = &pushed(&diff(&before, &app), "library")["payload"]["saved_albums"];
+    let albums = &pushed(&diff(&before, &app, Language::En), "library")["payload"]["saved_albums"];
     assert_eq!(albums[0]["name"], "First");
     assert_eq!(albums[1]["name"], "Second");
   }
@@ -1868,7 +2104,7 @@ mod tests {
     app.open_saved_album("21".to_string());
     assert!(rx.try_recv().is_err());
 
-    let payload = &pushed(&diff(&before, &app), "album")["payload"];
+    let payload = &pushed(&diff(&before, &app, Language::En), "album")["payload"];
     assert_eq!(payload["album"]["id"], "21");
     assert_eq!(payload["saved"], true);
   }
@@ -1889,12 +2125,15 @@ mod tests {
     app.album_table_context = AlbumTableContext::Simplified;
     app.saved_album_ids_set_mut().insert("21".to_string());
     let before = app.display_revisions();
-    assert_eq!(pushed(&resync(&app), "album")["payload"]["saved"], true);
+    assert_eq!(
+      pushed(&resync(&app, None), "album")["payload"]["saved"],
+      true
+    );
 
     app.saved_album_ids_set_mut().remove("21");
 
     assert_eq!(
-      pushed(&diff(&before, &app), "album")["payload"]["saved"],
+      pushed(&diff(&before, &app, Language::En), "album")["payload"]["saved"],
       false
     );
   }
@@ -1918,7 +2157,7 @@ mod tests {
   fn a_fetched_show_rides_the_show_channel_with_its_episodes_and_saved_state() {
     use crate::core::app::{EpisodeTableContext, SelectedFullShow};
     let (mut app, _rx) = app();
-    assert!(pushed(&resync(&app), "show")["payload"]["page"].is_null());
+    assert!(pushed(&resync(&app, None), "show")["payload"]["page"].is_null());
     let before = app.display_revisions();
 
     app.selected_show_full = Some(SelectedFullShow {
@@ -1941,7 +2180,7 @@ mod tests {
       true,
     );
 
-    let page = &pushed(&diff(&before, &app), "show")["payload"]["page"];
+    let page = &pushed(&diff(&before, &app, Language::En), "show")["payload"]["page"];
     assert_eq!(page["show"]["name"], "Pod");
     assert_eq!(page["episodes"][1]["name"], "Episode 1");
     assert_eq!(page["total"], 5);
@@ -1950,7 +2189,7 @@ mod tests {
 
     let before = app.display_revisions();
     app.saved_show_ids_set_mut().insert("pod".to_string());
-    let page = &pushed(&diff(&before, &app), "show")["payload"]["page"];
+    let page = &pushed(&diff(&before, &app, Language::En), "show")["payload"]["page"];
     assert_eq!(page["saved"], true);
   }
 
@@ -1985,14 +2224,14 @@ mod tests {
       },
       true,
     );
-    let library = &pushed(&resync(&app), "library")["payload"];
+    let library = &pushed(&resync(&app, None), "library")["payload"];
     assert_eq!(library["saved_shows"].as_array().unwrap().len(), 2);
     assert!(app.saved_show_ids_set().contains("a"));
     let before = app.display_revisions();
 
     app.saved_show_ids_set_mut().remove("a");
 
-    let library = &pushed(&diff(&before, &app), "library")["payload"];
+    let library = &pushed(&diff(&before, &app, Language::En), "library")["payload"];
     assert_eq!(library["saved_shows"][0]["name"], "b");
     assert_eq!(library["saved_shows"].as_array().unwrap().len(), 1);
   }
@@ -2001,7 +2240,7 @@ mod tests {
   fn the_rootlist_folders_ride_the_library_channel_as_a_tree() {
     use crate::core::app::{PlaylistFolderNode, PlaylistFolderNodeType};
     let (mut app, _rx) = app();
-    assert!(pushed(&resync(&app), "library")["payload"]["folders"].is_null());
+    assert!(pushed(&resync(&app, None), "library")["payload"]["folders"].is_null());
     let before = app.display_revisions();
 
     *app.playlist_folder_nodes_mut() = Some(vec![PlaylistFolderNode {
@@ -2016,7 +2255,7 @@ mod tests {
       }],
     }]);
 
-    let folders = &pushed(&diff(&before, &app), "library")["payload"]["folders"];
+    let folders = &pushed(&diff(&before, &app, Language::En), "library")["payload"]["folders"];
     assert_eq!(folders[0]["kind"], "folder");
     assert_eq!(folders[0]["name"], "Gym");
     assert_eq!(folders[0]["children"][0]["kind"], "playlist");
@@ -2033,7 +2272,7 @@ mod tests {
     app.track_table.tracks = liked_page(0, 2, 2, false).items;
     app.playlist_track_positions = Some(vec![4, 9]);
     app.note_display_changes();
-    let table = &pushed(&resync(&app), "track_table")["payload"];
+    let table = &pushed(&resync(&app, None), "track_table")["payload"];
     assert_eq!(table["positions"], serde_json::json!([4, 9]));
     assert!(table["radio"].is_null());
     let before = app.display_revisions();
@@ -2042,7 +2281,7 @@ mod tests {
     app.set_radio_seed_id(Some("seed".to_string()));
     app.note_display_changes();
 
-    let table = &pushed(&diff(&before, &app), "track_table")["payload"];
+    let table = &pushed(&diff(&before, &app, Language::En), "track_table")["payload"];
     assert!(table["positions"].is_null());
     assert_eq!(table["radio"], "seed");
   }
@@ -2050,7 +2289,7 @@ mod tests {
   #[test]
   fn hello_says_whether_a_shell_can_resize_its_window() {
     let (app, _rx) = app();
-    let message = encode(&hello(app.display_revisions(), None, true));
+    let message = encode(&hello(app.display_revisions(), None, true, Language::En));
     let hello: serde_json::Value = serde_json::from_str(&message).unwrap();
     assert_eq!(hello["payload"]["window"], true);
     let ClientMessage::Window { mode } =
@@ -2078,7 +2317,7 @@ mod tests {
     app.liked_song_ids_set_mut().insert("seen".to_string());
     app.note_display_changes();
 
-    let marks = &pushed(&diff(&before, &app), "liked_marks")["payload"];
+    let marks = &pushed(&diff(&before, &app, Language::En), "liked_marks")["payload"];
     assert_eq!(marks, &serde_json::json!(["seen"]));
   }
 
@@ -2098,7 +2337,7 @@ mod tests {
       playlist_info("theirs", "Theirs", "friend", false),
     ];
 
-    let editable = &pushed(&diff(&before, &app), "library")["payload"]["editable"];
+    let editable = &pushed(&diff(&before, &app, Language::En), "library")["payload"]["editable"];
     assert_eq!(
       editable,
       &serde_json::json!(["spotify:playlist:mine", "spotify:playlist:shared"])
@@ -2124,7 +2363,7 @@ mod tests {
       .iter()
       .any(|id| id.starts_with("behavior.tick_rate")));
     assert!(!without.contains(&"behavior.disable_auto_update".to_string()));
-    let rows = &pushed(&diff(&before, &app), "settings")["payload"];
+    let rows = &pushed(&diff(&before, &app, Language::En), "settings")["payload"]["rows"];
     assert!(rows
       .as_array()
       .unwrap()
@@ -2132,6 +2371,78 @@ mod tests {
       .any(|row| row["id"] == "behavior.disable_auto_update"
         && row["group"] == "updates"
         && row["value"]["kind"] == "bool"));
+  }
+
+  #[cfg(all(feature = "subsonic", feature = "local-files", feature = "youtube"))]
+  #[test]
+  fn source_settings_follow_the_language_on_desktop_and_phone_without_exposing_secrets() {
+    let (mut app, _rx) = app();
+    app.user_config.behavior.subsonic_password = Some("literal secret {name}".into());
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      for phone in [false, true] {
+        let rows = settings_for(&app, phone);
+        for key in [
+          "subsonic_url",
+          "subsonic_username",
+          "subsonic_password",
+          "local_music_path",
+          "ytdlp_path",
+        ] {
+          let id = format!("behavior.{key}");
+          let row = rows.iter().find(|row| row.id == id).unwrap();
+          assert_eq!(row.group, "sources");
+          let (name, description) = app.strings().settings.row_text(&id).unwrap();
+          assert_eq!(row.name, name);
+          assert_eq!(row.description, description);
+        }
+        let encoded = serde_json::to_value(&rows).unwrap();
+        assert!(!encoded.to_string().contains("literal secret"));
+        let password = rows
+          .iter()
+          .find(|row| row.id == "behavior.subsonic_password")
+          .unwrap();
+        assert!(matches!(
+          password.value,
+          SettingRowValue::Secret { set: true }
+        ));
+        assert_eq!(
+          rows
+            .iter()
+            .find(|row| row.id == "behavior.language")
+            .unwrap()
+            .group,
+          "interface"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn apple_library_labels_refresh_by_uri_and_leave_user_playlists_literal() {
+    let (mut app, _rx) = app();
+    app.append_apple_music_playlists(vec![
+      PlaylistInfo {
+        uri: "applemusic:library".into(),
+        name: "All songs".into(),
+        ..crate::core::test_helpers::playlist_info("p", "All songs", "", false)
+      },
+      PlaylistInfo {
+        uri: "applemusic:playlist:mine".into(),
+        name: "All songs".into(),
+        ..crate::core::test_helpers::playlist_info("p", "All songs", "", false)
+      },
+    ]);
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let rows = playlists(&app).apple_music;
+      assert_eq!(rows[0].name, app.strings().sidebar.all_songs);
+      assert_eq!(rows[0].uri, "applemusic:library");
+      assert_eq!(rows[1].name, "All songs");
+      assert_eq!(app.apple_music_playlists()[0].name, "All songs");
+    }
   }
 
   #[test]
@@ -2153,6 +2464,105 @@ mod tests {
   }
 
   #[test]
+  fn the_settings_channel_resyncs_the_resolved_language_and_shared_table() {
+    let (mut app, _rx) = app();
+    app.user_config.behavior.language = Language::En;
+    app.refresh_language();
+    let initial = pushed(&resync(&app, None), "settings");
+    assert_eq!(initial["payload"]["language"], "en");
+    assert_eq!(initial["payload"]["strings"]["gui"]["settings"], "Settings");
+    let before = app.display_revisions();
+    app.user_config.behavior.language = Language::ZhHant;
+    app.refresh_language();
+    let changed = pushed(&diff(&before, &app, Language::En), "settings");
+    assert_eq!(changed["payload"]["language"], "zh-Hant");
+    assert_eq!(
+      changed["payload"]["strings"]["gui"]["settings"],
+      app.strings().gui.settings
+    );
+    let language = changed["payload"]["rows"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .find(|row| row["id"] == "behavior.language")
+      .unwrap();
+    assert_eq!(language["value"]["value"], "zh-Hant");
+    assert_eq!(
+      language["value"]["options"],
+      serde_json::json!(["auto", "en", "zh-Hans", "zh-Hant"])
+    );
+    assert_eq!(
+      language["value"]["labels"][0],
+      app
+        .strings()
+        .settings
+        .option_label("behavior.language", "auto")
+    );
+  }
+
+  #[test]
+  fn settings_updates_send_the_table_only_when_the_language_changes_or_resync_needs_it() {
+    let (mut app, _rx) = app();
+    assert!(pushed(&resync(&app, Some(Language::En)), "settings")["payload"]["strings"].is_null());
+    let before = app.display_revisions();
+    app.user_config.behavior.language = Language::ZhHans;
+    app.refresh_language();
+    assert!(
+      pushed(&diff(&before, &app, Language::En), "settings")["payload"]["strings"].is_object()
+    );
+    let before = app.display_revisions();
+    app.bump_display(DisplayDomain::Settings);
+    assert!(
+      pushed(&diff(&before, &app, Language::ZhHans), "settings")["payload"]["strings"].is_null()
+    );
+    assert!(pushed(&resync(&app, None), "settings")["payload"]["strings"].is_object());
+    let row = settings(&app)
+      .into_iter()
+      .find(|row| row.id == "behavior.language")
+      .unwrap();
+    assert_eq!(row.group, "interface");
+  }
+
+  #[test]
+  fn hello_supplies_the_language_table_before_onboarding_can_ask() {
+    let message = serde_json::to_value(hello(
+      DisplayRevisions::default(),
+      None,
+      false,
+      Language::ZhHans,
+    ))
+    .unwrap();
+    assert_eq!(message["payload"]["language"], "zh-Hans");
+    assert_eq!(
+      message["payload"]["strings"]["gui"]["continue_button"],
+      crate::core::i18n::ZH_HANS.gui.continue_button
+    );
+  }
+
+  #[test]
+  fn gui_update_descriptions_keep_their_original_english_and_translate_on_change() {
+    let (mut app, _rx) = app();
+    app.user_config.behavior.language = Language::En;
+    app.refresh_language();
+    app.set_update_status(UpdateStatus::Idle);
+    let english = settings(&app);
+    assert_eq!(english.iter().find(|row| row.id == "behavior.disable_auto_update").unwrap().description,
+      "Skip the checks at launch and every 6 hours; check, download and install updates from this page yourself");
+    assert_eq!(english.iter().find(|row| row.id == "behavior.auto_update_delay").unwrap().description,
+      "How long a release must be out before it downloads: '0' for at once, or for example '10m', '2h', '7d'");
+    app.user_config.behavior.language = Language::ZhHans;
+    app.refresh_language();
+    assert_eq!(
+      settings(&app)
+        .iter()
+        .find(|row| row.id == "behavior.disable_auto_update")
+        .unwrap()
+        .description,
+      app.strings().gui.update_checks_description
+    );
+  }
+
+  #[test]
   fn an_update_status_rides_the_update_channel() {
     let (mut app, _rx) = app();
     let before = app.display_revisions();
@@ -2161,7 +2571,7 @@ mod tests {
       version: "0.45.0".to_string(),
     });
 
-    let update = &pushed(&diff(&before, &app), "update")["payload"];
+    let update = &pushed(&diff(&before, &app, Language::En), "update")["payload"];
     assert_eq!(update["state"], "ready");
     assert_eq!(update["version"], "0.45.0");
   }
@@ -2177,7 +2587,7 @@ mod tests {
     });
     app.bump_display(DisplayDomain::RecentlyPlayed);
 
-    let recent = &pushed(&diff(&before, &app), "recently_played")["payload"];
+    let recent = &pushed(&diff(&before, &app, Language::En), "recently_played")["payload"];
     assert_eq!(recent[0]["name"], "Track 0");
   }
 
@@ -2212,7 +2622,7 @@ mod tests {
       image_url: None,
     });
 
-    let plays = &pushed(&diff(&before, &app), "session")["payload"];
+    let plays = &pushed(&diff(&before, &app, Language::En), "session")["payload"];
     assert_eq!(plays[0]["title"], "Turning Tables");
     assert_eq!(plays[0]["started_at_ms"], 1000);
   }
@@ -2225,7 +2635,7 @@ mod tests {
     app.end_discover_fetch(Some(crate::core::test_helpers::discover_shelves()));
     app.note_display_changes();
 
-    let discover = &pushed(&diff(&before, &app), "discover")["payload"];
+    let discover = &pushed(&diff(&before, &app, Language::En), "discover")["payload"];
     assert_eq!(discover["shelves"][1]["title"], "New");
     assert_eq!(
       discover["shelves"][1]["playlists"][0]["name"],
@@ -2250,7 +2660,7 @@ mod tests {
 
     let before = app.display_revisions();
     app.apply(Action::Open(OpenTarget::SourcePlaylist(uri.to_string())));
-    let loading = &pushed(&diff(&before, &app), "track_table")["payload"];
+    let loading = &pushed(&diff(&before, &app, Language::En), "track_table")["payload"];
     assert!(loading["uri"].is_null());
     assert_eq!(loading["tracks"], serde_json::json!([]));
     assert!(matches!(rx.try_recv(), Ok(IoEvent::GetSubsonicTracks(u)) if u == uri));
@@ -2262,7 +2672,7 @@ mod tests {
       TrackTableContext::SubsonicPlaylist,
     );
     app.note_display_changes();
-    let landed = &pushed(&diff(&before, &app), "track_table")["payload"];
+    let landed = &pushed(&diff(&before, &app, Language::En), "track_table")["payload"];
     assert_eq!(landed["uri"], uri);
     assert_eq!(landed["tracks"][0]["name"], "Track 0");
     assert_eq!(landed["has_more"], false);
@@ -2284,7 +2694,7 @@ mod tests {
     let before = app.display_revisions();
     app.note_display_changes();
     assert_eq!(
-      pushed(&diff(&before, &app), "track_table")["payload"]["uri"],
+      pushed(&diff(&before, &app, Language::En), "track_table")["payload"]["uri"],
       format!("spotify:playlist:{id}")
     );
   }
@@ -2330,7 +2740,7 @@ mod tests {
       }],
     }]);
 
-    let sync = &pushed(&diff(&before, &app), "playlist_sync")["payload"];
+    let sync = &pushed(&diff(&before, &app, Language::En), "playlist_sync")["payload"];
     let mirror = &sync["links"][0]["mirrors"][0];
     assert_eq!(sync["links"][0]["name"], "Road Trip");
     assert_eq!(mirror["source"], "Qobuz");
@@ -2340,13 +2750,126 @@ mod tests {
   }
 
   #[test]
+  fn sync_report_text_changes_language_without_reformatting_names_or_reasons() {
+    use crate::core::playlist_sync::{Endpoint, Link, LinkOutcome, LinkReport, SyncReport};
+    let (mut app, _rx) = app();
+    app.user_config.behavior.language = Language::En;
+    app.refresh_language();
+    app.set_playlist_sync_links(vec![Link {
+      id: "link".to_string(),
+      master: Endpoint {
+        source: Source::Qobuz,
+        playlist_uri: "qobuz:playlist:1".to_string(),
+        name: "{added} 五月天".to_string(),
+      },
+      mirrors: vec![],
+    }]);
+    let report = SyncReport {
+      dry_run: true,
+      links: vec![LinkReport {
+        id: "link".to_string(),
+        name: "{added} 五月天".to_string(),
+        added: 2,
+        removed: 1,
+        unmatched: 3,
+        ..Default::default()
+      }],
+      ..Default::default()
+    };
+    app.finish_playlist_sync(report.clone());
+    let english = playlist_sync(&app);
+    assert_eq!(
+      english.last_summary.as_deref(),
+      Some(report.summary().as_str())
+    );
+    assert_eq!(
+      english.links[0].last_line.as_deref(),
+      Some(report.links[0].line().as_str())
+    );
+
+    let before = app.display_revisions();
+    app.user_config.behavior.language = Language::ZhHant;
+    app.refresh_language();
+    let changed = pushed(&diff(&before, &app, Language::En), "playlist_sync");
+    assert!(changed["payload"]["links"][0]["last_line"]
+      .as_str()
+      .unwrap()
+      .contains("{added} 五月天"));
+
+    let mut failed = report;
+    failed.error = Some("{added} HTTP 503".to_string());
+    failed.links[0].outcome = LinkOutcome::Failed("{name} HTTP 503".into());
+    app.finish_playlist_sync(failed);
+    let localized = playlist_sync(&app);
+    assert!(localized
+      .last_summary
+      .as_deref()
+      .unwrap()
+      .contains("{added} HTTP 503"));
+    assert!(localized.links[0]
+      .last_line
+      .as_deref()
+      .unwrap()
+      .contains("{name} HTTP 503"));
+  }
+
+  #[test]
+  fn stored_sync_reasons_follow_language_changes_in_the_gui_payload() {
+    use crate::core::playlist_sync::{
+      Endpoint, Link, LinkOutcome, LinkReport, SyncReason, SyncReport,
+    };
+    let (mut app, _rx) = app();
+    app.set_playlist_sync_links(vec![Link {
+      id: "link".into(),
+      master: Endpoint {
+        source: Source::Local,
+        playlist_uri: "local:playlist:1".into(),
+        name: "{reason}".into(),
+      },
+      mirrors: vec![],
+    }]);
+    let reason = SyncReason::Unreachable {
+      source: Source::Local,
+      error: "{source}: HTTP 503".into(),
+    };
+    app.finish_playlist_sync(SyncReport {
+      links: vec![LinkReport {
+        id: "link".into(),
+        name: "{reason}".into(),
+        outcome: LinkOutcome::Skipped(reason.clone()),
+        ..Default::default()
+      }],
+      ..Default::default()
+    });
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      let previous = app.language();
+      let before = app.display_revisions();
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let expected = app
+        .strings()
+        .screens
+        .sync_run_skipped("{reason}", &reason.render(app.strings()));
+      assert_eq!(
+        playlist_sync(&app).links[0].last_line.as_deref(),
+        Some(expected.as_str())
+      );
+      assert!(expected.contains("{source}: HTTP 503"));
+      if language != previous {
+        let updated = pushed(&diff(&before, &app, previous), "playlist_sync");
+        assert_eq!(updated["payload"]["links"][0]["last_line"], expected);
+      }
+    }
+  }
+
+  #[test]
   fn a_sync_run_in_flight_rides_the_playlist_sync_channel() {
     let (mut app, _rx) = app();
     let before = app.display_revisions();
 
     assert!(app.begin_playlist_sync());
     assert_eq!(
-      pushed(&diff(&before, &app), "playlist_sync")["payload"]["running"],
+      pushed(&diff(&before, &app, Language::En), "playlist_sync")["payload"]["running"],
       true
     );
     let begun = app.display_revisions();
@@ -2430,6 +2953,16 @@ mod tests {
     written::<PodcastPage>(&dir, &cfg);
     written::<ShowInfo>(&dir, &cfg);
     written::<WindowMode>(&dir, &cfg);
+    std::fs::write(
+      dir.join("strings.json"),
+      serde_json::to_string_pretty(&serde_json::json!({
+        "EN": crate::core::i18n::EN,
+        "ZH_HANS": crate::core::i18n::ZH_HANS,
+        "ZH_HANT": crate::core::i18n::ZH_HANT,
+      }))
+      .unwrap(),
+    )
+    .unwrap();
     for entry in std::fs::read_dir(&dir).unwrap() {
       let path = entry.unwrap().path();
       assert!(

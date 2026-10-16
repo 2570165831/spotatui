@@ -258,6 +258,7 @@ fn normalize_number_setting(id: &str, value: i64) -> i64 {
 }
 
 fn handle_string_edit(key: Key, app: &mut App) {
+  let strings = &app.strings().settings;
   match key {
     Key::Enter => {
       // Apply the edited string
@@ -265,18 +266,43 @@ fn handle_string_edit(key: Key, app: &mut App) {
         let new_value = app.view.settings_edit_buffer.clone();
 
         #[cfg(feature = "self-update")]
-        if setting.id == "behavior.auto_update_delay" {
-          if let Err(e) = crate::core::user_config::parse_update_delay_secs(&new_value) {
-            app.handle_error(anyhow::anyhow!("Invalid delay format: {}", e));
-            return;
-          }
+        if let Some(error) = (setting.id == "behavior.auto_update_delay")
+          .then(|| crate::core::user_config::parse_update_delay_secs(&new_value))
+          .and_then(Result::err)
+        {
+          let detail = match new_value.trim().chars().last() {
+            Some('d') => strings.delay_days,
+            Some('h') => strings.delay_hours,
+            Some('m') => strings.delay_minutes,
+            Some('s') => strings.delay_seconds,
+            _ => strings.delay_number,
+          };
+          app.handle_error_with_message(
+            anyhow::anyhow!("Invalid delay format: {}", error),
+            strings.invalid_delay(detail),
+          );
+          return;
         }
 
         let automatic_dither = setting.id == "theme.cover_art_dither_color"
           && (new_value.trim().is_empty() || new_value.trim().eq_ignore_ascii_case("auto"));
         if matches!(setting.value, SettingValue::Color(_)) && !automatic_dither {
           if let Err(e) = crate::core::user_config::parse_theme_item(&new_value) {
-            app.handle_error(anyhow::anyhow!("Invalid color: {}", e));
+            let detail = if let Some(error) = e.downcast_ref::<std::num::ParseIntError>() {
+              match error.kind() {
+                std::num::IntErrorKind::Empty => strings.color_empty.to_string(),
+                std::num::IntErrorKind::InvalidDigit => strings.color_invalid_digit.to_string(),
+                std::num::IntErrorKind::PosOverflow => strings.color_too_large.to_string(),
+                std::num::IntErrorKind::NegOverflow => strings.color_too_small.to_string(),
+                _ => e.to_string(),
+              }
+            } else {
+              strings.color_unknown(&format!("{new_value:?}"))
+            };
+            app.handle_error_with_message(
+              anyhow::anyhow!("Invalid color: {}", e),
+              strings.invalid_color(&detail),
+            );
             return;
           }
         }
@@ -327,8 +353,12 @@ fn handle_string_edit(key: Key, app: &mut App) {
 }
 
 /// Check if a keybinding conflicts with another action
-/// Returns Some(action_name) if conflict found, None otherwise
-fn check_keybinding_conflict(app: &App, new_key: Key, current_setting_id: &str) -> Option<String> {
+/// Return the English diagnostic name and localized display name on a conflict.
+fn check_keybinding_conflict(
+  app: &App,
+  new_key: Key,
+  current_setting_id: &str,
+) -> Option<(String, String)> {
   // Iterate through all settings items
   for setting in &app.settings_items {
     // Skip if it's the same setting we're editing
@@ -347,8 +377,16 @@ fn check_keybinding_conflict(app: &App, new_key: Key, current_setting_id: &str) 
       if let Ok(existing_key) = crate::core::user_config::parse_key_public(key_string.clone()) {
         // Check if keys match (case-sensitive comparison)
         if existing_key == new_key {
-          // Return the friendly name of the conflicting action
-          return Some(setting.name.clone());
+          // Resolve by stable id: a localized row name must never enter the log.
+          let diagnostic_name = crate::core::i18n::settings::EN
+            .row_text(&setting.id)
+            .map_or(setting.name.as_str(), |(name, _)| name);
+          let display_name = app
+            .strings()
+            .settings
+            .row_text(&setting.id)
+            .map_or(setting.name.as_str(), |(name, _)| name);
+          return Some((diagnostic_name.to_string(), display_name.to_string()));
         }
       }
     }
@@ -371,7 +409,11 @@ fn handle_key_edit(key: Key, app: &mut App) {
       // Check if this is a reserved key
       if let Err(e) = crate::core::user_config::check_reserved_keys_public(key) {
         // Show error but don't apply the reserved key
-        app.handle_error(anyhow::anyhow!("{}", e));
+        let message = app
+          .strings()
+          .settings
+          .reserved_key(&key_to_config_string(&key));
+        app.handle_error_with_message(anyhow::anyhow!("{}", e), message);
         app.view.settings_edit_mode = false;
         app.view.settings_edit_buffer.clear();
         return;
@@ -379,14 +421,23 @@ fn handle_key_edit(key: Key, app: &mut App) {
 
       // Check for keybinding conflicts
       if let Some(setting) = app.settings_items.get(app.view.settings_selected_index) {
-        if let Some(conflict_name) = check_keybinding_conflict(app, key, &setting.id) {
+        if let Some((diagnostic_name, conflict_name)) =
+          check_keybinding_conflict(app, key, &setting.id)
+        {
           // Show error and don't apply the conflicting key
           let key_display = key_to_config_string(&key);
-          app.handle_error(anyhow::anyhow!(
-            "Key {} is already assigned to {}",
-            key_display,
-            conflict_name
-          ));
+          let message = app
+            .strings()
+            .settings
+            .key_conflict(&key_display, &conflict_name);
+          app.handle_error_with_message(
+            anyhow::anyhow!(
+              "Key {} is already assigned to {}",
+              key_display,
+              diagnostic_name
+            ),
+            message,
+          );
           app.view.settings_edit_mode = false;
           app.view.settings_edit_buffer.clear();
           return;
@@ -595,6 +646,42 @@ mod tests {
       .iter()
       .position(|setting| matches!(setting.value, SettingValue::Bool(_)))
       .expect("expected a boolean setting")
+  }
+
+  #[test]
+  fn key_conflicts_keep_english_diagnostics_and_localized_ui_names() {
+    let mut config = crate::core::user_config::UserConfig::new();
+    config.behavior.language = crate::core::i18n::Language::ZhHans;
+    config.keys.help = Key::F5;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut app = App::new(tx, config, None);
+    app.view.settings_category = SettingsCategory::Keybindings;
+    open_settings(&mut app);
+    app.view.settings_selected_index = setting_index(&app, "keys.search");
+    assert_eq!(
+      check_keybinding_conflict(&app, Key::F5, "keys.search"),
+      Some((
+        "Help".to_string(),
+        app.strings().settings.keys_help_name.to_string()
+      ))
+    );
+    handle_key_edit(Key::F5, &mut app);
+    assert_eq!(
+      app.api_error(),
+      app
+        .strings()
+        .settings
+        .key_conflict("f5", app.strings().settings.keys_help_name)
+    );
+
+    // The CLI override must use English even while staged rows still have Chinese names.
+    app.use_english_messages();
+    assert_eq!(
+      check_keybinding_conflict(&app, Key::F5, "keys.search"),
+      Some(("Help".to_string(), "Help".to_string()))
+    );
+    handle_key_edit(Key::F5, &mut app);
+    assert_eq!(app.api_error(), "Key f5 is already assigned to Help");
   }
 
   #[test]

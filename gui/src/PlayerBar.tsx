@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import { useCallback, useRef, useState } from "react";
 import type { Action } from "./bindings/Action";
 import type { DeviceInfo } from "./bindings/DeviceInfo";
@@ -18,6 +19,7 @@ export type Panel = "now" | "queue" | null;
 const UNMUTE_VOLUME = 50;
 
 export function PlayerBar({
+  s = EN,
   playback,
   position,
   connected,
@@ -30,6 +32,7 @@ export function PlayerBar({
   onMini,
   send,
 }: {
+  s?: GuiStrings;
   playback: PlaybackPayload | null;
   position: Position | null;
   connected: boolean;
@@ -67,7 +70,7 @@ export function PlayerBar({
         <Cover src={item?.image_url} size={56} />
         <div className="titles">
           <strong title={item?.title}>
-            {item?.title ?? "Nothing playing"}
+            {item?.title ?? s.nothing_playing}
           </strong>
           {item && (
             <span className="artist-line">
@@ -82,7 +85,7 @@ export function PlayerBar({
           <button
             type="button"
             className="like"
-            aria-label="Like"
+            aria-label={s.like}
             aria-pressed={liked}
             disabled={!connected}
             onClick={() => send("ToggleSaveCurrentItem")}
@@ -90,11 +93,14 @@ export function PlayerBar({
             <Glyph name="heart" filled={liked} />
           </button>
         )}
-        {source && source !== "Spotify" && <SourceBadge source={source} />}
+        {source && source !== "Spotify" && (
+          <SourceBadge s={s} source={source} />
+        )}
       </div>
       <div className="transport">
-        <Transport item={item} connected={connected} send={send} />
+        <Transport s={s} item={item} connected={connected} send={send} />
         <Progress
+          s={s}
           item={item}
           elapsed={elapsed}
           connected={connected}
@@ -105,7 +111,7 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label="Now playing view"
+          aria-label={s.now_playing_view}
           aria-pressed={panel === "now"}
           onClick={() => onPanel(panel === "now" ? null : "now")}
         >
@@ -114,7 +120,7 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label="Lyrics"
+          aria-label={s.lyrics}
           aria-keyshortcuts="l"
           aria-pressed={lyricsOpen}
           onClick={onLyrics}
@@ -124,7 +130,7 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label="Queue"
+          aria-label={s.queue}
           aria-keyshortcuts="Shift+Q"
           aria-pressed={panel === "queue"}
           onClick={() => onPanel(panel === "queue" ? null : "queue")}
@@ -135,7 +141,7 @@ export function PlayerBar({
           <button
             type="button"
             className="icon-button"
-            aria-label="Connect to a device"
+            aria-label={s.connect_device}
             aria-haspopup="dialog"
             aria-expanded={devicesOpen}
             disabled={!connected}
@@ -145,6 +151,7 @@ export function PlayerBar({
           </button>
           {devicesOpen && (
             <DevicesPopover
+              s={s}
               devices={devices}
               current={playback?.device ?? null}
               send={send}
@@ -155,7 +162,7 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label={volume === 0 ? "Unmute" : "Mute"}
+          aria-label={volume === 0 ? s.unmute : s.mute}
           disabled={!connected}
           onClick={() => {
             if (volume === 0) {
@@ -169,7 +176,7 @@ export function PlayerBar({
           <Glyph name={volume === 0 ? "mute" : "volume"} />
         </button>
         <Meter
-          label="Volume"
+          label={s.volume}
           ratio={volume / 100}
           text={`${volume}%`}
           disabled={!connected}
@@ -179,7 +186,8 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label="Open mini player"
+          aria-label={s.open_mini_player}
+          data-mini-toggle
           aria-keyshortcuts="Shift+T"
           onClick={() => onMini()}
         >
@@ -188,7 +196,7 @@ export function PlayerBar({
         <button
           type="button"
           className="icon-button"
-          aria-label="Full screen"
+          aria-label={s.full_screen}
           aria-keyshortcuts="r"
           onClick={() => onRoom()}
         >

@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { EpisodeInfo } from "./bindings/EpisodeInfo";
 import type { PodcastPage } from "./bindings/PodcastPage";
@@ -26,25 +27,27 @@ export function newestEpisode(episodes: EpisodeInfo[]): number {
 }
 
 /** "45 min", "1 hr 5 min", "2 hr", or "30 sec" under a minute; empty for no length. */
-export function episodeLength(ms: number): string {
+export function episodeLength(ms: number, s: GuiStrings = EN): string {
   if (ms <= 0) return "";
   const minutes = Math.round(ms / 60_000);
-  if (minutes === 0) return `${Math.round(ms / 1000)} sec`;
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes === 0)
+    return fmt(s.seconds_short, { seconds: Math.round(ms / 1000) });
+  if (minutes < 60) return fmt(s.minutes_short, { minutes });
   const hours = Math.floor(minutes / 60);
-  return minutes % 60 ? `${hours} hr ${minutes % 60} min` : `${hours} hr`;
+  return minutes % 60
+    ? fmt(s.hours_minutes, { hours, minutes: minutes % 60 })
+    : fmt(s.hours_short, { hours });
 }
 
-const releaseDate = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
 /** A full release date as "Oct 1, 2026"; a year or a month stays as given. */
-export function episodeDate(date: string): string {
+export function episodeDate(date: string, s: GuiStrings = EN): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const releaseDate = new Intl.DateTimeFormat(s.date_locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
   return releaseDate.format(new Date(`${date}T00:00:00Z`));
 }
 
@@ -52,17 +55,20 @@ export function episodeDate(date: string): string {
 export type Resume =
   { played: true } | { played: false; percent: number; left: string };
 
-export function resumeOf(episode: EpisodeInfo): Resume | null {
+export function resumeOf(
+  episode: EpisodeInfo,
+  s: GuiStrings = EN,
+): Resume | null {
   const point = episode.resume_point;
   if (!point) return null;
   if (point.fully_played) return { played: true };
   if (point.resume_position_ms <= 0 || episode.duration_ms <= 0) return null;
   const at = Math.min(point.resume_position_ms, episode.duration_ms);
-  const left = episodeLength(episode.duration_ms - at);
+  const left = episodeLength(episode.duration_ms - at, s);
   return {
     played: false,
     percent: Math.round((at / episode.duration_ms) * 100),
-    left: left ? `${left} left` : "",
+    left: left ? fmt(s.time_left, { time: left }) : "",
   };
 }
 

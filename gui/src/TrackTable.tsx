@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import {
   memo,
   useContext,
@@ -21,6 +22,7 @@ import { Cover } from "./ui";
 
 /** The `# / Title / Album / duration` table; the cursor row is `aria-selected`. */
 export const TrackTable = memo(function TrackTable({
+  s = EN,
   label,
   idPrefix,
   tracks,
@@ -34,6 +36,7 @@ export const TrackTable = memo(function TrackTable({
   open,
   rowContext,
 }: {
+  s?: GuiStrings;
   label: string;
   idPrefix: string;
   tracks: TrackInfo[];
@@ -76,8 +79,8 @@ export const TrackTable = memo(function TrackTable({
     <div className={showAlbum ? "track-table" : "track-table no-album"}>
       <div className="track-row track-head" aria-hidden="true">
         <span className="n">#</span>
-        <span>Title</span>
-        {showAlbum && <span className="album">Album</span>}
+        <span>{s.title}</span>
+        {showAlbum && <span className="album">{s.album}</span>}
         <span className="time">
           {actions && <span className="time-space" />}
           <Glyph name="clock" />
@@ -134,7 +137,7 @@ export const TrackTable = memo(function TrackTable({
                   type="button"
                   className="row-play"
                   tabIndex={-1}
-                  aria-label={`Play ${track.name}`}
+                  aria-label={fmt(s.play_named, { name: track.name })}
                   onClick={inRow(() => onPlay(index))}
                   onDoubleClick={stop}
                 >
@@ -147,12 +150,12 @@ export const TrackTable = memo(function TrackTable({
                   <span className="title">{track.name}</span>
                   <span className="artists">
                     {source && source !== "Spotify" && (
-                      <SourceBadge source={source} />
+                      <SourceBadge s={s} source={source} />
                     )}
                     {track.explicit && (
-                      <span className="explicit" title="Explicit">
+                      <span className="explicit" title={s.explicit}>
                         <span aria-hidden="true">E</span>
-                        <span className="sr-only">Explicit</span>
+                        <span className="sr-only">{s.explicit}</span>
                       </span>
                     )}
                     <Artists track={track} open={open} />
@@ -177,14 +180,14 @@ export const TrackTable = memo(function TrackTable({
                 </span>
               )}
               <span className="time">
-                {actions && <RowHeart track={track} actions={actions} />}
+                {actions && <RowHeart s={s} track={track} actions={actions} />}
                 <span>{track.duration_ms > 0 && clock(track.duration_ms)}</span>
                 {actions && (
                   <button
                     type="button"
                     className="row-more"
                     tabIndex={-1}
-                    aria-label={`More options for ${track.name}`}
+                    aria-label={fmt(s.more_track_options, { name: track.name })}
                     aria-haspopup="menu"
                     aria-expanded={menu?.index === index}
                     onClick={inRow((event) => {
@@ -203,12 +206,14 @@ export const TrackTable = memo(function TrackTable({
       </div>
       {actions && menu && (
         <TrackMenu
-          label={`Options for ${menu.track.name}`}
+          s={s}
+          label={fmt(s.track_options, { name: menu.track.name })}
           groups={trackMenu(
             menu.track,
             menu.track.id !== null && actions.liked.has(menu.track.id),
             actions.playlists,
             menu.context,
+            s,
           )}
           at={menu.at}
           actions={actions}
@@ -287,9 +292,11 @@ function stop(event: MouseEvent) {
 
 /** The heart of a Spotify row: filled when liked; a click saves or removes the track. */
 function RowHeart({
+  s = EN,
   track,
   actions,
 }: {
+  s?: GuiStrings;
   track: TrackInfo;
   actions: TrackActions;
 }) {
@@ -302,7 +309,7 @@ function RowHeart({
       type="button"
       className={liked ? "row-heart liked" : "row-heart"}
       tabIndex={-1}
-      aria-label={liked ? "Remove from Liked Songs" : "Save to Liked Songs"}
+      aria-label={liked ? s.remove_liked : s.save_liked}
       aria-pressed={liked}
       onClick={inRow(() => actions.send({ ToggleSaveTrack: uri }))}
       onDoubleClick={stop}

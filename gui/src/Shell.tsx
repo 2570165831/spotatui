@@ -1,3 +1,4 @@
+import { EN, type GuiStrings } from "./i18n";
 import {
   useCallback,
   useEffect,
@@ -64,12 +65,14 @@ const WIDE = "(min-width: 1101px)";
 
 /** The frame: the top bar, the library panel, the main view, the right panel, the player bar. */
 export function Shell({
+  s = EN,
   state,
   send,
   onUpdate,
   onWindow,
   onQuit,
 }: {
+  s?: GuiStrings;
   state: State;
   send: (action: Action) => void;
   onUpdate: (ask: UpdateAsk) => void;
@@ -169,9 +172,7 @@ export function Shell({
     focusScreen(page);
     if (document.activeElement === document.body)
       document
-        .querySelector<HTMLElement>(
-          '.playerbar [aria-label="Open mini player"]',
-        )
+        .querySelector<HTMLElement>(".playerbar [data-mini-toggle]")
         ?.focus();
   }, [mini, page]);
   // The Room fetches the playing track's album over the one the album page showed.
@@ -239,7 +240,7 @@ export function Shell({
   const showView = viewOf("show");
   const radioView = viewOf("radio");
   // The Library defaults from Settings: the sort each list starts with.
-  const settingRows = channels.settings?.payload;
+  const settingRows = channels.settings?.payload.rows;
   const choice = (id: string) => {
     const value = settingRows?.find((row) => row.id === id)?.value;
     return value?.kind === "choice" ? value.value : null;
@@ -248,6 +249,7 @@ export function Shell({
   const pages: Record<Page, ReactNode> = {
     home: (
       <Home
+        s={s}
         recent={channels.recently_played?.payload ?? null}
         playlists={channels.library?.payload ?? null}
         discover={channels.discover?.payload ?? null}
@@ -260,6 +262,7 @@ export function Shell({
     ),
     liked: (
       <ListPage
+        s={s}
         view={{ page: "liked" }}
         liked={channels.liked?.payload ?? null}
         table={channels.track_table?.payload ?? null}
@@ -276,6 +279,7 @@ export function Shell({
     ),
     playlist: playlistView && (
       <ListPage
+        s={s}
         view={playlistView}
         liked={channels.liked?.payload ?? null}
         table={channels.track_table?.payload ?? null}
@@ -292,6 +296,7 @@ export function Shell({
     ),
     album: albumView && (
       <AlbumPage
+        s={s}
         id={albumView.id}
         album={channels.album?.payload.album ?? null}
         saved={channels.album?.payload.saved ?? false}
@@ -302,6 +307,7 @@ export function Shell({
     ),
     artist: artistView && (
       <ArtistPage
+        s={s}
         id={artistView.id}
         name={artistView.name}
         artist={channels.artist?.payload ?? null}
@@ -312,6 +318,7 @@ export function Shell({
     ),
     show: showView && (
       <PodcastPage
+        s={s}
         id={showView.id}
         name={showView.name}
         show={channels.show?.payload ?? null}
@@ -323,6 +330,7 @@ export function Shell({
     ),
     radio: radioView && (
       <RadioPage
+        s={s}
         id={radioView.id}
         name={radioView.name}
         table={channels.track_table?.payload ?? null}
@@ -337,6 +345,7 @@ export function Shell({
     ),
     recent: (
       <RecentlyPlayed
+        s={s}
         recent={channels.recently_played?.payload ?? null}
         available={spotify}
         playingUri={playingUri}
@@ -347,6 +356,7 @@ export function Shell({
     ),
     search: (
       <Search
+        s={s}
         search={channels.search?.payload ?? null}
         waiting={searchWaiting}
         source={channels.source?.payload ?? null}
@@ -359,6 +369,7 @@ export function Shell({
     ),
     lyrics: (
       <LyricsPage
+        s={s}
         item={playback?.item ?? null}
         lyrics={channels.lyrics?.payload ?? null}
         position={state.position}
@@ -369,6 +380,7 @@ export function Shell({
     ),
     session: (
       <Session
+        s={s}
         plays={channels.session?.payload ?? NO_PLAYS}
         item={playback?.item ?? null}
         position={state.position}
@@ -380,6 +392,7 @@ export function Shell({
     ),
     discover: (
       <Discover
+        s={s}
         discover={channels.discover?.payload ?? null}
         connected={state.connected}
         active={page === "discover"}
@@ -387,9 +400,10 @@ export function Shell({
         send={send}
       />
     ),
-    stats: <Stats stats={channels.stats?.payload ?? null} send={send} />,
+    stats: <Stats s={s} stats={channels.stats?.payload ?? null} send={send} />,
     party: (
       <Party
+        s={s}
         party={channels.party?.payload ?? null}
         connected={state.connected}
         item={playback?.item ?? null}
@@ -401,6 +415,7 @@ export function Shell({
     ),
     health: (
       <LibraryHealth
+        s={s}
         sync={channels.playlist_sync?.payload ?? null}
         send={send}
         onBack={() => show(goBack(history), false)}
@@ -408,7 +423,8 @@ export function Shell({
     ),
     settings: (
       <Settings
-        rows={channels.settings?.payload ?? null}
+        s={s}
+        rows={channels.settings?.payload.rows ?? null}
         update={channels.update?.payload ?? null}
         version={state.version}
         send={send}
@@ -557,6 +573,7 @@ export function Shell({
     <TrackActionsContext.Provider value={trackActions}>
       {mini && (
         <MiniPlayer
+          s={s}
           playback={playback}
           position={state.position}
           connected={state.connected}
@@ -567,6 +584,7 @@ export function Shell({
       {/* Hidden, not unmounted: the pages keep their cursors for the way back. */}
       <main className={panel ? "shell" : "shell no-right"} hidden={mini}>
         <TopBar
+          s={s}
           page={page}
           canBack={history.back.length > 0}
           canForward={history.forward.length > 0}
@@ -582,6 +600,7 @@ export function Shell({
           onUpdate={onUpdate}
         />
         <LibraryPanel
+          s={s}
           playlists={channels.library?.payload ?? null}
           artists={playlists?.followed_artists ?? null}
           albumSort={choice("behavior.default_sort_saved_albums")}
@@ -608,9 +627,10 @@ export function Shell({
           </div>
         </div>
         {panel && (
-          <aside className="right-panel" aria-label="Side panel">
+          <aside className="right-panel" aria-label={s.side_panel}>
             {panel === "queue" ? (
               <QueueDrawer
+                s={s}
                 queue={queue ?? null}
                 item={playback?.item ?? null}
                 send={send}
@@ -618,6 +638,7 @@ export function Shell({
               />
             ) : (
               <NowPlayingPanel
+                s={s}
                 playback={playback}
                 upNext={queued}
                 open={open}
@@ -628,6 +649,7 @@ export function Shell({
           </aside>
         )}
         <PlayerBar
+          s={s}
           playback={playback}
           position={state.position}
           connected={state.connected}
@@ -643,6 +665,7 @@ export function Shell({
         {room && (
           <div className="room-layer">
             <Room
+              s={s}
               item={playback?.item ?? null}
               position={state.position}
               connected={state.connected}
@@ -659,6 +682,7 @@ export function Shell({
         )}
         {overlay === "command" && (
           <CommandMode
+            s={s}
             search={channels.search?.payload ?? null}
             searchRev={channels.search?.rev ?? null}
             source={channels.source?.payload ?? null}
@@ -676,6 +700,7 @@ export function Shell({
       </main>
       {/* Outside the main view, so the mini player shows it too. */}
       <Toast
+        s={s}
         status={channels.status?.payload ?? null}
         route={channels.route?.payload ?? null}
         send={send}

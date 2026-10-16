@@ -451,6 +451,7 @@ mod tests {
 
   fn track(id: &str, name: &str) -> TrackInfo {
     TrackInfo {
+      generated_name: None,
       id: Some(id.to_string()),
       name: name.to_string(),
       uri: Some(format!("spotify:track:{id}")),

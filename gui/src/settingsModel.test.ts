@@ -47,6 +47,7 @@ describe("sections", () => {
         kind: "choice",
         value: "default",
         options: ["default", "name"],
+        labels: ["default", "name"],
       }),
     );
     const shown = sections([...sorts, seek], false);
@@ -62,6 +63,7 @@ describe("sections", () => {
       kind: "choice",
       value: "default",
       options: ["default"],
+      labels: ["Custom order"],
     });
     const music = row("behavior.local_music_path", "sources", {
       kind: "text",

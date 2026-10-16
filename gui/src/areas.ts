@@ -1,14 +1,18 @@
+import { EN, type GuiStrings } from "./i18n";
 import type { Page } from "./nav";
 
 /** The pages that digit keys open, in key order. */
-export const AREAS: { area: Page; label: string; key: string }[] = [
-  { area: "home", label: "Home", key: "1" },
-  { area: "search", label: "Search", key: "2" },
-  { area: "discover", label: "Discover", key: "3" },
-  { area: "session", label: "Session", key: "4" },
-  { area: "stats", label: "Stats", key: "5" },
-  { area: "party", label: "Party", key: "6" },
+export const areas = (
+  s: GuiStrings = EN,
+): { area: Page; label: string; key: string }[] => [
+  { area: "home", label: s.home, key: "1" },
+  { area: "search", label: s.search, key: "2" },
+  { area: "discover", label: s.discover, key: "3" },
+  { area: "session", label: s.session, key: "4" },
+  { area: "stats", label: s.stats, key: "5" },
+  { area: "party", label: s.party, key: "6" },
 ];
+export const AREAS = areas();
 
 export type ShellCommand =
   | { area: Page }

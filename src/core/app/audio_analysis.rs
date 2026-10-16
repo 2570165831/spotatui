@@ -172,6 +172,7 @@ pub fn section_at(analysis: &TrackAnalysis, position_ms: u32) -> Option<&Analysi
 }
 
 /// "F# minor", "C major", or "?" when no key was detected.
+#[cfg(test)]
 pub fn key_label(key: Option<u8>, minor: Option<bool>) -> String {
   let Some(name) = key.and_then(|key| PITCH_NAMES.get(usize::from(key))) else {
     return "?".to_string();

@@ -51,6 +51,7 @@ describe("trackMenu", () => {
   it("adds the track to the chosen playlist by URI", () => {
     const [add] = trackMenu(track(), false, [playlist])[0];
     expect(add.kind === "submenu" && add.entries[0]).toEqual({
+      id: "spotify:playlist:p1",
       label: "Mine",
       kind: "action",
       action: {
@@ -72,6 +73,7 @@ describe("trackMenu", () => {
   it("goes straight to a lone artist and lists several in a submenu", () => {
     const lone = track({ artist_refs: [{ id: "zedd", name: "Zedd" }] });
     expect(trackMenu(lone, false, [])[1][1]).toEqual({
+      id: "zedd",
       label: "Go to artist",
       kind: "open",
       view: { page: "artist", id: "zedd", name: "Zedd" },
@@ -123,6 +125,7 @@ describe("trackMenu in a list", () => {
       "Add to queue",
     ]);
     expect(edit[1]).toEqual({
+      id: "remove",
       label: "Remove from this playlist",
       kind: "action",
       action: remove,
@@ -131,6 +134,7 @@ describe("trackMenu in a list", () => {
 
   it("opens the song radio of the track by its id and name", () => {
     expect(trackMenu(track(), false, [])[1][0]).toEqual({
+      id: "radio",
       label: "Go to song radio",
       kind: "open",
       view: { page: "radio", id: "t1", name: "Clarity" },

@@ -93,6 +93,7 @@ pub fn apply_resolved(
 #[cfg(feature = "queue-download")]
 fn placeholder_track(uri: &str) -> TrackInfo {
   TrackInfo {
+    generated_name: None,
     uri: Some(uri.to_string()),
     name: uri.to_string(),
     artists: Vec::new(),
@@ -583,6 +584,7 @@ mod tests {
 
     fn track(uri: &str, name: &str) -> TrackInfo {
       TrackInfo {
+        generated_name: None,
         uri: Some(uri.to_string()),
         name: name.to_string(),
         artists: vec!["Artist".to_string()],

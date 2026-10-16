@@ -44,6 +44,9 @@ impl Default for App {
       artists: vec![],
       artist: None,
       user_config: UserConfig::new(),
+      strings: &crate::core::i18n::EN,
+      system_language: crate::core::i18n::Language::En,
+      localize_messages: true,
       runtime_state: RuntimeState::default(),
       state_path: None,
       recently_played: None,
@@ -309,6 +312,7 @@ impl App {
       RuntimeState::default(),
       None,
       spotify_session.is_some(),
+      crate::core::i18n::Language::En,
     )
   }
 
@@ -318,7 +322,13 @@ impl App {
     mut runtime_state: RuntimeState,
     state_path: Option<PathBuf>,
     spotify_connected: bool,
+    system_language: crate::core::i18n::Language,
   ) -> App {
+    let strings = user_config
+      .behavior
+      .language
+      .resolve(system_language)
+      .strings();
     // A saved Apple Music scope can outlive the build that offered it. Restore
     // only a source the current picker can select, keeping both mirrors in sync.
     let sources = Source::picker_sources();
@@ -377,6 +387,8 @@ impl App {
     App {
       io_tx: Some(io_tx),
       user_config,
+      strings,
+      system_language,
       runtime_state,
       state_path,
       spotify_connected,
@@ -411,7 +423,29 @@ mod tests {
       },
       None,
       false,
+      crate::core::i18n::Language::En,
     )
+  }
+
+  #[test]
+  fn fixtures_stay_english_beside_a_boot_using_chinese() {
+    use crate::core::i18n::Language;
+    for system in [Language::ZhHans, Language::ZhHant] {
+      let (tx, _rx) = std::sync::mpsc::channel();
+      let booted = App::new_with_state(
+        tx.clone(),
+        UserConfig::new(),
+        RuntimeState::default(),
+        None,
+        false,
+        system,
+      );
+      assert_eq!(booted.language(), system);
+      let fixture = App::new(tx, UserConfig::new(), None);
+      assert_eq!(fixture.language(), Language::En);
+      assert_eq!(fixture.strings().sidebar.library, "Library");
+      assert_eq!(App::default().language(), Language::En);
+    }
   }
 
   #[test]

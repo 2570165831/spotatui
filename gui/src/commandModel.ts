@@ -1,3 +1,4 @@
+import { deviceKind, EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { DeviceInfo } from "./bindings/DeviceInfo";
 import type { SearchPayload } from "./bindings/SearchPayload";
@@ -10,21 +11,24 @@ export type Verb =
   "search" | "play" | "queue" | "source" | "device" | "party" | "quit";
 export type Kind = "song" | "album" | "artist";
 
-export const COMMANDS: Record<Verb, { usage: string; what: string }> = {
-  search: { usage: "search <words>", what: "open Search with the words" },
+export const commands = (
+  s: GuiStrings = EN,
+): Record<Verb, { usage: string; what: string }> => ({
+  search: { usage: s.command_search_usage, what: s.command_search_what },
   play: {
-    usage: "play [song|album|artist] <name>",
-    what: "find it and play it",
+    usage: s.command_play_usage,
+    what: s.command_play_what,
   },
-  queue: { usage: "queue <song>", what: "add a song to the end of the queue" },
-  source: { usage: "source <name>", what: "browse another source" },
-  device: { usage: "device <name>", what: "play on another device" },
+  queue: { usage: s.command_queue_usage, what: s.command_queue_what },
+  source: { usage: s.command_source_usage, what: s.command_source_what },
+  device: { usage: s.command_device_usage, what: s.command_device_what },
   party: {
-    usage: "party start | join <code> <name> | leave",
-    what: "listening party",
+    usage: s.command_party_usage,
+    what: s.command_party_what,
   },
-  quit: { usage: "quit", what: "stop spotatui and its music" },
-};
+  quit: { usage: s.command_quit_usage, what: s.command_quit_what },
+});
+export const COMMANDS = commands();
 
 const VERBS = Object.keys(COMMANDS) as Verb[];
 const KINDS: Kind[] = ["song", "album", "artist"];
@@ -107,6 +111,7 @@ export function rowsFor(
   parsed: Parsed,
   search: SearchPayload | null,
   devices: DeviceInfo[],
+  s: GuiStrings = EN,
 ): Row[] {
   if (parsed.verb === "device") {
     const want = parsed.arg.toLowerCase();
@@ -116,7 +121,7 @@ export function rowsFor(
       .map((device) => ({
         kind: "device",
         title: device.name,
-        meta: device.is_active ? "playing here now" : device.kind,
+        meta: device.is_active ? s.playing_here : deviceKind(device.kind, s),
         uri: null,
         deviceId: device.id ?? undefined,
       }));
@@ -125,7 +130,10 @@ export function rowsFor(
   const songs: Row[] = search.tracks.map((track) => ({
     kind: "song",
     title: track.name,
-    meta: [track.artists.join(", "), track.album && `from ${track.album}`]
+    meta: [
+      track.artists.join(", "),
+      track.album && fmt(s.from_album, { album: track.album }),
+    ]
       .filter(Boolean)
       .join(" · "),
     uri: track.uri,
@@ -147,7 +155,7 @@ export function rowsFor(
   const artists: Row[] = search.artists.map((artist) => ({
     kind: "artist",
     title: artist.name,
-    meta: "artist",
+    meta: s.artist_meta,
     uri: artist.uri,
   }));
   if (parsed.kind === "album") return albums.slice(0, MAX_ROWS);

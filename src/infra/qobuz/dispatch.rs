@@ -44,8 +44,6 @@ use crate::infra::queue::{
   advance_index, apply_resolved, placeholder_uri, replay_file, snapshot_tracks,
 };
 
-const LOGIN_EXPIRED: &str = "Qobuz: login expired, press `d` and pick Qobuz to log in again";
-
 /// Whether a URI is owned by the Qobuz source.
 pub fn is_qobuz_uri(uri: &str) -> bool {
   uri.starts_with("qobuz:")
@@ -189,14 +187,25 @@ async fn build_source(
   let Some(token) = auth::current_token() else {
     match when_logged_out {
       WhenLoggedOut::Login => app.lock().await.dispatch(IoEvent::QobuzLogin),
-      WhenLoggedOut::Message => set_error(app, LOGIN_EXPIRED.to_string()).await,
+      WhenLoggedOut::Message => {
+        set_error(
+          app,
+          crate::infra::app_strings(app)
+            .await
+            .status
+            .infra
+            .qobuz_login_expired
+            .to_string(),
+        )
+        .await
+      }
     }
     return None;
   };
   match constants(app).await {
     Ok(c) => Some(QobuzSource::new(c.app_id, c.app_secret, token)),
     Err(e) => {
-      report(app, "web player constants", e).await;
+      report(app, QobuzStep::Constants, e).await;
       None
     }
   }
@@ -210,7 +219,7 @@ pub(crate) async fn build_playback_source(app: &Arc<Mutex<App>>) -> Option<Qobuz
 
 /// A source for the playlist sync; the caller reports the logged-out case itself.
 pub(crate) async fn build_sync_source(app: &Arc<Mutex<App>>) -> Result<QobuzSource> {
-  let token = auth::current_token().context("Qobuz is not logged in")?;
+  let token = sync_token(auth::current_token())?;
   let constants = constants(app).await.context("Qobuz web player constants")?;
   Ok(QobuzSource::new(
     constants.app_id,
@@ -219,19 +228,58 @@ pub(crate) async fn build_sync_source(app: &Arc<Mutex<App>>) -> Result<QobuzSour
   ))
 }
 
+fn sync_token(token: Option<String>) -> Result<String> {
+  token.ok_or_else(|| crate::core::playlist_sync::SyncReason::QobuzNotLoggedIn.into())
+}
+
 /// Report a failed call as one status message; a 401 also clears the token.
-async fn report(app: &Arc<Mutex<App>>, step: &str, err: anyhow::Error) {
+#[derive(Clone, Copy)]
+enum QobuzStep {
+  Constants,
+  Login,
+  Library,
+  Tracks,
+  Search,
+  Stream,
+}
+impl QobuzStep {
+  fn label(self, strings: &crate::core::i18n::status_infra::InfraStatusStrings) -> &'static str {
+    match self {
+      Self::Constants => strings.qobuz_step_constants,
+      Self::Login => strings.qobuz_step_login,
+      Self::Library => strings.qobuz_step_library,
+      Self::Tracks => strings.qobuz_step_tracks,
+      Self::Search => strings.qobuz_step_search,
+      Self::Stream => strings.qobuz_step_stream,
+    }
+  }
+}
+impl std::fmt::Display for QobuzStep {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(self.label(&crate::core::i18n::status_infra::EN))
+  }
+}
+
+async fn report(app: &Arc<Mutex<App>>, step: QobuzStep, err: anyhow::Error) {
   let mut guard = app.lock().await;
   report_locked(&mut guard, step, err);
 }
 
-fn report_locked(app: &mut App, step: &str, err: anyhow::Error) {
+fn report_locked(app: &mut App, step: QobuzStep, err: anyhow::Error) {
   if err.downcast_ref::<Unauthorized>().is_some() {
     auth::set_token(None);
-    app.set_error_status_message(LOGIN_EXPIRED, 8);
+    let strings = app.strings();
+    app.set_error_status_message(strings.status.infra.qobuz_login_expired, 8);
   } else {
     log::warn!("[qobuz] {step}: {err:#}");
-    app.set_status_message(format!("Qobuz: {step}: {err:#}"), 6);
+    let strings = app.strings();
+    app.set_status_message(
+      strings
+        .status
+        .infra
+        .qobuz_operation_failed(step.label(&strings.status.infra), &format!("{err:#}")),
+      6,
+    );
   }
 }
 
@@ -249,14 +297,23 @@ static LOGIN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 /// Start the in-TUI browser login on a detached task so the pump keeps running.
 async fn begin_login(app: &Arc<Mutex<App>>) {
   if LOGIN_IN_PROGRESS.swap(true, Ordering::SeqCst) {
-    set_error(app, "Qobuz login already in progress...".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .qobuz_login_busy
+        .to_string(),
+    )
+    .await;
     return;
   }
   let constants = match constants(app).await {
     Ok(c) => c,
     Err(e) => {
       LOGIN_IN_PROGRESS.store(false, Ordering::SeqCst);
-      report(app, "web player constants", e).await;
+      report(app, QobuzStep::Constants, e).await;
       return;
     }
   };
@@ -264,7 +321,7 @@ async fn begin_login(app: &Arc<Mutex<App>>) {
     Ok(a) => a,
     Err(e) => {
       LOGIN_IN_PROGRESS.store(false, Ordering::SeqCst);
-      report(app, "login", e).await;
+      report(app, QobuzStep::Login, e).await;
       return;
     }
   };
@@ -273,12 +330,15 @@ async fn begin_login(app: &Arc<Mutex<App>>) {
     let mut guard = app.lock().await;
     if let Err(e) = open::that_detached(&url) {
       log::warn!("[qobuz] failed to open browser automatically: {e}");
-      guard.set_status_message(
-        format!("Open this URL in your browser to log in to Qobuz: {url}"),
-        30,
-      );
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.qobuz_login_url(&url), 30)
+      };
     } else {
-      guard.set_status_message("Qobuz: open the browser window to log in", 12);
+      {
+        let strings = guard.strings();
+        guard.set_status_message(strings.status.infra.qobuz_browser_login, 12)
+      };
     }
   }
   let io_tx = app.lock().await.io_tx_clone();
@@ -289,17 +349,24 @@ async fn begin_login(app: &Arc<Mutex<App>>) {
         if let Err(e) = auth::save_login(&credentials) {
           log::warn!("[qobuz] cannot save credentials: {e:#}");
         }
-        app.lock().await.set_status_message("Qobuz: logged in", 4);
+        {
+          let mut guard = app.lock().await;
+          let message = guard.strings().status.infra.qobuz_logged_in;
+          guard.set_status_message(message, 4);
+        };
         if let Some(tx) = io_tx {
           let _ = tx.send(IoEvent::GetQobuzPlaylists);
         }
       }
       Err(e) => {
         log::warn!("[qobuz] login failed: {e:#}");
-        app
-          .lock()
-          .await
-          .set_status_message(format!("Qobuz login failed: {e:#}"), 8);
+        let mut guard = app.lock().await;
+        let message = guard
+          .strings()
+          .status
+          .infra
+          .qobuz_login_failed(&format!("{e:#}"));
+        guard.set_status_message(message, 8);
       }
     }
     LOGIN_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -317,7 +384,7 @@ async fn load_qobuz_playlists(app: &Arc<Mutex<App>>) {
   };
   match source.playlists().await {
     Ok(playlists) => *app.lock().await.qobuz_playlists_mut() = playlists,
-    Err(e) => report(app, "library", e).await,
+    Err(e) => report(app, QobuzStep::Library, e).await,
   }
 }
 
@@ -332,7 +399,7 @@ async fn load_qobuz_tracks(app: &Arc<Mutex<App>>, playlist_uri: &str) {
       let mut app = app.lock().await;
       app.set_source_track_table(playlist_uri, tracks, TrackTableContext::QobuzPlaylist);
     }
-    Err(e) => report(app, "tracks", e).await,
+    Err(e) => report(app, QobuzStep::Tracks, e).await,
   }
 }
 
@@ -346,7 +413,7 @@ async fn run_qobuz_search(app: &Arc<Mutex<App>>, query: &str) {
       .lock()
       .await
       .show_source_search_tracks(query, results.tracks),
-    Err(e) => report(app, "search", e).await,
+    Err(e) => report(app, QobuzStep::Search, e).await,
   }
 }
 
@@ -387,11 +454,27 @@ async fn acquire_player(app: &Arc<Mutex<App>>) -> Option<Arc<LocalPlayer>> {
   match tokio::task::spawn_blocking(LocalPlayer::new).await {
     Ok(Ok(p)) => Some(Arc::new(p)),
     Ok(Err(e)) => {
-      set_error(app, format!("No audio output for Qobuz playback: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .qobuz_audio_unavailable(&e.to_string()),
+      )
+      .await;
       None
     }
     Err(e) => {
-      set_error(app, format!("Audio output init failed: {e}")).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .audio_init_failed(&e.to_string()),
+      )
+      .await;
       None
     }
   }
@@ -483,7 +566,7 @@ fn spawn_fetch(
       Ok((tmp, delivered, prepared)) => {
         commit_fetch(&app, fetch_id, tmp, delivered, prepared).await
       }
-      Err(e) => fail_fetch(&app, fetch_id, "stream", e).await,
+      Err(e) => fail_fetch(&app, fetch_id, QobuzStep::Stream, e).await,
     }
   });
   session.fetch = Some(task.abort_handle());
@@ -528,7 +611,7 @@ fn spawn_resolve(app: &Arc<Mutex<App>>, session: &QobuzPlaybackState) {
 /// A failed fetch: tear the session down only if it still waits for this
 /// fetch, and report the error. Under the native queue the session stays for
 /// the queue's resume, which fetches again.
-async fn fail_fetch(app: &Arc<Mutex<App>>, fetch_id: u64, step: &str, err: anyhow::Error) {
+async fn fail_fetch(app: &Arc<Mutex<App>>, fetch_id: u64, step: QobuzStep, err: anyhow::Error) {
   let mut guard = app.lock().await;
   if guard
     .qobuz_playback
@@ -682,14 +765,32 @@ pub(crate) async fn start_qobuz_queue(
     snapshot_tracks(&guard.track_table.tracks, search, uris)
   };
   if tracks.is_empty() {
-    set_error(app, "No Qobuz tracks to play".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .qobuz_no_tracks
+        .to_string(),
+    )
+    .await;
     return;
   }
   let index = start_idx.min(tracks.len() - 1);
   let track_id = match tracks[index].uri.as_deref().map(track_id_from_uri) {
     Some(Ok(id)) => id.to_string(),
     _ => {
-      set_error(app, "Invalid Qobuz track URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .qobuz_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -791,7 +892,16 @@ async fn replay_current(app: &Arc<Mutex<App>>) -> bool {
     }
   } else {
     teardown_qobuz(app).await;
-    set_error(app, "Cannot replay Qobuz track".to_string()).await;
+    set_error(
+      app,
+      crate::infra::app_strings(app)
+        .await
+        .status
+        .infra
+        .qobuz_replay_failed
+        .to_string(),
+    )
+    .await;
   }
   true
 }
@@ -815,7 +925,16 @@ pub(crate) async fn play_index(app: &Arc<Mutex<App>>, target: usize, resume: Opt
     _ => {
       drop(guard);
       teardown_qobuz(app).await;
-      set_error(app, "Invalid Qobuz track URI".to_string()).await;
+      set_error(
+        app,
+        crate::infra::app_strings(app)
+          .await
+          .status
+          .infra
+          .qobuz_uri_invalid
+          .to_string(),
+      )
+      .await;
       return;
     }
   };
@@ -866,5 +985,29 @@ mod tests {
   fn qobuz_uris_are_recognised_by_scheme() {
     assert!(is_qobuz_uri("qobuz:track:1"));
     assert!(!is_qobuz_uri("subsonic:track:1"));
+  }
+}
+
+#[cfg(test)]
+mod sync_error_localization_tests {
+  use super::*;
+  #[test]
+  fn a_missing_sync_login_is_structured_and_keeps_the_english_diagnostic() {
+    use crate::core::playlist_sync::SyncReason;
+    let error = sync_token(None).unwrap_err();
+    assert_eq!(error.to_string(), "Qobuz is not logged in");
+    let reason = SyncReason::from_error(&error);
+    assert_eq!(reason, SyncReason::QobuzNotLoggedIn);
+    for strings in [
+      &crate::core::i18n::EN,
+      &crate::core::i18n::ZH_HANS,
+      &crate::core::i18n::ZH_HANT,
+    ] {
+      assert_eq!(
+        reason.render(strings),
+        strings.status.infra.sync_qobuz_not_logged_in
+      );
+    }
+    assert_eq!(sync_token(Some("{token}".into())).unwrap(), "{token}");
   }
 }

@@ -1,6 +1,7 @@
 //! Pushes from the tick loop to every page socket, and page messages back.
 
 use crate::core::app::{App, DisplayRevisions};
+use crate::core::i18n::Language;
 use crate::gui::onboarding::BrowserOnboarding;
 use crate::gui::protocol::{self, ClientMessage, ServerMessage};
 use futures::{SinkExt, StreamExt};
@@ -30,10 +31,22 @@ pub(crate) struct Link {
   window: bool,
 }
 
+impl Link {
+  /// Boot's language is available even when the page assets are missing.
+  pub(crate) async fn strings(&self) -> &'static crate::core::i18n::Strings {
+    let app = self.app.borrow().clone();
+    match app {
+      Some(app) => app.lock().await.strings(),
+      None => self.onboarding.language().strings(),
+    }
+  }
+}
+
 /// The tick loop's side of the bridge.
 pub(crate) struct Publisher {
   pushes: broadcast::Sender<String>,
   sent: DisplayRevisions,
+  language: Language,
   last_tick: Instant,
   /// When the last page went away; unset while one is connected or before the first check.
   alone_since: Option<Instant>,
@@ -50,6 +63,7 @@ pub(crate) fn channel(
   let publisher = Publisher {
     pushes: pushes.clone(),
     sent: DisplayRevisions::default(),
+    language: onboarding.language(),
     last_tick: now,
     alone_since: None,
   };
@@ -69,10 +83,11 @@ pub(crate) fn channel(
 impl Publisher {
   /// Broadcast every channel that changed since the last call.
   pub(crate) fn publish(&mut self, app: &App) {
-    for message in protocol::diff(&self.sent, app) {
+    for message in protocol::diff(&self.sent, app, self.language) {
       let _ = self.pushes.send(protocol::encode(&message));
     }
     self.sent = app.display_revisions();
+    self.language = app.language();
   }
 
   /// Push the position at most every 250 ms, whatever the tick rate.
@@ -93,10 +108,10 @@ impl Publisher {
   }
 }
 
-async fn resync(app: &SharedApp) -> Vec<ServerMessage> {
+async fn resync(app: &SharedApp, language: Option<Language>) -> Vec<ServerMessage> {
   let app = app.borrow().clone();
   match app {
-    Some(app) => protocol::resync(&*app.lock().await),
+    Some(app) => protocol::resync(&*app.lock().await, language),
     None => Vec::new(),
   }
 }
@@ -113,15 +128,18 @@ where
   let mut views = link.onboarding.subscribe();
   let mut apps = link.app.clone();
   let app = apps.borrow_and_update().clone();
-  let revisions = match app {
-    Some(app) => app.lock().await.display_revisions(),
-    None => DisplayRevisions::default(),
+  let (revisions, language) = match app {
+    Some(app) => {
+      let app = app.lock().await;
+      (app.display_revisions(), app.language())
+    }
+    None => (DisplayRevisions::default(), link.onboarding.language()),
   };
   let mut outgoing = vec![
-    protocol::hello(revisions, token, link.window),
+    protocol::hello(revisions, token, link.window, language),
     protocol::onboarding(views.borrow_and_update().clone()),
   ];
-  outgoing.extend(resync(&apps).await);
+  outgoing.extend(resync(&apps, Some(language)).await);
   loop {
     for message in outgoing.drain(..) {
       if sink
@@ -142,7 +160,7 @@ where
         Err(RecvError::Lagged(_)) => {
           // Stale ticks carry no revision; drop the backlog and start over.
           pushes = pushes.resubscribe();
-          outgoing = resync(&apps).await;
+          outgoing = resync(&apps, None).await;
         }
         Err(RecvError::Closed) => return,
       },
@@ -151,7 +169,7 @@ where
       }
       Ok(()) = apps.changed() => {
         apps.borrow_and_update();
-        outgoing = resync(&apps).await;
+        outgoing = resync(&apps, Some(language)).await;
       }
       incoming = stream.next() => match incoming {
         Some(Ok(WsMessage::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {

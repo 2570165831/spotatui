@@ -39,7 +39,7 @@ impl App {
   #[cfg_attr(not(any(feature = "mcp-server", feature = "ai-dj")), allow(dead_code))]
   pub fn extend_native_queue_from_dj(&mut self, tracks: Vec<TrackInfo>) -> usize {
     if self.apple_music_owns_playback() {
-      self.set_status_message(crate::core::queue::APPLE_MUSIC_QUEUE_UNSUPPORTED, 4);
+      self.set_status_message(self.strings().status.app.music_cannot_queue, 4);
       return 0;
     }
     let mut accepted = 0usize;
@@ -150,7 +150,7 @@ impl App {
     use crate::infra::dj::{AskDjRequest, DjLine, TurnKind};
     // Checked before the trim so a blank ask during a turn still reports busy.
     if self.dj.thinking {
-      self.set_status_message("The DJ is still working on the last request", 3);
+      self.set_status_message(self.strings().status.app.dj_previous_request, 3);
       return;
     }
     let text = text.trim();
@@ -216,12 +216,9 @@ impl App {
       // forever. Said out loud, or auto-queue just looks broken on that device.
       let external = self.spotify_external_device_active();
       if external {
-        self.set_status_message(
-          "DJ auto-queue on — waits while another Spotify device is playing",
-          6,
-        );
+        self.set_status_message(self.strings().status.app.dj_auto_queue_wait, 6);
       } else {
-        self.set_status_message("DJ auto-queue on", 4);
+        self.set_status_message(self.strings().status.app.dj_auto_queue_on, 4);
       }
       if crate::infra::network::dj::wants_top_up(self.native_queue.len(), &self.dj, external) {
         let turn_seq = self.dj.begin_turn(TurnKind::Refill);
@@ -235,7 +232,7 @@ impl App {
         // step lands.
         self.dj.finish_turn(self.dj.turn_seq);
       }
-      self.set_status_message("DJ auto-queue off", 4);
+      self.set_status_message(self.strings().status.app.dj_auto_queue_off, 4);
     }
   }
 
@@ -245,10 +242,10 @@ impl App {
     self.dj.avoid_library = !self.dj.avoid_library;
     self.dj.bump_revision();
     if self.dj.avoid_library {
-      self.set_status_message("DJ: only tracks you don't already have", 4);
+      self.set_status_message(self.strings().status.app.dj_fresh_only, 4);
       self.request_dj_library_index();
     } else {
-      self.set_status_message("DJ: recommending from everything", 4);
+      self.set_status_message(self.strings().status.app.dj_everything, 4);
     }
   }
 
@@ -257,7 +254,7 @@ impl App {
   pub(crate) fn dj_vibe_shift(&mut self) {
     use crate::infra::dj::{AskDjRequest, DjLine, TurnKind, MAX_BATCH};
     if self.dj.thinking {
-      self.set_status_message("The DJ is already working on something", 3);
+      self.set_status_message(self.strings().status.app.dj_busy, 3);
       return;
     }
     let generation = self.dj.bump_generation();
@@ -265,9 +262,9 @@ impl App {
     let turn_seq = self.dj.begin_turn(TurnKind::Ask);
     self.dj.scroll = 0;
     self.dj.push_line(DjLine::system(if dropped > 0 {
-      format!("Shifting the vibe (dropped {dropped} queued track(s))")
+      self.strings().status.app.dj_shift_dropped(dropped)
     } else {
-      "Shifting the vibe".to_string()
+      self.strings().status.app.dj_shifting.to_string()
     }));
     // A steer rather than a transcript line: the listener never typed this, and the
     // system line above already tells them what happened.
@@ -302,7 +299,7 @@ impl App {
   pub(crate) fn dismiss_dj_setup(&mut self) {
     self.dj.close_setup();
     self.user_config.behavior.dj_configured = Some(true);
-    self.persist_dj_setup("keeping the current DJ brain");
+    self.persist_dj_setup(self.strings().status.app.dj_keep_brain);
   }
 
   /// Apply the finished picker to the config, close it, and persist the choice.
@@ -318,18 +315,19 @@ impl App {
     self.dj.close_setup();
     // A batch already in flight came from the backend the user just replaced.
     self.dj.bump_generation();
-    self
-      .dj
-      .push_line(DjLine::system(format!("DJ brain: {}", choice.describe())));
+    self.dj.push_line(DjLine::system(
+      self.strings().status.app.dj_brain(&choice.describe()),
+    ));
     // The picker is already closed by the time this shows, so the "not ready"
     // case repeats what to do about it rather than pointing at a hidden row.
     let message = if choice.ready {
-      format!("DJ brain: {}", choice.describe())
+      self.strings().status.app.dj_brain(&choice.describe())
     } else {
-      format!(
-        "DJ brain: {} (not usable yet: install it, or set its API key)",
-        choice.describe()
-      )
+      self
+        .strings()
+        .status
+        .app
+        .dj_brain_not_ready(&choice.describe())
     };
     self.persist_dj_setup(&message);
   }
@@ -340,7 +338,7 @@ impl App {
   #[cfg(feature = "ai-dj")]
   fn persist_dj_setup(&mut self, ok_message: &str) {
     if let Err(e) = self.user_config.save_config() {
-      self.set_error_status_message(format!("DJ: could not save that choice: {e}"), 8);
+      self.set_error_status_message(self.strings().status.app.dj_save_failed(&e.to_string()), 8);
       return;
     }
     self.set_status_message(ok_message.to_string(), 5);

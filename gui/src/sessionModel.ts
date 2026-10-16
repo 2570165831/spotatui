@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt } from "./i18n";
 import type { Action } from "./bindings/Action";
 import type { SessionPlay } from "./bindings/SessionPlay";
 import type { Source } from "./bindings/Source";
@@ -105,17 +106,25 @@ export function replayRun(plays: SessionPlay[], index: number): Action | null {
 }
 
 /** "since 19:40 · 31 songs · 2 sources"; the playing song counts as a source. */
-export function headline(plays: SessionPlay[], nowUri: string | null): string {
+export function headline(
+  plays: SessionPlay[],
+  nowUri: string | null,
+  s: GuiStrings = EN,
+): string {
   const sources = new Set(
     [...plays.map((play) => play.uri), nowUri]
       .map(sourceOf)
       .filter((source) => source !== null),
   );
   return [
-    plays[0] && `since ${timeOfDay(plays[0].started_at_ms)}`,
-    `${plays.length} ${plays.length === 1 ? "song" : "songs"}`,
+    plays[0] && fmt(s.since_time, { time: timeOfDay(plays[0].started_at_ms) }),
+    fmt(plays.length === 1 ? s.one_song_count : s.songs_count, {
+      count: plays.length,
+    }),
     sources.size > 0 &&
-      `${sources.size} ${sources.size === 1 ? "source" : "sources"}`,
+      fmt(sources.size === 1 ? s.one_source : s.sources_count, {
+        count: sources.size,
+      }),
   ]
     .filter(Boolean)
     .join(" · ");

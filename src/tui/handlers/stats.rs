@@ -62,7 +62,7 @@ pub fn handler(key: Key, app: &mut App) {
             .as_ref()
             .is_some_and(|stats| !stats.top_tracks.is_empty());
           if has_tracks {
-            app.set_status_message("This entry can't be played directly".to_string(), 4);
+            app.set_status_message(app.strings().status.app.entry_not_playable.to_string(), 4);
           }
         }
       }

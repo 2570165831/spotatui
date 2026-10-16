@@ -47,9 +47,9 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   }
   if items.is_empty() {
     let message = if app.discover_loading() {
-      "Loading Made For You…"
+      app.strings().screens.made_for_you_loading
     } else {
-      "Nothing here yet."
+      app.strings().screens.discover_empty
     };
     items.push(ListItem::new(Span::styled(
       message,
@@ -58,9 +58,9 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   }
 
   let title = if app.discover_loading() {
-    "Discover [Loading...]"
+    app.strings().screens.discover_loading_title
   } else {
-    "Discover"
+    app.strings().screens.discover
   };
   let mut state = ListState::default();
   state.select(selected_row);
@@ -82,11 +82,11 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let label = |text: &'static str| Span::styled(text, Style::default().fg(theme.text.into()));
   let mut info_lines = vec![Line::from(vec![
     key("Enter "),
-    label("Open"),
+    label(app.strings().screens.discover_open),
     key("   e "),
-    label("Play"),
+    label(app.strings().screens.discover_play),
     key("   w "),
-    label("Save to library"),
+    label(app.strings().screens.discover_save),
   ])];
   if let Some(description) = app
     .discover_playlist(app.view.discover_selected_index)
@@ -103,7 +103,7 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
-          "Made For You",
+          app.strings().screens.made_for_you,
           Style::default().fg(theme.inactive.into()),
         ))
         .border_style(Style::default().fg(theme.inactive.into())),
@@ -130,6 +130,47 @@ mod tests {
       .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
       .collect::<Vec<_>>()
       .join("\n")
+  }
+
+  #[test]
+  fn made_for_you_keeps_external_names_and_renders_at_narrow_cell_widths() {
+    use crate::core::i18n::Language;
+    let mut app = App::default();
+    app.push_navigation_stack(RouteId::Discover, ActiveBlock::Discover);
+    let mut shelves = discover_shelves();
+    shelves[0].title = "中文栏目 {title}".to_string();
+    shelves[0].playlists[0].name = "每日精选 {name}".to_string();
+    shelves[0].playlists[0].description = Some("来自用户的说明 {description}".to_string());
+    app.end_discover_fetch(Some(shelves));
+    for language in [Language::En, Language::ZhHans, Language::ZhHant] {
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      for width in [1, 2, 24, 40, 80] {
+        let mut terminal = Terminal::new(TestBackend::new(width, 18)).unwrap();
+        terminal.draw(|f| draw_discover(f, &app, f.area())).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.area.width, width);
+        use unicode_width::UnicodeWidthStr;
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+          let mut x = 0;
+          while x < width {
+            let symbol = buffer.cell((x, y)).unwrap().symbol();
+            let cells = symbol.width().max(1) as u16;
+            assert!(x + cells <= width, "a wide glyph must fit within the row");
+            text.push_str(symbol);
+            x += cells;
+          }
+          text.push('\n');
+        }
+        if width == 80 {
+          assert!(text.contains("中文栏目 {title}"));
+          assert!(text.contains("每日精选 {name}"));
+          assert!(text.contains("来自用户的说明 {description}"));
+          assert!(text.contains(app.strings().screens.made_for_you));
+        }
+      }
+    }
   }
 
   #[test]

@@ -34,6 +34,7 @@ pub struct LocalPlaybackState {
   /// Index into [`queue`](Self::queue) of the currently playing track.
   pub index: usize,
   pub name: String,
+  pub generated_name: Option<crate::core::plugin_api::GeneratedTrackName>,
   /// Display string of the joined artist names.
   pub artists: String,
   pub album: String,
@@ -73,6 +74,14 @@ pub struct LocalPlaybackState {
 }
 
 impl LocalPlaybackState {
+  pub fn display_name<'a>(&'a self, strings: &crate::core::i18n::Strings) -> &'a str {
+    crate::core::plugin_api::GeneratedTrackName::display_name(
+      &self.name,
+      self.generated_name,
+      strings,
+    )
+  }
+
   /// Turn in-place shuffle on or off for this session — see
   /// [`toggle_shuffle`](crate::infra::queue::toggle_shuffle) for the shared
   /// semantics (current track stays playing at the front; un-shuffle restores
@@ -210,6 +219,7 @@ impl MediaSource for LocalSource {
     let mut playlists: Vec<PlaylistInfo> = dirs
       .into_iter()
       .map(|(path, track_count)| PlaylistInfo {
+        generated_name: None,
         name: relative_display_name(&self.root, &path),
         uri: path_to_file_uri(&path),
         owner: "local".to_string(),
@@ -235,8 +245,13 @@ impl MediaSource for LocalSource {
       playlists.insert(
         0,
         PlaylistInfo {
+          generated_name: Some(crate::core::plugin_api::GeneratedPlaylistName::LocalRoot),
           uri: path_to_file_uri(&self.root),
-          name: "(root)".to_string(),
+          name: crate::core::i18n::EN
+            .status
+            .infra
+            .local_root_folder
+            .to_string(),
           owner: "local".to_string(),
           track_count: root_audio_count,
           id: None,
@@ -366,10 +381,12 @@ fn track_info_from_path(path: &Path) -> TrackInfo {
   let uri = path_to_file_uri(path);
 
   // Default fallback name: the filename without extension.
-  let fallback_name = path
-    .file_stem()
-    .and_then(|s| s.to_str())
-    .unwrap_or("Unknown Track")
+  let filename = path.file_stem().and_then(|s| s.to_str());
+  let mut generated_name = filename
+    .is_none()
+    .then_some(crate::core::plugin_api::GeneratedTrackName::LocalUnknown);
+  let fallback_name = filename
+    .unwrap_or(crate::core::i18n::EN.status.infra.local_unknown_track)
     .to_string();
 
   // Try to read tags; if lofty fails, return minimal metadata.
@@ -377,6 +394,7 @@ fn track_info_from_path(path: &Path) -> TrackInfo {
     Ok(t) => t,
     Err(_) => {
       return TrackInfo {
+        generated_name,
         uri: Some(uri),
         name: fallback_name,
         artists: Vec::new(),
@@ -404,7 +422,13 @@ fn track_info_from_path(path: &Path) -> TrackInfo {
   let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
   let (name, artist_name, album, track_number, release_date) = if let Some(t) = tag {
-    let name = t.title().map(|s| s.to_string()).unwrap_or(fallback_name);
+    let name = t
+      .title()
+      .map(|s| {
+        generated_name = None;
+        s.to_string()
+      })
+      .unwrap_or(fallback_name);
     let artist = t.artist().map(|s| s.to_string()).unwrap_or_default();
     let album = t.album().map(|s| s.to_string()).unwrap_or_default();
     let track_number = t.track().unwrap_or(0);
@@ -434,6 +458,7 @@ fn track_info_from_path(path: &Path) -> TrackInfo {
     .collect();
 
   TrackInfo {
+    generated_name,
     uri: Some(uri),
     name,
     artists,
@@ -657,6 +682,54 @@ fn collect_audio_dirs(
 mod tests {
   use super::*;
   use std::io::Write;
+
+  #[test]
+  fn generated_local_labels_do_not_rewrite_user_file_or_folder_names() {
+    use crate::core::i18n::{EN, ZH_HANS, ZH_HANT};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("(root)")).unwrap();
+    std::fs::File::create(root.join("Unknown Track.mp3")).unwrap();
+    std::fs::File::create(root.join("(root)/other.mp3")).unwrap();
+
+    let cached = futures::executor::block_on(LocalSource::new(root).playlists()).unwrap();
+    for (strings, root_label, unknown_track) in [
+      (&EN, "(root)", "Unknown Track"),
+      (
+        &ZH_HANS,
+        ZH_HANS.status.infra.local_root_folder,
+        ZH_HANS.status.infra.local_unknown_track,
+      ),
+      (
+        &ZH_HANT,
+        ZH_HANT.status.infra.local_root_folder,
+        ZH_HANT.status.infra.local_unknown_track,
+      ),
+    ] {
+      let source = LocalSource::new(root);
+      let playlists = futures::executor::block_on(source.playlists()).unwrap();
+      assert_eq!(playlists[0].display_name(strings), root_label);
+      assert_eq!(cached[0].display_name(strings), root_label);
+      assert_eq!(cached[1].display_name(strings), "(root)");
+      assert_eq!(playlists[0].uri, path_to_file_uri(root));
+      assert_eq!(playlists[1].name, "(root)");
+      assert_eq!(playlists[1].uri, path_to_file_uri(&root.join("(root)")));
+
+      let tracks = futures::executor::block_on(source.tracks(&playlists[0].uri)).unwrap();
+      assert_eq!(tracks[0].name, "Unknown Track");
+      assert_eq!(
+        track_info_from_path(Path::new("")).display_name(strings),
+        unknown_track
+      );
+    }
+    let source = LocalSource::new(root);
+    assert_eq!(
+      futures::executor::block_on(source.playlists()).unwrap()[0].name,
+      "(root)"
+    );
+    assert_eq!(track_info_from_path(Path::new("")).name, "Unknown Track");
+  }
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -1225,5 +1298,37 @@ mod tests {
     let queue = vec!["x".to_string(), "y".to_string()];
     assert_eq!(queue.get(1).map(String::as_str), Some("y"));
     assert_eq!(queue.get(5).map(String::as_str), None);
+  }
+
+  #[test]
+  fn a_generated_track_title_survives_reload_and_follows_language_without_renaming_user_titles() {
+    use crate::core::i18n::Strings;
+    let alternate = Strings {
+      status: crate::core::i18n::StatusStrings {
+        infra: crate::core::i18n::status_infra::InfraStatusStrings {
+          local_unknown_track: "alternate generated title",
+          ..crate::core::i18n::EN.status.infra
+        },
+        ..crate::core::i18n::EN.status
+      },
+      ..crate::core::i18n::EN
+    };
+    let cached = track_info_from_path(Path::new(""));
+    let serialized = serde_json::to_string(&cached).unwrap();
+    let restored: TrackInfo = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(
+      restored.display_name(&crate::core::i18n::EN),
+      "Unknown Track"
+    );
+    assert_eq!(
+      restored.display_name(&alternate),
+      "alternate generated title"
+    );
+    let user = track_info_from_path(Path::new("Unknown Track.mp3"));
+    assert_eq!(user.generated_name, None);
+    assert_eq!(user.display_name(&alternate), "Unknown Track");
+    assert!(!serde_json::to_string(&user)
+      .unwrap()
+      .contains("generated_name"));
   }
 }

@@ -1,5 +1,5 @@
 use crate::core::app::{ActiveBlock, App};
-use crate::infra::history::{count_label, format_duration, period_label, RankedEntry, RecapPeriod};
+use crate::infra::history::{format_duration_with, period_label_with, RankedEntry, RecapPeriod};
 use ratatui::{
   layout::{Constraint, Layout, Rect},
   style::{Modifier, Style},
@@ -31,7 +31,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // Period tabs
   let titles: Vec<Line> = RecapPeriod::ALL_PERIODS
     .iter()
-    .map(|period| Line::from(period_label(*period)))
+    .map(|period| Line::from(period_label_with(*period, app.strings())))
     .collect();
   let selected = RecapPeriod::ALL_PERIODS
     .iter()
@@ -42,7 +42,10 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .block(
       Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled("Stats", get_color(highlight_state, theme)))
+        .title(Span::styled(
+          app.strings().screens.stats,
+          get_color(highlight_state, theme),
+        ))
         .border_style(get_color(highlight_state, theme)),
     )
     .style(Style::default().fg(theme.text.into()))
@@ -57,38 +60,36 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let mut summary_spans: Vec<Span> = Vec::new();
   if let Some(streaks) = &app.listening_streaks {
     summary_spans.push(Span::styled(
-      format!("{}-day streak", streaks.current_days),
+      app.strings().screens.day_streak(streaks.current_days),
       Style::default()
         .fg(theme.active.into())
         .add_modifier(app.user_config.behavior.emphasis(Modifier::BOLD)),
     ));
     summary_spans.push(Span::styled(
-      format!(
-        " (best {}) · {} today",
+      app.strings().screens.streak_best_today(
         streaks.longest_days,
-        format_duration(streaks.today_ms)
+        &format_duration_with(streaks.today_ms, app.strings()),
       ),
       Style::default().fg(theme.text.into()),
     ));
   }
   if app.stats_loading() {
     summary_spans.push(Span::styled(
-      "  [Loading...]",
+      app.strings().screens.stats_loading,
       Style::default().fg(theme.hint.into()),
     ));
   } else if let Some(stats) = &app.stats_data {
     summary_spans.push(Span::styled(
-      format!(
-        "  {} · {} listened",
-        count_label(stats.total_plays as u64, "play", "plays"),
-        format_duration(stats.total_time_ms)
+      app.strings().screens.stats_totals(
+        stats.total_plays as u64,
+        &format_duration_with(stats.total_time_ms, app.strings()),
       ),
       Style::default().fg(theme.text.into()),
     ));
   }
   if summary_spans.is_empty() {
     summary_spans.push(Span::styled(
-      "No listening history recorded yet. Play something!",
+      app.strings().screens.stats_empty,
       Style::default().fg(theme.hint.into()),
     ));
   }
@@ -96,7 +97,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     Block::default()
       .borders(Borders::ALL)
       .title(Span::styled(
-        period_label(app.stats_period),
+        period_label_with(app.stats_period, app.strings()),
         Style::default().fg(theme.inactive.into()),
       ))
       .border_style(Style::default().fg(theme.inactive.into())),
@@ -120,7 +121,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     f,
     app,
     tracks_area,
-    "Top Tracks",
+    app.strings().screens.top_tracks,
     top_tracks,
     get_color(highlight_state, theme),
     Some(app.view.stats_selected_track),
@@ -129,7 +130,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     f,
     app,
     artists_area,
-    "Top Artists",
+    app.strings().screens.top_artists,
     top_artists,
     Style::default().fg(theme.inactive.into()),
     None,
@@ -138,7 +139,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     f,
     app,
     albums_area,
-    "Top Albums",
+    app.strings().screens.top_albums,
     top_albums,
     Style::default().fg(theme.inactive.into()),
     None,
@@ -178,7 +179,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .collect();
   if day_lines.is_empty() {
     day_lines.push(Line::from(Span::styled(
-      "No plays in this period yet.",
+      app.strings().screens.stats_period_empty,
       Style::default().fg(theme.hint.into()),
     )));
   }
@@ -187,7 +188,7 @@ pub fn draw_stats(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     Block::default()
       .borders(Borders::ALL)
       .title(Span::styled(
-        "Last 10 Days",
+        app.strings().screens.last_ten_days,
         Style::default().fg(theme.inactive.into()),
       ))
       .border_style(Style::default().fg(theme.inactive.into())),
@@ -203,20 +204,20 @@ fn draw_help_bar(f: &mut Frame<'_>, app: &App, area: Rect) {
 
   let line = Line::from(vec![
     hint_span("↑/↓", theme),
-    label(" Select track  "),
+    label(app.strings().screens.select_track_hint),
     hint_span("Enter", theme),
-    label(" Play  "),
+    label(app.strings().screens.play_hint),
     hint_span("[ / ]", theme),
-    label(" Change period  "),
+    label(app.strings().screens.period_hint),
     Span::styled(
       app.user_config.keys.generate_recap.to_string(),
       Style::default()
         .fg(theme.hint.into())
         .add_modifier(Modifier::BOLD),
     ),
-    label(" Open share card  "),
+    label(app.strings().screens.share_card_hint),
     hint_span("←/Esc", theme),
-    label(" Back"),
+    label(app.strings().screens.back_hint),
   ]);
 
   f.render_widget(Paragraph::new(line), area);

@@ -221,7 +221,7 @@ fn prompt_global_song_count_opt_in(
   let interactive = onboarding.is_interactive();
   let enable = if interactive {
     matches!(
-      onboarding.ask(&global_song_counter_prompt())?,
+      onboarding.ask(&global_song_counter_prompt(onboarding.strings()))?,
       OnboardingAnswer::Yes
     )
   } else {
@@ -237,19 +237,22 @@ fn prompt_global_song_count_opt_in(
       config_paths.config_file_path.display()
     );
     if interactive {
-      onboarding.info(&format!(
-        "Could not save your answer to {} (read-only config?). Set `enable_global_song_count` under `behavior:` there to stop this prompt.\n",
-        config_paths.config_file_path.display()
-      ));
+      onboarding.info(
+        &onboarding
+          .strings()
+          .status
+          .runtime
+          .song_counter_save_failed(&config_paths.config_file_path.display().to_string()),
+      );
     }
     return Ok(());
   }
 
   if interactive {
     if enable {
-      onboarding.info("Thank you for participating!\n");
+      onboarding.info(onboarding.strings().status.runtime.song_counter_thanks);
     } else {
-      onboarding.info("Opted out. You can change this anytime in Settings -> Behavior.\n");
+      onboarding.info(onboarding.strings().status.runtime.song_counter_opted_out);
     }
   }
 
@@ -291,11 +294,11 @@ fn spotify_auth_mode(
   }
 }
 
-fn global_song_counter_prompt() -> OnboardingPrompt {
+fn global_song_counter_prompt(strings: &crate::core::i18n::Strings) -> OnboardingPrompt {
   OnboardingPrompt::Confirm {
-    title: "Global Song Counter".to_string(),
-    body: "\nspotatui can contribute to a global counter showing total\nsongs played by all users worldwide.\n\nPrivacy: This feature is completely anonymous.\n• No personal information is collected\n• No song names, artists, or listening history\n• Only a simple increment once a song has played for 30 seconds".to_string(),
-    question: "\nWould you like to participate? (Y/n): ".to_string(),
+    title: strings.status.runtime.song_counter_title.to_string(),
+    body: strings.status.runtime.song_counter_body.to_string(),
+    question: strings.status.runtime.song_counter_question.to_string(),
   }
 }
 
@@ -400,6 +403,7 @@ pub(super) struct Boot {
 }
 /// The launch inputs `boot` reads, built from the command line by `cli::boot_options`.
 pub(super) struct BootOptions {
+  pub(super) system_language: Option<crate::core::i18n::Language>,
   pub(super) config_path: Option<PathBuf>,
   pub(super) tick_rate: Option<u64>,
   pub(super) subcommand: Option<String>,
@@ -425,6 +429,19 @@ pub(super) async fn boot(
     user_config.path_to_config.replace(path);
   }
   user_config.load_config()?;
+  let system_language = if options.subcommand.is_some() {
+    crate::core::i18n::Language::En
+  } else {
+    options
+      .system_language
+      .unwrap_or_else(crate::core::i18n::system_language)
+  };
+  let language = if options.subcommand.is_some() {
+    crate::core::i18n::Language::En
+  } else {
+    user_config.behavior.language.resolve(system_language)
+  };
+  onboarding.set_language(language);
   let mut runtime_state = RuntimeState::default();
   let mut persisted_state = PersistedRuntimeState::default();
   let mut state_path = None;
@@ -577,7 +594,7 @@ pub(super) async fn boot(
 
   let reconfigure_auth = options.reconfigure_auth;
   if reconfigure_auth {
-    onboarding.info("\nForgetting the saved Spotify login...");
+    onboarding.info(onboarding.strings().status.runtime.forgetting_spotify_login);
     auth::forget_spotify_login().await;
   }
   // A build without Spotify support has nothing to log in to.
@@ -592,7 +609,12 @@ pub(super) async fn boot(
   // round trips and neither depends on the other. (An update that actually
   // installs still restarts the process, exactly as before.)
   let (logged_in, installed_update) = tokio::join!(
-    spotify_login(auth_mode, options.subcommand.is_none(), onboarding.as_ref()),
+    spotify_login_with(
+      auth_mode,
+      options.subcommand.is_none(),
+      onboarding.as_ref(),
+      language.strings(),
+    ),
     super::cli::run_auto_update(
       options.subcommand.is_some() || options.no_update,
       &user_config
@@ -604,9 +626,6 @@ pub(super) async fn boot(
   super::cli::restart_after_update(installed_update, instance_lock)?;
 
   let (spotify, startup_notice) = logged_in?;
-  if let Some(message) = startup_notice.as_deref() {
-    log::warn!("{message}");
-  }
   let (sync_io_tx, sync_io_rx) = std::sync::mpsc::channel::<IoEvent>();
   info!("app state initialized");
 
@@ -617,7 +636,12 @@ pub(super) async fn boot(
     runtime_state.clone(),
     state_path.clone(),
     spotify.is_some(),
+    system_language,
   )));
+
+  if options.subcommand.is_some() {
+    app.lock().await.use_english_messages();
+  }
 
   // `--play-file <PATH>`: queue a local file to start once the UI is up. The
   // path is canonicalised to an absolute `file://` URI so the local-files
@@ -630,10 +654,9 @@ pub(super) async fn boot(
     }) {
       Some(uri) => app.lock().await.pending_play_file = Some(uri),
       None => {
-        app
-          .lock()
-          .await
-          .set_status_message(format!("Cannot find local file: {path}"), 8);
+        let mut app = app.lock().await;
+        let message = app.strings().status.runtime.local_file_missing(path);
+        app.set_status_message(message, 8);
       }
     }
   }
@@ -654,20 +677,31 @@ pub(super) async fn boot(
 
 /// The Spotify login `mode` asks for, plus a status line for the first frame.
 /// A failed login on a UI launch is that line; the app starts without Spotify.
+#[cfg(test)]
 async fn spotify_login(
   mode: SpotifyAuthMode,
   ui_launch: bool,
   onboarding: &dyn Onboarding,
 ) -> Result<(Option<SpotifyLogin>, Option<String>)> {
+  spotify_login_with(mode, ui_launch, onboarding, &crate::core::i18n::EN).await
+}
+
+async fn spotify_login_with(
+  mode: SpotifyAuthMode,
+  ui_launch: bool,
+  onboarding: &dyn Onboarding,
+  strings: &crate::core::i18n::Strings,
+) -> Result<(Option<SpotifyLogin>, Option<String>)> {
   match mode {
     SpotifyAuthMode::Interactive => match auth::log_in_to_spotify(onboarding).await {
       Ok(login) => Ok((Some(login), None)),
-      Err(e) if ui_launch => Ok((
-        None,
-        Some(format!(
-          "Spotify login failed: {e}. Press `d` and pick Spotify to try again."
-        )),
-      )),
+      Err(e) if ui_launch => {
+        log::warn!("Spotify login failed: {e}. Press `d` and pick Spotify to try again.");
+        Ok((
+          None,
+          Some(strings.status.runtime.spotify_login_failed(&e.to_string())),
+        ))
+      }
       Err(e) => Err(e.context("Spotify login failed")),
     },
     SpotifyAuthMode::CachedOrFail => live_spotify_session()
@@ -791,7 +825,7 @@ mod tests {
       title,
       body,
       question,
-    } = global_song_counter_prompt();
+    } = global_song_counter_prompt(&crate::core::i18n::EN);
     assert_eq!(title, "Global Song Counter");
     assert_eq!(
       body,

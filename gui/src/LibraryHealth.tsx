@@ -1,3 +1,4 @@
+import { EN, type GuiStrings, fmt, sourceLabel } from "./i18n";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Action } from "./bindings/Action";
 import type { PlaylistSyncPayload } from "./bindings/PlaylistSyncPayload";
@@ -13,19 +14,21 @@ import { KeyHints } from "./KeyHints";
 import "./LibraryHealth.css";
 import { SourceIcon } from "./SourceBadge";
 
-const CELL_TEXT = {
-  master: "MASTER",
-  synced: "synced",
-  never: "never",
+const cellText = (s: GuiStrings) => ({
+  master: s.sync_master,
+  synced: s.synced,
+  never: s.never,
   none: "·",
-};
+});
 
 /** Library health: the playlists mirrored across sources. The copy tabs need a source resolver that does not exist yet. */
 export function LibraryHealth({
+  s = EN,
   sync,
   send,
   onBack,
 }: {
+  s?: GuiStrings;
   sync: PlaylistSyncPayload | null;
   send: (action: Action) => void;
   onBack: () => void;
@@ -78,29 +81,25 @@ export function LibraryHealth({
     <div ref={root} className="health" tabIndex={-1} onKeyDown={onKeyDown}>
       <section className="health-main">
         <button type="button" className="crumb" onClick={onBack}>
-          <Glyph name="back" /> Back
+          <Glyph name="back" /> {s.back}
         </button>
         <div className="health-title">
-          <h1>Library health</h1>
-          <span>Playlists mirrored across your sources</span>
+          <h1>{s.library_health}</h1>
+          <span>{s.mirrored_playlists}</span>
         </div>
-        <div role="tablist" aria-label="Sections" className="health-tabs">
+        <div role="tablist" aria-label={s.sections} className="health-tabs">
           <span role="tab" aria-selected="true">
-            Playlist sync
+            {s.playlist_sync}
           </span>
         </div>
         {links.length === 0 ? (
           <div className="empty">
             {running ? (
-              <p>Loading the linked playlists…</p>
+              <p>{s.loading_links}</p>
             ) : (
               <>
-                <p>No linked playlists.</p>
-                <p>
-                  A build with Qobuz, Subsonic or YouTube can mirror a playlist:
-                  quit this window, highlight the playlist in the terminal and
-                  press m.
-                </p>
+                <p>{s.no_links}</p>
+                <p>{s.mirror_instructions}</p>
                 {sync?.last_failed && sync.last_summary && (
                   <p className="failed">{sync.last_summary}</p>
                 )}
@@ -111,15 +110,15 @@ export function LibraryHealth({
           <>
             <div className="link-row head" aria-hidden="true">
               <span>#</span>
-              <span>Playlist</span>
+              <span>{s.playlist}</span>
               {SYNC_SOURCES.map((source) => (
                 <span key={source}>{source}</span>
               ))}
-              <span className="when">Last sync</span>
+              <span className="when">{s.last_sync}</span>
             </div>
             <div
               role="listbox"
-              aria-label="Linked playlists"
+              aria-label={s.linked_playlists}
               tabIndex={0}
               data-focus
               aria-activedescendant={link ? `link-${link.id}` : undefined}
@@ -142,31 +141,40 @@ export function LibraryHealth({
                     return (
                       <span key={source} className={`cell ${cell.role}`}>
                         {cell.role === "unmatched"
-                          ? `${cell.count} unmatched`
-                          : CELL_TEXT[cell.role]}
+                          ? fmt(s.unmatched_count, { count: cell.count })
+                          : cellText(s)[cell.role]}
                       </span>
                     );
                   })}
                   <span className="when">
                     {entry.mirrors.length === 0
-                      ? "no mirrors"
-                      : lastSync(entry)}
+                      ? s.no_mirrors
+                      : lastSync(entry, s)}
                   </span>
                 </div>
               ))}
             </div>
           </>
         )}
-        <KeyHints hints={["j k move", "s sync all", "D remove", "esc back"]} />
+        <KeyHints
+          hints={[s.hint_move, s.hint_sync, s.hint_remove_link, s.hint_back]}
+        />
       </section>
-      <aside aria-label="Selected playlist">
+      <aside aria-label={s.selected_playlist}>
         {link ? (
           <>
-            <span className="label">Linked playlist</span>
+            <span className="label">{s.linked_playlist}</span>
             <h2>{link.name}</h2>
             <span className="sub">
-              {link.source} playlist · {link.mirrors.length}{" "}
-              {link.mirrors.length === 1 ? "mirror" : "mirrors"}
+              {fmt(
+                link.mirrors.length === 1
+                  ? s.playlist_one_mirror
+                  : s.playlist_mirrors,
+                {
+                  source: sourceLabel(link.source, s),
+                  count: link.mirrors.length,
+                },
+              )}
             </span>
             {link.mirrors.map((mirror) => (
               <div
@@ -182,16 +190,21 @@ export function LibraryHealth({
                   </span>
                   <span className="tag">
                     {mirror.last_run === null
-                      ? "never ran"
+                      ? s.never_ran
                       : mirror.unmatched.length > 0
-                        ? `${mirror.unmatched.length} unmatched`
-                        : "synced"}
+                        ? fmt(s.unmatched_count, {
+                            count: mirror.unmatched.length,
+                          })
+                        : s.synced}
                   </span>
                 </div>
-                <span className="detail">{mirror.matched} matched</span>
+                <span className="detail">
+                  {fmt(s.matched_count, { count: mirror.matched })}
+                </span>
                 {mirror.unmatched.slice(0, 6).map((entry) => (
                   <span key={entry.master_key} className="miss">
-                    {entry.title} – {entry.artist}: {reasonText(entry.reason)}
+                    {entry.title} – {entry.artist}:{" "}
+                    {reasonText(entry.reason, s)}
                   </span>
                 ))}
               </div>
@@ -208,35 +221,31 @@ export function LibraryHealth({
                 disabled={running}
                 onClick={() => send("RunPlaylistSync")}
               >
-                {running ? "Syncing…" : "Sync all now"}
+                {running ? s.syncing : s.sync_all}
               </button>
               {confirming ? (
                 <>
                   <button type="button" className="danger" onClick={remove}>
-                    Remove the link
+                    {s.remove_the_link}
                   </button>
                   <button
                     type="button"
                     autoFocus
                     onClick={() => setConfirmId(null)}
                   >
-                    Keep it
+                    {s.keep_it}
                   </button>
                 </>
               ) : (
                 <button type="button" onClick={() => setConfirmId(link.id)}>
-                  Remove link
+                  {s.remove_link}
                 </button>
               )}
             </div>
-            {confirming && (
-              <p className="sub">The mirror playlists stay where they are.</p>
-            )}
+            {confirming && <p className="sub">{s.mirror_stays}</p>}
           </>
         ) : (
-          <span className="sub">
-            {sync?.last_summary ?? "Nothing has synced yet."}
-          </span>
+          <span className="sub">{sync?.last_summary ?? s.nothing_synced}</span>
         )}
       </aside>
     </div>
