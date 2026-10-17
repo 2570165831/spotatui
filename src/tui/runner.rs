@@ -41,17 +41,7 @@ fn cover_art_full_image_support() -> bool {
 }
 
 fn back_key_clears_playlist_filter(app: &mut App, active_block: ActiveBlock) -> bool {
-  if active_block == ActiveBlock::TrackTable {
-    if app.is_playlist_track_filter_active() {
-      app.clear_playlist_track_filter();
-      return true;
-    }
-    if app.is_saved_track_filter_active() {
-      app.clear_saved_track_filter();
-      return true;
-    }
-  }
-  false
+  active_block == ActiveBlock::TrackTable && handlers::clear_active_track_filter(app)
 }
 
 /// The runner normally handles the configurable back key before `handle_app`.
@@ -220,6 +210,63 @@ mod tests {
 
     assert!(!app.is_saved_track_filter_active());
     assert_eq!(app.get_current_route().id, RouteId::TrackTable);
+  }
+
+  #[test]
+  fn escape_keeps_liked_rows_when_liked_songs_opened_after_a_playlist_search() {
+    use crate::core::action::LibraryTarget;
+    use crate::core::pagination::Paged;
+    use crate::core::plugin_api::{PlayableInfo, TrackInfo};
+
+    let mut app = app();
+    let playlist_id = PlaylistId::from_id("37i9dQZF1DX4WYpdgoIcn6")
+      .unwrap()
+      .into_static();
+    app.playlist_track_table_id = Some(playlist_id);
+    // A playlist search left over from before the user switched to Liked Songs,
+    // with cached playlist rows that clearing the filter would otherwise
+    // restore into the table.
+    app.active_playlist_track_filter = Some("leftover".to_string());
+    app.playlist_track_pages.upsert_page_by_offset(Paged {
+      items: vec![(
+        0,
+        PlayableInfo::Track(TrackInfo {
+          generated_name: None,
+          uri: None,
+          name: "Playlist Track".to_string(),
+          artists: vec![],
+          album: String::new(),
+          duration_ms: 0,
+          id: None,
+          album_id: None,
+          artist_refs: vec![],
+          is_playable: true,
+          is_local: false,
+          track_number: 0,
+          explicit: false,
+          image_url: None,
+          release_date: None,
+        }),
+      )],
+      limit: 1,
+      next: None,
+      offset: 0,
+      previous: None,
+      total: 1,
+    });
+
+    app.open_library_section(LibraryTarget::LikedSongs);
+
+    handlers::handle_app(Key::Esc, &mut app);
+
+    // The leftover playlist filter must not survive opening Liked Songs, so Esc
+    // must not swap the liked rows out for the playlist's cached rows.
+    assert!(app.active_playlist_track_filter.is_none());
+    assert_eq!(
+      app.track_table.context,
+      Some(TrackTableContext::SavedTracks)
+    );
+    assert!(app.track_table.tracks.is_empty());
   }
 
   #[test]
