@@ -195,7 +195,7 @@ pub const ZH_HANS: SettingsStrings = SettingsStrings {
   keys_show_queue_description: "显示播放队列",
   keys_remove_from_queue_name: "移出队列",
   keys_remove_from_queue_description: "从队列中移除所选曲目",
-  keys_like_track_name: "喜欢的歌曲",
+  keys_like_track_name: "喜欢曲目",
   keys_like_track_description: "切换当前播放曲目或单集的收藏状态",
   keys_generate_recap_name: "生成听歌回顾",
   keys_generate_recap_description: "生成并打开听歌回顾 HTML 卡片（统计页使用所选时间段，其他页面使用 30 天）",
