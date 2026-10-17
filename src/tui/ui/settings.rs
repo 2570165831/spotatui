@@ -478,6 +478,27 @@ mod tests {
   const WIDTH: u16 = 100;
   const HEIGHT: u16 = 30;
 
+  #[test]
+  fn chinese_settings_render_localized_choices_without_changing_the_raw_value() {
+    let mut app = App::default();
+    app.user_config.behavior.language = crate::core::i18n::Language::ZhHans;
+    app.refresh_language();
+    app.load_settings_for_category();
+    let content = rendered(&app).replace(' ', "");
+    assert!(content.contains("语言"), "{content}");
+    assert!(content.contains("简体中文"), "{content}");
+    assert!(!content.contains("Language:"), "{content}");
+    let language = app
+      .settings_items
+      .iter()
+      .find(|row| row.id == "behavior.language")
+      .unwrap();
+    assert_eq!(
+      language.value,
+      SettingValue::Cycle("zh-Hans".to_string(), crate::core::i18n::Language::OPTIONS)
+    );
+  }
+
   fn filtered_app(filter: &str, editing: bool) -> App {
     let mut app = App::default();
     app.view.size = crate::core::geometry::Viewport {

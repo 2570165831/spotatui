@@ -660,19 +660,10 @@ mod tests {
     app.view.settings_selected_index = setting_index(&app, "keys.search");
     assert_eq!(
       check_keybinding_conflict(&app, Key::F5, "keys.search"),
-      Some((
-        "Help".to_string(),
-        app.strings().settings.keys_help_name.to_string()
-      ))
+      Some(("Help".to_string(), "帮助".to_string()))
     );
     handle_key_edit(Key::F5, &mut app);
-    assert_eq!(
-      app.api_error(),
-      app
-        .strings()
-        .settings
-        .key_conflict("f5", app.strings().settings.keys_help_name)
-    );
+    assert_eq!(app.api_error(), "按键 f5 已分配给帮助");
 
     // The CLI override must use English even while staged rows still have Chinese names.
     app.use_english_messages();
