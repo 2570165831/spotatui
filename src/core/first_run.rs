@@ -581,6 +581,8 @@ mod localization_tests {
   async fn localized_source_setup_preserves_the_source_identity() {
     for (language, expected) in [
       (Language::En, "\nStarting spotatui with Internet Radio as your source. Press `d` anytime to switch or to log in to Spotify.\n"),
+      (Language::ZhHans, "\n正在以 网络电台 为音源启动 spotatui。随时按 `d` 切换音源或登录 Spotify。\n"),
+      (Language::ZhHant, "\n正在以 網路電台 為來源啟動 spotatui。隨時按 `d` 切換來源或登入 Spotify。\n"),
     ] {
       let dir = tempfile::tempdir().unwrap();
       let state_path = dir.path().join("state.yml");
@@ -601,6 +603,104 @@ mod localization_tests {
       assert_eq!(state.active_source, Source::Radio);
       assert!(state_path.exists());
       assert!(onboarding.scripted.saw(expected));
+    }
+  }
+
+  #[test]
+  fn localized_save_warning_keeps_the_path_and_raw_error() {
+    for (language, prefix) in [
+      (Language::ZhHans, "无法保存"),
+      (Language::ZhHant, "無法儲存"),
+    ] {
+      let dir = tempfile::tempdir().unwrap();
+      let path = dir.path().join("missing-{error}").join("config.yml");
+      let config = config_at(path.clone());
+      let error = config.save_config().unwrap_err().to_string();
+      let onboarding = LocalizedOnboarding::new(language, &[]);
+
+      assert!(!save_config_or_warn(&config, &onboarding));
+      assert!(onboarding
+        .scripted
+        .saw(&format!("{prefix} {}：{error}", path.display())));
+      assert!(!path.exists());
+    }
+  }
+
+  #[cfg(feature = "subsonic")]
+  #[test]
+  fn localized_required_password_stays_masked_and_keeps_input_literal() {
+    for (language, label) in [(Language::ZhHans, "密码"), (Language::ZhHant, "密碼")] {
+      let onboarding = LocalizedOnboarding::new(language, &["", "  p{max}密碼&:  "]);
+
+      assert_eq!(
+        prompt_required(&onboarding, onboarding.strings().onboarding.password, true).unwrap(),
+        "p{max}密碼&:"
+      );
+      assert_eq!(
+        *onboarding.scripted.masked_prompts.lock().unwrap(),
+        vec![format!("  {label}: "); 2]
+      );
+      assert!(onboarding.scripted.saw("  （必填）"));
+      assert!(!onboarding.scripted.saw("  (required)"));
+    }
+  }
+
+  #[cfg(feature = "subsonic")]
+  #[tokio::test]
+  async fn localized_subsonic_setup_masks_only_the_password() {
+    for (language, password_label) in [(Language::ZhHans, "密码"), (Language::ZhHant, "密碼")] {
+      let dir = tempfile::tempdir().unwrap();
+      let mut config = config_at(dir.path().join("config.yml"));
+      let onboarding = LocalizedOnboarding::new(
+        language,
+        &["http://127.0.0.1:9", "用户{name}", "p{max}密碼"],
+      );
+
+      configure_subsonic(&mut config, &onboarding).await.unwrap();
+
+      assert_eq!(
+        *onboarding.scripted.masked_prompts.lock().unwrap(),
+        vec![format!("  {password_label}: ")]
+      );
+      assert_eq!(
+        config.behavior.subsonic_url.as_deref(),
+        Some("http://127.0.0.1:9")
+      );
+      assert_eq!(
+        config.behavior.subsonic_username.as_deref(),
+        Some("用户{name}")
+      );
+      assert_eq!(
+        config.behavior.subsonic_password.as_deref(),
+        Some("p{max}密碼")
+      );
+    }
+  }
+
+  #[cfg(feature = "local-files")]
+  #[test]
+  fn localized_local_setup_keeps_user_paths_and_config_keys_literal() {
+    for (language, prefix) in [
+      (Language::ZhHans, "\n将从此文件夹读取本地文件："),
+      (Language::ZhHant, "\n將從此資料夾讀取本機檔案："),
+    ] {
+      let dir = tempfile::tempdir().unwrap();
+      let mut config = config_at(dir.path().join("{path}-config.yml"));
+      let music_path = "/Music/音樂-{path}";
+      config.behavior.local_music_path = Some(music_path.to_string());
+      let onboarding = LocalizedOnboarding::new(language, &[]);
+
+      configure_local(&config, &onboarding);
+
+      assert!(onboarding.scripted.saw(&format!("{prefix}{music_path}")));
+      let change = onboarding
+        .strings()
+        .onboarding
+        .change_local_music_path(&config_file_path_display(&config));
+      assert!(change.starts_with('（') && change.ends_with("。）"));
+      assert!(change.contains("behavior.local_music_path"));
+      assert!(change.contains("{path}-config.yml"));
+      assert!(onboarding.scripted.saw(&change));
     }
   }
 }

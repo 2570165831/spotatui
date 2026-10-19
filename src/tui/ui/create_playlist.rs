@@ -218,3 +218,46 @@ fn draw_add_tracks_stage(f: &mut Frame<'_>, app: &App, area: Rect) {
     .style(theme.base_style());
   f.render_stateful_widget(added_list, panels[1], &mut added_state);
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use ratatui::{backend::TestBackend, Terminal};
+
+  #[test]
+  fn traditional_chinese_create_form_keeps_the_playlist_name_literal() {
+    let mut app = App::default();
+    app.user_config.behavior.language = crate::core::i18n::Language::ZhHant;
+    app.refresh_language();
+    app.view.create_playlist_name = "{name}".chars().collect();
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal
+      .draw(|f| draw_create_playlist_form(f, &app))
+      .unwrap();
+    let buffer = terminal.backend().buffer();
+    let content: String = (0..30)
+      .flat_map(|y| (0..100).map(move |x| (x, y)))
+      .filter_map(|pos| buffer.cell(pos))
+      .map(|cell| cell.symbol())
+      .collect::<String>()
+      .replace(' ', "");
+    assert!(content.contains("建立播放清單"), "{content}");
+    assert!(content.contains("播放清單名稱"), "{content}");
+    assert!(content.contains("{name}"), "{content}");
+    assert!(!content.contains("Playlistname"), "{content}");
+  }
+
+  #[test]
+  fn chinese_add_tracks_title_keeps_the_playlist_name_literal() {
+    for (language, expected) in [
+      (crate::core::i18n::Language::ZhHans, "向“{name}”添加曲目"),
+      (crate::core::i18n::Language::ZhHant, "向「{name}」加入曲目"),
+    ] {
+      let mut app = App::default();
+      app.user_config.behavior.language = language;
+      app.refresh_language();
+      let title = app.strings().popups.add_tracks_title("{name}");
+      assert!(title.starts_with(expected), "{title}");
+    }
+  }
+}
