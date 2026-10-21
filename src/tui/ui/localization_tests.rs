@@ -346,26 +346,36 @@ fn chinese_main_routes_render_in_tiny_and_practical_viewports() {
 
 #[test]
 fn chinese_empty_main_tables_show_translated_titles_at_narrow_widths() {
-  let renderers: &[(AreaRenderer, &str)] = &[
-    (super::tables::draw_song_table, "Songs"),
-    (super::tables::draw_album_list, "Albums"),
-    (super::tables::draw_artist_table, "Artists"),
-    (super::tables::draw_recently_played_table, "Recently Played"),
+  type Title = fn(&App) -> &'static str;
+  let renderers: &[(AreaRenderer, &str, Title)] = &[
+    (super::tables::draw_song_table, "Songs", |app| {
+      app.strings().screens.songs
+    }),
+    (super::tables::draw_album_list, "Albums", |app| {
+      app.strings().screens.saved_albums
+    }),
+    (super::tables::draw_artist_table, "Artists", |app| {
+      app.strings().screens.artists
+    }),
+    (
+      super::tables::draw_recently_played_table,
+      "Recently Played",
+      |app| app.strings().screens.recent_tracks,
+    ),
   ];
   for language in [Language::ZhHans, Language::ZhHant] {
     for width in [24, 40] {
       let app = localized_app(language, false);
-      for (draw, english_title) in renderers {
+      for (draw, english_title, title) in renderers {
         let text = buffer_text(&render_area(&app, width, 8, *draw));
         assert!(
           !text.contains(english_title),
           "{language:?}/{width}: {text}"
         );
+        let expected = title(&app);
         assert!(
-          text
-            .chars()
-            .any(|ch| ('\u{3400}'..='\u{9fff}').contains(&ch)),
-          "no translated title for {english_title}, {language:?}/{width}: {text}"
+          text.contains(expected),
+          "no {expected:?} for {english_title}, {language:?}/{width}: {text}"
         );
       }
     }
