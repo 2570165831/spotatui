@@ -726,6 +726,24 @@ impl App {
     self.display_revisions.bump(DisplayDomain::Library);
   }
 
+  /// The "All songs" row is built before Music answers; the first playlists
+  /// page sizes it.
+  #[cfg_attr(
+    not(all(feature = "apple-music", target_os = "macos")),
+    allow(dead_code)
+  )]
+  pub(crate) fn set_apple_music_library_count(&mut self, count: u32) {
+    if let Some(row) = self
+      .apple_music
+      .playlists
+      .iter_mut()
+      .find(|p| p.uri == crate::infra::apple_music::LIBRARY_URI)
+    {
+      row.track_count = count;
+      self.display_revisions.bump(DisplayDomain::Library);
+    }
+  }
+
   #[cfg(test)]
   pub(crate) fn play_apple_music_track(&mut self, uri: String) {
     self.play_apple_music_track_at(uri, 0);
@@ -2158,5 +2176,23 @@ mod tests {
       Ok(IoEvent::StartPlayback(Some(ref context), Some(ref uris), Some(0)))
         if *context == playlist && uris[..] == [track]
     ));
+  }
+
+  #[cfg(all(feature = "apple-music", target_os = "macos"))]
+  #[test]
+  fn apple_music_all_songs_row_takes_the_library_count() {
+    use crate::infra::apple_music::LIBRARY_URI;
+    let (tx, _rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), None);
+    app.set_active_source(Source::AppleMusic);
+    app.load_source_sidebar(Source::AppleMusic);
+    assert_eq!(app.apple_music_playlists()[0].track_count, 0);
+
+    app.set_apple_music_library_count(5390);
+    let all_songs = &app.apple_music_playlists()[0];
+    assert_eq!(
+      (all_songs.uri.as_str(), all_songs.track_count),
+      (LIBRARY_URI, 5390)
+    );
   }
 }

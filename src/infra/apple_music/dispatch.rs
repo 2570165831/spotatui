@@ -436,13 +436,16 @@ async fn worker<C: Client>(weak: Weak<Mutex<App>>, mut rx: mpsc::Receiver<Work>,
         }
         let next = result.and_then(|json| {
           if request == Browse::Playlists {
-            let page = parse_playlists(&json)?;
+            let (page, library) = parse_playlists(&json)?;
             ensure!(
               page.offset == offset,
               "Music library changed during loading; reload it"
             );
             let end = page.next;
             app.append_apple_music_playlists(page.items);
+            if let Some(count) = library {
+              app.set_apple_music_library_count(count);
+            }
             Ok((end, page.total))
           } else {
             let page = parse_tracks(&json)?;

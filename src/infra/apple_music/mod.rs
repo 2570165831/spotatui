@@ -282,6 +282,8 @@ struct WirePage<T> {
   total: usize,
   /// Absent from older helpers, which never skipped an entry.
   next: Option<usize>,
+  /// The library's track count, sent with the first playlists page.
+  library: Option<u32>,
 }
 
 impl<T> WirePage<T> {
@@ -323,15 +325,20 @@ pub(crate) fn parse_tracks(json: &str) -> Result<Page<TrackInfo>> {
   })
 }
 
-pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
+/// A playlists page, plus the library's track count when Music sent it (the
+/// first page only).
+pub(crate) fn parse_playlists(json: &str) -> Result<(Page<PlaylistInfo>, Option<u32>)> {
   #[derive(Deserialize)]
   struct Playlist {
     id: String,
     name: String,
+    /// Absent from older helpers, and null when Music could not read it.
+    count: Option<u32>,
   }
   let wire: WirePage<Playlist> = serde_json::from_str(json).context("Invalid Music playlists")?;
   validate_page(&wire)?;
   let next = wire.next();
+  let library = wire.library;
   let items = wire
     .items
     .into_iter()
@@ -341,7 +348,7 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
         uri: format!("applemusic:playlist:{}", persistent_id(&p.id)?),
         name: p.name,
         owner: "Music".into(),
-        track_count: 0,
+        track_count: p.count.unwrap_or(0),
         id: None,
         owner_id: None,
         collaborative: false,
@@ -350,12 +357,15 @@ pub(crate) fn parse_playlists(json: &str) -> Result<Page<PlaylistInfo>> {
       })
     })
     .collect::<Result<_>>()?;
-  Ok(Page {
-    items,
-    next,
-    offset: wire.offset,
-    total: wire.total,
-  })
+  Ok((
+    Page {
+      items,
+      next,
+      offset: wire.offset,
+      total: wire.total,
+    },
+    library,
+  ))
 }
 
 #[derive(Default)]
@@ -492,9 +502,27 @@ mod tests {
     assert!(parse_tracks(r#"{"items":[],"offset":0,"total":50,"next":100}"#).is_err());
     assert!(parse_tracks(r#"{"items":[],"offset":0,"total":500,"next":200}"#).is_err());
     // Older helpers send no next: it follows the rows.
-    let page =
+    let (page, _) =
       parse_playlists(r#"{"items":[{"id":"0123456789ABCDEF","name":"x"}],"offset":3,"total":9}"#)
         .unwrap();
     assert_eq!(page.next, 4);
+  }
+
+  #[test]
+  fn apple_music_playlists_carry_their_track_counts() {
+    let (page, library) = parse_playlists(
+      r#"{"items":[{"id":"0123456789ABCDEF","name":"x","count":84},
+                   {"id":"FEDCBA9876543210","name":"y","count":null}],
+          "offset":0,"total":2,"library":5390}"#,
+    )
+    .unwrap();
+    let counts: Vec<u32> = page.items.iter().map(|p| p.track_count).collect();
+    assert_eq!(counts, [84, 0]);
+    assert_eq!(library, Some(5390));
+    // Only the first page sizes the library.
+    let (_, library) =
+      parse_playlists(r#"{"items":[{"id":"0123456789ABCDEF","name":"x"}],"offset":3,"total":9}"#)
+        .unwrap();
+    assert_eq!(library, None);
   }
 }
