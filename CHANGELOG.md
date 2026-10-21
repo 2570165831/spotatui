@@ -32,7 +32,7 @@
 
 ### Fixed
 
-- **Apple Music playlists show their real song counts** in the desktop app and the browser GUI: every playlist in Your Library, "All songs" included, said `0 songs`, because the count was never read from Music. It now is, one playlist at a time, which adds about 8 ms per playlist to loading the sidebar ([#891](https://github.com/LargeModGames/spotatui/issues/891)).
+- **Apple Music playlists show their real song counts** in the desktop app and the browser GUI: every playlist in Your Library, "All songs" included, said `0 songs`, because the count was never read from Music. It now is, one playlist at a time, which adds about 8 ms per playlist to loading the sidebar; a playlist whose count Music cannot read shows no number rather than a wrong 0 ([#891](https://github.com/LargeModGames/spotatui/issues/891)).
 
 - **The page no longer scrolls past the player bar when a list has explicit songs** in the desktop app and the browser GUI: the hidden screen-reader text next to each E badge had no anchor, so it stretched the document below the window and the whole page could scroll into empty space. The text is now anchored and clipped, so only the panels inside the page scroll ([#878](https://github.com/LargeModGames/spotatui/issues/878)).
 
