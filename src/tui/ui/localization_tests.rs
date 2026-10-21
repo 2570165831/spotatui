@@ -368,13 +368,24 @@ fn chinese_empty_main_tables_show_translated_titles_at_narrow_widths() {
       let app = localized_app(language, false);
       for (draw, english_title, title) in renderers {
         let text = buffer_text(&render_area(&app, width, 8, *draw));
+        // The block title is on the border row; the header row below can
+        // repeat the same word (the artist table's 艺人), so look only here.
+        let title_row = text.lines().next().unwrap_or_default();
         assert!(
-          !text.contains(english_title),
+          !title_row.contains(english_title),
           "{language:?}/{width}: {text}"
         );
         let expected = title(&app);
+        // Taken from the same table, so it must itself be Chinese, or an
+        // untranslated title would match itself.
         assert!(
-          text.contains(expected),
+          expected
+            .chars()
+            .any(|ch| ('\u{3400}'..='\u{9fff}').contains(&ch)),
+          "{english_title} is not translated for {language:?}: {expected:?}"
+        );
+        assert!(
+          title_row.contains(expected),
           "no {expected:?} for {english_title}, {language:?}/{width}: {text}"
         );
       }
